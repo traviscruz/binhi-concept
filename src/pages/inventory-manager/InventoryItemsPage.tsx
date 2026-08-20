@@ -207,7 +207,7 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="bg-[#161823] text-white p-4 rounded-2xl border border-[#24252c]/10 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="bg-white p-4 rounded-2xl border border-[#24252c]/[0.08] shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-1.5 flex-wrap w-full sm:w-auto">
           {categories.map((cat) => (
             <button
@@ -215,8 +215,8 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
               onClick={() => setSelectedCat(cat)}
               className={`text-xs px-3.5 py-1.5 rounded-full font-medium transition-all ${
                 selectedCat === cat
-                  ? 'bg-[#1090F8] text-white shadow-sm font-semibold'
-                  : 'bg-white/10 text-white/70 hover:bg-white/20'
+                  ? 'bg-[var(--ink)] text-white shadow-sm font-semibold'
+                  : 'bg-[var(--mist)] text-[#24252c]/60 hover:text-[var(--ink)]'
               }`}
             >
               {cat}
@@ -228,7 +228,7 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search model, brand, or ID..."
-          className="w-full sm:w-64 rounded-full border px-4 py-2.5 text-xs bg-white/10 text-white placeholder:text-white/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors"
+          className={inputClass + ' sm:w-64'}
         />
       </div>
 

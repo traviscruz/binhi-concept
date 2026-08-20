@@ -69,26 +69,28 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
       </div>
 
       {/* Date Filter & Search Controls */}
-      <div className="bg-[#161823] text-white p-4 rounded-2xl border border-[#24252c]/10 shadow-md flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="bg-white p-4 rounded-2xl border border-[#24252c]/[0.08] shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-3 w-full md:w-auto">
-          <div className="flex items-center gap-2 bg-white/10 px-3.5 py-2 rounded-full border border-white/10">
+          <div className="flex items-center gap-2 bg-[var(--mist)] px-3.5 py-2 rounded-full border border-[#24252c]/10">
             <IconCalendar className="w-4 h-4 text-[#1090F8]" />
-            <span className="text-xs font-semibold text-white/70">Filter Event Date:</span>
+            <span className="text-xs font-semibold text-[#24252c]/60">Filter Event Date:</span>
             <input
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer"
+              className="bg-transparent text-xs font-bold text-[var(--ink)] focus:outline-none cursor-pointer"
             />
           </div>
 
-          <div className="hidden sm:flex items-center gap-1">
+          <div className="hidden sm:flex items-center gap-1.5">
             {['All', 'Audio', 'Video', 'Effects'].map((cat) => (
               <button
                 key={cat}
                 onClick={() => setCategoryFilter(cat)}
-                className={`text-xs px-3 py-1 rounded-full font-medium transition-all ${
-                  categoryFilter === cat ? 'bg-[#1090F8] text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                className={`text-xs px-3.5 py-1.5 rounded-full font-medium transition-all ${
+                  categoryFilter === cat
+                    ? 'bg-[var(--ink)] text-white shadow-sm font-semibold'
+                    : 'bg-[var(--mist)] text-[#24252c]/60 hover:text-[var(--ink)]'
                 }`}
               >
                 {cat}
@@ -101,7 +103,7 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by serial ID or booking..."
-          className="w-full md:w-64 rounded-full border px-4 py-2.5 text-xs bg-white/10 text-white placeholder:text-white/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors"
+          className={inputClass + ' w-full md:w-64'}
         />
       </div>
 
