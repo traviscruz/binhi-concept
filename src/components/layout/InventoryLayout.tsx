@@ -26,20 +26,20 @@ export function InventoryLayout({
     return (
       <button
         onClick={() => handleNav(target)}
-        className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-semibold transition-all outline-none ${
+        className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-xs transition-all outline-none ${
           isActive
-            ? 'bg-[#1090F8] text-white shadow-md'
-            : 'text-white/70 hover:bg-white/10 hover:text-white'
+            ? 'bg-white text-[var(--ink)] font-extrabold shadow-sm'
+            : 'text-white/70 hover:bg-white/10 hover:text-white font-medium'
         }`}
       >
         <div className="flex items-center gap-3">
-          <span className={isActive ? 'text-white' : 'text-white/50'}>{icon}</span>
+          <span className={isActive ? 'text-[var(--ink)]' : 'text-white/50'}>{icon}</span>
           <span>{label}</span>
         </div>
         {count !== undefined && count > 0 && (
           <span
             className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
-              isActive ? 'bg-white text-[#1090F8]' : 'bg-rose-500 text-white'
+              isActive ? 'bg-[var(--ink)] text-white' : 'bg-rose-500 text-white'
             }`}
           >
             {count}
@@ -57,8 +57,8 @@ export function InventoryLayout({
           <button onClick={() => handleNav('landing')}>
             <Logo />
           </button>
-          <span className="text-[10px] uppercase font-bold tracking-wider bg-[#1090F8]/20 text-[#1090F8] px-2 py-0.5 rounded-full">
-            Manager
+          <span className="text-[10px] uppercase font-bold tracking-wider bg-white/15 text-white/90 px-2 py-0.5 rounded-full">
+            Warehouse Lead
           </span>
         </div>
         <button
@@ -80,9 +80,6 @@ export function InventoryLayout({
             <button onClick={() => handleNav('landing')} className="outline-none">
               <Logo />
             </button>
-            <span className="text-[10px] uppercase font-bold tracking-wider bg-[#1090F8]/20 text-[#1090F8] px-2 py-0.5 rounded-full">
-              Inventory
-            </span>
           </div>
 
           <nav className="space-y-1.5">
@@ -97,12 +94,12 @@ export function InventoryLayout({
         <div className="pt-4 border-t border-white/10">
           <div className="flex items-center justify-between bg-white/5 p-3 rounded-2xl border border-white/10 mb-3">
             <div className="flex items-center gap-2.5">
-              <span className="w-8 h-8 rounded-full bg-[#1090F8] text-white text-xs font-bold flex items-center justify-center">
+              <span className="w-8 h-8 rounded-full bg-white text-[var(--ink)] text-xs font-extrabold flex items-center justify-center">
                 RM
               </span>
               <div>
                 <div className="text-xs font-bold text-white">Raymund M.</div>
-                <div className="text-[10px] text-white/50">Warehouse Lead</div>
+                <div className="text-[10px] text-white/60">Warehouse Lead</div>
               </div>
             </div>
           </div>

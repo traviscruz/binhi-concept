@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconBox, IconX, IconChevronDown, IconChevronUp } from '../../components/shared/icons';
+import { IconBox, IconX, IconChevronDown, IconChevronUp, IconSearch } from '../../components/shared/icons';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -224,12 +224,15 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
           ))}
         </div>
 
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search model, brand, or ID..."
-          className={inputClass + ' sm:w-64'}
-        />
+        <div className="relative w-full sm:w-64">
+          <IconSearch className="w-4 h-4 text-[#24252c]/40 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search model, brand, or ID..."
+            className={inputClass + ' pl-10'}
+          />
+        </div>
       </div>
 
       {/* Master Models List with Layered Unit Roster Expansion */}
