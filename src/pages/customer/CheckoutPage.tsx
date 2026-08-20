@@ -22,7 +22,7 @@ export default function CheckoutPage({
   const [email, setEmail] = useState('juan.delacruz@email.com');
   const [phone, setPhone] = useState('+63 917 123 4567');
   const [eventType, setEventType] = useState('Grand Wedding Reception');
-  const [eventDate, setEventDate] = useState(initialDate || '2026-09-14');
+  const [eventDate, setEventDate] = useState(initialDate || 'September 14, 2026');
   const [locationRegion, setLocationRegion] = useState('Metro Manila');
   const [venueAddress, setVenueAddress] = useState('Grand Ballroom, Shangri-La Fort, BGC, Taguig');
   const [selectedAddons, setSelectedAddons] = useState<string[]>(initialAddons);

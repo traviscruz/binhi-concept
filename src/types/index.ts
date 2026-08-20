@@ -23,8 +23,21 @@ export type Page =
   | 'inventory-units'
   | 'inventory-alerts'
   | 'inventory-reports'
+  | 'admin-dashboard'
+  | 'admin-bookings'
+  | 'admin-packages'
+  | 'admin-transport'
+  | 'admin-staff'
+  | 'admin-calendar'
+  | 'admin-reports'
+  | 'admin-inquiries'
+  | 'admin-loyalty'
+  | 'admin-reviews'
+  | 'crew-assigned-bookings'
+  | 'crew-booking-detail'
+  | 'crew-setup-teardown'
 
-export type UserRole = 'customer' | 'inventory_manager' | 'admin' | 'event_staff'
+export type UserRole = 'customer' | 'inventory_manager' | 'admin' | 'crew'
 
 export interface User {
   id: string

@@ -1,80 +1,90 @@
+import { useState } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconBox } from '../../components/shared/icons';
+import { IconShield, IconX } from '../../components/shared/icons';
+
+const rewardsList = [
+  { id: 'r1', pts: '250 PTS', title: 'Free Heavy Fog / Smoke Upgrade', desc: 'Upgrade any booking with a complimentary high-output low-lying fog cloud effect unit.' },
+  { id: 'r2', pts: '500 PTS', title: '₱3,000 Booking Discount Voucher', desc: 'Apply a flat ₱3,000 discount voucher directly to your next event rental checkout.' },
+  { id: 'r3', pts: '1,000 PTS', title: 'Free LED Par Uplight Pack (8x Units)', desc: 'Add 8 additional wireless RGBW ambient uplights to illuminate your event stage venue.' },
+];
 
 export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
+  const [redeemedTitle, setRedeemedTitle] = useState<string | null>(null);
+
   return (
-    <section className="pt-36 pb-24 px-6 min-h-screen bg-white">
-      <div className="max-w-4xl mx-auto">
-        <div className="bg-white rounded-[2rem] p-6 md:p-8 border border-[#24252c]/[0.08] shadow-sm">
-          <div className="flex items-center justify-between mb-6 pb-4 border-b border-[#24252c]/[0.06]">
-            <div>
-              <MonoBadge icon={IconBox}>Rewards Program</MonoBadge>
-              <h1 className="text-3xl font-extrabold tracking-tight text-[var(--ink)] mt-2">
-                Loyalty & VIP Host Rewards
-              </h1>
-              <p className="text-xs text-[#24252c]/60 mt-1">Earn points on every booking and redeem free production upgrades.</p>
-            </div>
-            <button
-              onClick={() => go('packages')}
-              className="bg-[#1090F8] text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm"
-            >
-              Earn More Points
-            </button>
-          </div>
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+      <div>
+        <MonoBadge icon={IconShield}>BINHI Rewards Club</MonoBadge>
+        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ink)] mt-1.5">
+          Host Loyalty & Rewards
+        </h1>
+        <p className="text-xs text-[#24252c]/60 mt-1">
+          Earn 1 PTS per ₱100 spent. Redeem points for equipment upgrades and booking discount vouchers.
+        </p>
+      </div>
 
-          <div className="bg-[#161823] text-white rounded-[2rem] p-6 md:p-8 mb-8 shadow-xl">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-              <div>
-                <div className="text-xs text-white/50 uppercase tracking-wider font-semibold">VIP Status Tier</div>
-                <div className="text-2xl font-extrabold text-amber-300 mt-0.5">VIP Gold Host Member</div>
-              </div>
-              <div className="sm:text-right">
-                <div className="text-xs text-white/50 uppercase tracking-wider font-semibold">Available Rewards Balance</div>
-                <div className="text-3xl font-extrabold text-[#1090F8] mt-0.5">1,450 PTS</div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs text-white/70 font-semibold">
-                <span>Progress to Platinum Rank</span>
-                <span>1,450 / 2,000 PTS (550 PTS remaining)</span>
-              </div>
-              <div className="h-2.5 rounded-full bg-white/15 overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-[#1090F8] to-amber-300 rounded-full w-[72%]" />
-              </div>
-            </div>
-          </div>
-
-          <h3 className="text-sm font-bold uppercase tracking-wider text-[#24252c]/40 mb-4 ml-1">
-            Redeemable Equipment Upgrades
-          </h3>
-          <div className="grid sm:grid-cols-2 gap-4">
-            {[
-              { title: 'Free Low Fog Cloud Machine', pts: '300 PTS', desc: 'Complimentary bridal entrance cloud effect unit for your next wedding event.' },
-              { title: '₱2,000 Off P3 LED Wall Upgrade', pts: '500 PTS', desc: 'Instant ₱2,000 discount voucher applied to any Package C setup.' },
-              { title: 'Extra Dual Wireless Mics', pts: '200 PTS', desc: 'Additional dual UHF wireless host microphones with technicians.' },
-              { title: 'Free Hazer Stage Atmosphere', pts: '400 PTS', desc: 'High-output stage haze machine for moving head light beams.' },
-            ].map((r, i) => (
-              <div key={i} className="p-5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.05] flex flex-col justify-between hover:border-[#1090F8]/30 transition-all">
-                <div>
-                  <span className="text-xs font-bold text-[#1090F8] bg-[#1090F8]/10 px-3 py-1 rounded-full">
-                    {r.pts}
-                  </span>
-                  <h4 className="font-bold text-base text-[var(--ink)] mt-3">{r.title}</h4>
-                  <p className="text-xs text-[#24252c]/60 mt-1 leading-relaxed">{r.desc}</p>
-                </div>
-                <button
-                  onClick={() => alert(`Redeemed ${r.title}!`)}
-                  className="mt-5 w-full bg-[var(--ink)] text-white text-xs font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-sm"
-                >
-                  Redeem Reward Voucher
-                </button>
-              </div>
-            ))}
-          </div>
+      {/* Status Card */}
+      <div className="bg-gradient-to-r from-[var(--ink)] to-[#1090F8] rounded-2xl p-6 text-white shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="text-xs font-mono uppercase tracking-wider opacity-80">VIP Tier Level</div>
+          <div className="text-2xl sm:text-3xl font-extrabold mt-0.5">VIP Gold Host Status</div>
+          <div className="text-xs opacity-90 mt-1">1,450 Available Points</div>
+        </div>
+        <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/20 text-xs font-semibold">
+          ✦ Gold Perks Active
         </div>
       </div>
-    </section>
+
+      {/* Redeemable Rewards */}
+      <div className="space-y-4 pt-2">
+        <h3 className="font-extrabold text-lg text-[var(--ink)]">Redeemable Host Rewards</h3>
+        <div className="grid md:grid-cols-3 gap-4">
+          {rewardsList.map((r) => (
+            <div
+              key={r.id}
+              className="bg-white rounded-2xl p-5 border border-[#24252c]/[0.08] shadow-sm flex flex-col justify-between"
+            >
+              <div>
+                <span className="text-xs font-bold text-[#1090F8] bg-[#1090F8]/10 px-3 py-1 rounded-full">
+                  {r.pts}
+                </span>
+                <h4 className="font-bold text-base text-[var(--ink)] mt-3">{r.title}</h4>
+                <p className="text-xs text-[#24252c]/60 mt-1 leading-relaxed">{r.desc}</p>
+              </div>
+              <button
+                onClick={() => setRedeemedTitle(r.title)}
+                className="mt-5 w-full bg-[var(--ink)] text-white text-xs font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-sm"
+              >
+                Redeem Reward Voucher
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {redeemedTitle && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+          <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl border border-[#24252c]/10 relative text-center">
+            <button onClick={() => setRedeemedTitle(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+              <IconX className="w-5 h-5" />
+            </button>
+            <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 font-extrabold text-xl flex items-center justify-center mx-auto mb-3 border border-emerald-200">
+              ✓
+            </div>
+            <h3 className="text-lg font-extrabold text-[var(--ink)] mb-1">Reward Voucher Redeemed</h3>
+            <p className="text-xs text-[#24252c]/60 mb-5">
+              You have successfully claimed <strong className="text-[var(--ink)]">{redeemedTitle}</strong>! The voucher has been applied to your account.
+            </p>
+            <button
+              onClick={() => setRedeemedTitle(null)}
+              className="w-full bg-[var(--ink)] text-white font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

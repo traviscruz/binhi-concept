@@ -9,8 +9,9 @@ const inputClass =
 export interface PhysicalUnit {
   serialId: string;
   condition: 'Operational (Good)' | 'Minor Wear' | 'Needs Inspection' | 'In Repair';
-  status: 'Available in Warehouse' | 'Assigned to Event';
+  status: 'Available in Warehouse' | 'Assigned to Event' | 'Decommissioned / Inactive';
   lastMaintenance: string;
+  notes?: string;
 }
 
 export interface MasterEquipmentModel {
@@ -35,11 +36,11 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
       desc: '1000W RMS high-output active loudspeaker with onboard mixer.',
       img: 'https://picsum.photos/seed/binhi-a1/640/480',
       units: [
-        { serialId: 'SPK-YAM-001', condition: 'Operational (Good)', status: 'Available in Warehouse', lastMaintenance: '2026-08-01' },
-        { serialId: 'SPK-YAM-002', condition: 'Operational (Good)', status: 'Available in Warehouse', lastMaintenance: '2026-08-01' },
-        { serialId: 'SPK-YAM-003', condition: 'Operational (Good)', status: 'Assigned to Event', lastMaintenance: '2026-07-25' },
-        { serialId: 'SPK-YAM-004', condition: 'Minor Wear', status: 'Available in Warehouse', lastMaintenance: '2026-08-10' },
-        { serialId: 'SPK-YAM-005', condition: 'In Repair', status: 'Available in Warehouse', lastMaintenance: '2026-08-18' },
+        { serialId: 'SPK-YAM-001', condition: 'Operational (Good)', status: 'Available in Warehouse', lastMaintenance: 'August 1, 2026', notes: 'Routine check done.' },
+        { serialId: 'SPK-YAM-002', condition: 'Operational (Good)', status: 'Available in Warehouse', lastMaintenance: 'August 1, 2026' },
+        { serialId: 'SPK-YAM-003', condition: 'Operational (Good)', status: 'Assigned to Event', lastMaintenance: 'July 25, 2026' },
+        { serialId: 'SPK-YAM-004', condition: 'Minor Wear', status: 'Available in Warehouse', lastMaintenance: 'August 10, 2026' },
+        { serialId: 'SPK-YAM-005', condition: 'In Repair', status: 'Decommissioned / Inactive', lastMaintenance: 'August 18, 2026', notes: 'Tweeter replacement pending.' },
       ],
     },
     {
@@ -51,10 +52,10 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
       desc: '7R DMX motorized pan/tilt moving head fixture for stage beam light shows.',
       img: 'https://picsum.photos/seed/binhi-b3/640/480',
       units: [
-        { serialId: 'LGT-CHV-001', condition: 'Operational (Good)', status: 'Assigned to Event', lastMaintenance: '2026-08-12' },
-        { serialId: 'LGT-CHV-002', condition: 'Operational (Good)', status: 'Assigned to Event', lastMaintenance: '2026-08-12' },
-        { serialId: 'LGT-CHV-003', condition: 'Needs Inspection', status: 'Available in Warehouse', lastMaintenance: '2026-08-15' },
-        { serialId: 'LGT-CHV-004', condition: 'Operational (Good)', status: 'Available in Warehouse', lastMaintenance: '2026-08-05' },
+        { serialId: 'LGT-CHV-001', condition: 'Operational (Good)', status: 'Assigned to Event', lastMaintenance: 'August 12, 2026' },
+        { serialId: 'LGT-CHV-002', condition: 'Operational (Good)', status: 'Assigned to Event', lastMaintenance: 'August 12, 2026' },
+        { serialId: 'LGT-CHV-003', condition: 'Needs Inspection', status: 'Available in Warehouse', lastMaintenance: 'August 15, 2026', notes: 'Pan motor needs lubrication.' },
+        { serialId: 'LGT-CHV-004', condition: 'Operational (Good)', status: 'Available in Warehouse', lastMaintenance: 'August 5, 2026' },
       ],
     },
     {
@@ -66,9 +67,9 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
       desc: 'High refresh rate P3 LED video tiles for backdrop visuals and stage presentations.',
       img: 'https://picsum.photos/seed/binhi-c3/640/480',
       units: [
-        { serialId: 'LED-P3-001', condition: 'Operational (Good)', status: 'Assigned to Event', lastMaintenance: '2026-08-14' },
-        { serialId: 'LED-P3-002', condition: 'Operational (Good)', status: 'Assigned to Event', lastMaintenance: '2026-08-14' },
-        { serialId: 'LED-P3-003', condition: 'Operational (Good)', status: 'Available in Warehouse', lastMaintenance: '2026-08-02' },
+        { serialId: 'LED-P3-001', condition: 'Operational (Good)', status: 'Assigned to Event', lastMaintenance: 'August 14, 2026' },
+        { serialId: 'LED-P3-002', condition: 'Operational (Good)', status: 'Assigned to Event', lastMaintenance: 'August 14, 2026' },
+        { serialId: 'LED-P3-003', condition: 'Operational (Good)', status: 'Available in Warehouse', lastMaintenance: 'August 2, 2026' },
       ],
     },
   ]);
@@ -77,11 +78,12 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
   const [selectedCat, setSelectedCat] = useState('All');
   const [expandedModelId, setExpandedModelId] = useState<string | null>('MOD-YAM-DBR12');
 
-  // Modals
+  // Modals State
   const [showAddModelModal, setShowAddModelModal] = useState(false);
+  const [editingModel, setEditingModel] = useState<MasterEquipmentModel | null>(null);
   const [selectedUnitForEdit, setSelectedUnitForEdit] = useState<{ modelId: string; unit: PhysicalUnit } | null>(null);
 
-  // Form States
+  // Add Model Form State
   const [newModelName, setNewModelName] = useState('');
   const [newBrand, setNewBrand] = useState('');
   const [newCat, setNewCat] = useState('Audio Production');
@@ -90,9 +92,19 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
   const [newUnitQty, setNewUnitQty] = useState(4);
   const [newSerialPrefix, setNewSerialPrefix] = useState('SPK-NEW');
 
-  // Unit Condition Edit Form
+  // Edit Model Form State
+  const [editModelName, setEditModelName] = useState('');
+  const [editModelBrand, setEditModelBrand] = useState('');
+  const [editModelCat, setEditModelCat] = useState('');
+  const [editModelPrice, setEditModelPrice] = useState('');
+  const [editModelDesc, setEditModelDesc] = useState('');
+
+  // Unit Condition Edit Form State
+  const [unitEditSerialId, setUnitEditSerialId] = useState('');
   const [unitEditCondition, setUnitEditCondition] = useState<PhysicalUnit['condition']>('Operational (Good)');
   const [unitEditStatus, setUnitEditStatus] = useState<PhysicalUnit['status']>('Available in Warehouse');
+  const [unitEditLastMaint, setUnitEditLastMaint] = useState('');
+  const [unitEditNotes, setUnitEditNotes] = useState('');
 
   const categories = ['All', 'Audio Production', 'Lighting', 'Video & Visuals', 'Stage Effects'];
 
@@ -109,7 +121,6 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
     e.preventDefault();
     if (!newModelName.trim()) return;
 
-    // Generate physical units
     const generatedUnits: PhysicalUnit[] = Array.from({ length: Math.max(1, newUnitQty) }).map((_, i) => ({
       serialId: `${newSerialPrefix.toUpperCase()}-${String(i + 1).padStart(3, '0')}`,
       condition: 'Operational (Good)',
@@ -135,6 +146,37 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
     setNewDesc('');
   };
 
+  const handleOpenEditModelModal = (model: MasterEquipmentModel) => {
+    setEditingModel(model);
+    setEditModelName(model.name);
+    setEditModelBrand(model.brand);
+    setEditModelCat(model.category);
+    setEditModelPrice(model.price);
+    setEditModelDesc(model.desc);
+  };
+
+  const handleSaveModelEdits = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingModel) return;
+
+    setModels((prev) =>
+      prev.map((m) =>
+        m.modelId === editingModel.modelId
+          ? {
+              ...m,
+              name: editModelName,
+              brand: editModelBrand,
+              category: editModelCat,
+              price: editModelPrice,
+              desc: editModelDesc,
+            }
+          : m
+      )
+    );
+
+    setEditingModel(null);
+  };
+
   const handleAddUnitToModel = (modelId: string) => {
     setModels((prev) =>
       prev.map((m) => {
@@ -154,7 +196,16 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
     );
   };
 
-  const handleUpdateUnitCondition = (e: React.FormEvent) => {
+  const handleOpenEditUnitModal = (modelId: string, unit: PhysicalUnit) => {
+    setSelectedUnitForEdit({ modelId, unit });
+    setUnitEditSerialId(unit.serialId);
+    setUnitEditCondition(unit.condition);
+    setUnitEditStatus(unit.status);
+    setUnitEditLastMaint(unit.lastMaintenance || new Date().toISOString().split('T')[0]);
+    setUnitEditNotes(unit.notes || '');
+  };
+
+  const handleSaveUnitEdits = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUnitForEdit) return;
 
@@ -167,7 +218,14 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
             ...m,
             units: m.units.map((u) =>
               u.serialId === unit.serialId
-                ? { ...u, condition: unitEditCondition, status: unitEditStatus }
+                ? {
+                    ...u,
+                    serialId: unitEditSerialId,
+                    condition: unitEditCondition,
+                    status: unitEditStatus,
+                    lastMaintenance: unitEditLastMaint,
+                    notes: unitEditNotes,
+                  }
                 : u
             ),
           };
@@ -179,10 +237,12 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
     setSelectedUnitForEdit(null);
   };
 
-  const handleDeleteModel = (modelId: string) => {
-    if (confirm('Are you sure you want to delete this equipment model and all its physical serial units?')) {
-      setModels((prev) => prev.filter((m) => m.modelId !== modelId));
-    }
+  const [deleteModelId, setDeleteModelId] = useState<string | null>(null);
+
+  const handleConfirmDeleteModel = () => {
+    if (!deleteModelId) return;
+    setModels((prev) => prev.filter((m) => m.modelId !== deleteModelId));
+    setDeleteModelId(null);
   };
 
   return (
@@ -194,7 +254,7 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
             Equipment Models & Physical Units
           </h1>
           <p className="text-xs text-[#24252c]/60 mt-1">
-            Layer 1: Master Equipment Models. Layer 2: Individual physical unit serials & condition logs.
+            Layer 1: Master Equipment Details. Layer 2: Physical Serial Roster & Unit Status.
           </p>
         </div>
 
@@ -241,7 +301,8 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
           const isExpanded = expandedModelId === model.modelId;
           const totalUnits = model.units.length;
           const availableUnits = model.units.filter((u) => u.status === 'Available in Warehouse').length;
-          const repairUnits = model.units.filter((u) => u.condition === 'In Repair' || u.condition === 'Needs Inspection').length;
+          const activeUnits = model.units.filter((u) => u.status === 'Assigned to Event').length;
+          const inactiveUnits = model.units.filter((u) => u.status === 'Decommissioned / Inactive' || u.condition === 'In Repair').length;
 
           return (
             <div
@@ -267,13 +328,27 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-6 shrink-0 justify-between md:justify-end border-t md:border-t-0 pt-3 md:pt-0 border-[#24252c]/[0.06]">
+                <div className="flex items-center gap-4 shrink-0 justify-between md:justify-end border-t md:border-t-0 pt-3 md:pt-0 border-[#24252c]/[0.06]">
                   <div className="text-right">
                     <div className="text-xs font-bold text-[var(--ink)]">{totalUnits} Physical Units</div>
-                    <div className="text-[11px] text-emerald-600 font-semibold">{availableUnits} Available · {repairUnits} Alert</div>
+                    <div className="text-[11px] text-[#24252c]/60">
+                      <span className="text-emerald-600 font-semibold">{availableUnits} Avail</span> ·{' '}
+                      <span className="text-amber-600 font-semibold">{activeUnits} Active</span>
+                      {inactiveUnits > 0 && <span className="text-rose-600 font-semibold"> · {inactiveUnits} Inactive</span>}
+                    </div>
                   </div>
 
                   <span className="text-sm font-extrabold text-[#1090F8]">{model.price}</span>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenEditModelModal(model);
+                    }}
+                    className="text-xs font-bold px-3 py-1.5 rounded-full bg-[var(--mist)] border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors"
+                  >
+                    Edit Model
+                  </button>
 
                   <div className="p-2 rounded-full bg-[var(--mist)] text-[var(--ink)]">
                     {isExpanded ? <IconChevronUp className="w-4 h-4" /> : <IconChevronDown className="w-4 h-4" />}
@@ -297,7 +372,7 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
                         + Add Physical Unit
                       </button>
                       <button
-                        onClick={() => handleDeleteModel(model.modelId)}
+                        onClick={() => setDeleteModelId(model.modelId)}
                         className="bg-rose-50 text-rose-600 border border-rose-200 text-xs font-semibold px-3.5 py-1.5 rounded-full hover:bg-rose-100 transition-colors"
                       >
                         Delete Model
@@ -318,6 +393,8 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
                               className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${
                                 unit.condition === 'Operational (Good)'
                                   ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : unit.condition === 'In Repair'
+                                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
                                   : 'bg-amber-50 text-amber-700 border border-amber-200'
                               }`}
                             >
@@ -327,17 +404,14 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
 
                           <div className="text-xs font-bold text-[var(--ink)] mt-2">{unit.status}</div>
                           <div className="text-[10px] text-[#24252c]/50 mt-1">Last Inspection: {unit.lastMaintenance}</div>
+                          {unit.notes && <div className="text-[10px] text-amber-600 mt-1 italic">"{unit.notes}"</div>}
                         </div>
 
                         <button
-                          onClick={() => {
-                            setSelectedUnitForEdit({ modelId: model.modelId, unit });
-                            setUnitEditCondition(unit.condition);
-                            setUnitEditStatus(unit.status);
-                          }}
+                          onClick={() => handleOpenEditUnitModal(model.modelId, unit)}
                           className="mt-3 w-full bg-[var(--mist)] text-[var(--ink)] text-[11px] font-semibold py-1.5 rounded-lg border border-[#24252c]/10 hover:bg-[#1090F8] hover:text-white transition-colors"
                         >
-                          Update Unit Condition
+                          Edit Serial & Status
                         </button>
                       </div>
                     ))}
@@ -349,7 +423,70 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
         })}
       </div>
 
-      {/* Add Master Equipment Model Modal */}
+      {/* Layer 1: Edit Master Model Modal */}
+      {editingModel && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+          <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
+            <button onClick={() => setEditingModel(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+              <IconX className="w-5 h-5" />
+            </button>
+            <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Edit Master Model Details</h3>
+            <p className="text-xs font-mono font-bold text-[#1090F8] mb-4">Model ID: {editingModel.modelId}</p>
+
+            <form onSubmit={handleSaveModelEdits} className="space-y-4 text-xs">
+              <div>
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Model Name</label>
+                <input value={editModelName} onChange={(e) => setEditModelName(e.target.value)} className={inputClass} required />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Brand Name</label>
+                  <input value={editModelBrand} onChange={(e) => setEditModelBrand(e.target.value)} className={inputClass} />
+                </div>
+                <div>
+                  <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Daily Rate</label>
+                  <input value={editModelPrice} onChange={(e) => setEditModelPrice(e.target.value)} className={inputClass} />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Category</label>
+                <select value={editModelCat} onChange={(e) => setEditModelCat(e.target.value)} className={inputClass + ' font-semibold'}>
+                  <option>Audio Production</option>
+                  <option>Lighting</option>
+                  <option>Video & Visuals</option>
+                  <option>Stage Effects</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Equipment Photo Image URL</label>
+                <div className="flex items-center gap-3">
+                  <img src={editModelImg || editingModel.img} alt="Preview" className="w-12 h-12 rounded-xl object-cover border border-[#24252c]/10 shrink-0" />
+                  <input
+                    value={editModelImg}
+                    onChange={(e) => setEditModelImg(e.target.value)}
+                    placeholder="Image URL (https://...)"
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Description & Inclusions</label>
+                <textarea rows={3} value={editModelDesc} onChange={(e) => setEditModelDesc(e.target.value)} className="w-full rounded-2xl border px-4 py-2.5 bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] border-transparent transition-colors" />
+              </div>
+
+              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors">
+                Save Model Details
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Master Model Modal */}
       {showAddModelModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
           <div className="bg-white rounded-[2rem] p-6 max-w-lg w-full shadow-2xl border border-[#24252c]/10 relative">
@@ -398,6 +535,14 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
               </div>
 
               <div>
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Equipment Photo Image URL</label>
+                <input
+                  placeholder="https://picsum.photos/seed/binhi-gear-new/640/480"
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
                 <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Description & Specs</label>
                 <textarea rows={2} value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Inclusions, wattage, dimensions..." className="w-full rounded-2xl border px-4 py-2.5 bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] border-transparent transition-colors" />
               </div>
@@ -410,39 +555,90 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
         </div>
       )}
 
-      {/* Edit Individual Physical Unit Condition Modal */}
+      {/* Layer 2: Edit Individual Physical Unit Serial & Status Modal */}
       {selectedUnitForEdit && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
           <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
             <button onClick={() => setSelectedUnitForEdit(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
               <IconX className="w-5 h-5" />
             </button>
-            <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Update Unit Condition</h3>
-            <p className="text-xs font-mono font-bold text-[#1090F8] mb-4">Serial Tag: {selectedUnitForEdit.unit.serialId}</p>
+            <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Edit Layer 2 Physical Serial Unit</h3>
+            <p className="text-xs text-[#24252c]/50 mb-4">Modify unit serial tag, condition rating, or decommission status.</p>
 
-            <form onSubmit={handleUpdateUnitCondition} className="space-y-4 text-xs">
+            <form onSubmit={handleSaveUnitEdits} className="space-y-4 text-xs">
               <div>
-                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Physical Condition Rating</label>
-                <select value={unitEditCondition} onChange={(e) => setUnitEditCondition(e.target.value as any)} className={inputClass + ' font-semibold'}>
-                  <option>Operational (Good)</option>
-                  <option>Minor Wear</option>
-                  <option>Needs Inspection</option>
-                  <option>In Repair</option>
-                </select>
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Physical Serial ID Tag</label>
+                <input value={unitEditSerialId} onChange={(e) => setUnitEditSerialId(e.target.value)} className={inputClass + ' font-mono font-bold text-[#1090F8]'} required />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Physical Condition</label>
+                  <select value={unitEditCondition} onChange={(e) => setUnitEditCondition(e.target.value as any)} className={inputClass + ' font-semibold'}>
+                    <option>Operational (Good)</option>
+                    <option>Minor Wear</option>
+                    <option>Needs Inspection</option>
+                    <option>In Repair</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Unit Status</label>
+                  <select value={unitEditStatus} onChange={(e) => setUnitEditStatus(e.target.value as any)} className={inputClass + ' font-semibold'}>
+                    <option>Available in Warehouse</option>
+                    <option>Assigned to Event</option>
+                    <option>Decommissioned / Inactive</option>
+                  </select>
+                </div>
               </div>
 
               <div>
-                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Deployment Status</label>
-                <select value={unitEditStatus} onChange={(e) => setUnitEditStatus(e.target.value as any)} className={inputClass + ' font-semibold'}>
-                  <option>Available in Warehouse</option>
-                  <option>Assigned to Event</option>
-                </select>
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Last Bench Inspection Date</label>
+                <input type="date" value={unitEditLastMaint} onChange={(e) => setUnitEditLastMaint(e.target.value)} className={inputClass} />
+              </div>
+
+              <div>
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Maintenance / Repair Notes</label>
+                <textarea rows={2} value={unitEditNotes} onChange={(e) => setUnitEditNotes(e.target.value)} placeholder="Notes about wear, repair parts, or decommissioning..." className="w-full rounded-2xl border px-4 py-2.5 bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] border-transparent transition-colors" />
               </div>
 
               <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors">
-                Save Unit Condition Changes
+                Save Physical Unit Changes
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Equipment Model Modal Overlay */}
+      {deleteModelId && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+          <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative text-center">
+            <button onClick={() => setDeleteModelId(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+              <IconX className="w-5 h-5" />
+            </button>
+            <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 font-extrabold text-xl flex items-center justify-center mx-auto mb-3 border border-rose-200">
+              !
+            </div>
+            <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Delete Equipment Model</h3>
+            <p className="text-xs text-[#24252c]/60 mb-5">
+              Are you sure you want to delete equipment model <strong className="text-[var(--ink)] font-mono">{deleteModelId}</strong> and all its physical serial units?
+            </p>
+
+            <div className="flex items-center gap-3 text-xs">
+              <button
+                onClick={() => setDeleteModelId(null)}
+                className="flex-1 bg-[var(--mist)] text-[var(--ink)] font-semibold py-3 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors"
+              >
+                Keep Model
+              </button>
+              <button
+                onClick={handleConfirmDeleteModel}
+                className="flex-1 bg-rose-600 text-white font-semibold py-3 rounded-full hover:bg-rose-700 transition-colors shadow-md"
+              >
+                Delete Model
+              </button>
+            </div>
           </div>
         </div>
       )}

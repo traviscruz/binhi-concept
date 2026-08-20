@@ -7,17 +7,17 @@ const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
 
 export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
-  const [selectedDate, setSelectedDate] = useState('2026-09-14');
+  const [selectedDate, setSelectedDate] = useState('September 14, 2026');
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
 
   const [units, setUnits] = useState([
-    { serial: 'LED-P3-001', name: 'P3 HD Indoor LED Wall Panel (Unit 1)', category: 'Video', booking: 'BNH-2026-889 (Grand Wedding)', date: '2026-09-14', venue: 'Shangri-La Fort BGC', status: 'Assigned' },
-    { serial: 'LED-P3-002', name: 'P3 HD Indoor LED Wall Panel (Unit 2)', category: 'Video', booking: 'BNH-2026-889 (Grand Wedding)', date: '2026-09-14', venue: 'Shangri-La Fort BGC', status: 'Assigned' },
-    { serial: 'SUB-D15-001', name: 'Dual 15-inch Active Subwoofer A', category: 'Audio', booking: 'BNH-2026-889 (Grand Wedding)', date: '2026-09-14', venue: 'Shangri-La Fort BGC', status: 'Assigned' },
-    { serial: 'SUB-D15-002', name: 'Dual 15-inch Active Subwoofer B', category: 'Audio', booking: 'Unassigned (In Warehouse)', date: '2026-09-14', venue: 'Warehouse Unit A', status: 'Available' },
-    { serial: 'MIC-UHF-001', name: 'UHF Wireless Host Mic Pair #1', category: 'Audio', booking: 'BNH-2026-502 (Tech Summit)', date: '2026-11-12', venue: 'Marriott Grand Ballroom', status: 'Assigned' },
-    { serial: 'FOG-SMK-001', name: 'Low-Lying Fog Cloud Effect Generator', category: 'Effects', booking: 'Unassigned (In Warehouse)', date: '2026-09-14', venue: 'Warehouse Unit A', status: 'Available' },
+    { serial: 'LED-P3-001', name: 'P3 HD Indoor LED Wall Panel (Unit 1)', category: 'Video', booking: 'BNH-2026-889 (Grand Wedding)', date: 'September 14, 2026', venue: 'Shangri-La Fort BGC', status: 'Assigned' },
+    { serial: 'LED-P3-002', name: 'P3 HD Indoor LED Wall Panel (Unit 2)', category: 'Video', booking: 'BNH-2026-889 (Grand Wedding)', date: 'September 14, 2026', venue: 'Shangri-La Fort BGC', status: 'Assigned' },
+    { serial: 'SUB-D15-001', name: 'Dual 15-inch Active Subwoofer A', category: 'Audio', booking: 'BNH-2026-889 (Grand Wedding)', date: 'September 14, 2026', venue: 'Shangri-La Fort BGC', status: 'Assigned' },
+    { serial: 'SUB-D15-002', name: 'Dual 15-inch Active Subwoofer B', category: 'Audio', booking: 'Unassigned (In Warehouse)', date: 'September 14, 2026', venue: 'Warehouse Unit A', status: 'Available' },
+    { serial: 'MIC-UHF-001', name: 'UHF Wireless Host Mic Pair #1', category: 'Audio', booking: 'BNH-2026-502 (Tech Summit)', date: 'November 12, 2026', venue: 'Marriott Grand Ballroom', status: 'Assigned' },
+    { serial: 'FOG-SMK-001', name: 'Low-Lying Fog Cloud Effect Generator', category: 'Effects', booking: 'Unassigned (In Warehouse)', date: 'September 14, 2026', venue: 'Warehouse Unit A', status: 'Available' },
   ]);
 
   const toggleAssignment = (serial: string) => {

@@ -55,9 +55,23 @@ export default function LoginPage({ go }: { go: (p: Page) => void }) {
           <button
             type="button"
             onClick={() => go('inventory-dashboard')}
-            className="w-full bg-[var(--ink)] text-white text-xs font-bold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-all shadow-md inline-flex items-center justify-center gap-1.5"
+            className="w-full bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/10 text-xs font-bold py-3 rounded-full hover:bg-[var(--ink)] hover:text-white transition-all shadow-sm inline-flex items-center justify-center gap-1.5"
           >
             <span>Demo: Log in as Inventory Manager</span> →
+          </button>
+          <button
+            type="button"
+            onClick={() => go('admin-dashboard')}
+            className="w-full bg-[var(--ink)] text-white text-xs font-bold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-all shadow-md inline-flex items-center justify-center gap-1.5"
+          >
+            <span>Demo: Log in as Admin (System Portal)</span> →
+          </button>
+          <button
+            type="button"
+            onClick={() => go('crew-assigned-bookings')}
+            className="w-full bg-emerald-600 text-white text-xs font-bold py-3 rounded-full hover:bg-emerald-700 transition-all shadow-md inline-flex items-center justify-center gap-1.5"
+          >
+            <span>Demo: Log in as Crew (Event Portal)</span> →
           </button>
         </div>
       </div>

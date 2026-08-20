@@ -157,3 +157,46 @@ header button:focus-visible {
 .preview-switcher {
   font-family: 'Inter', sans-serif;
 }
+
+/* Premium Custom Styled Scrollbars — BINHI Modern Theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f2f4;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #1090F8 0%, #24252c 100%);
+  border-radius: 999px;
+  border: 2px solid #f1f2f4;
+  transition: background 0.3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #0d78d0 0%, #1090F8 100%);
+}
+
+/* Firefox Scrollbar Support */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1090F8 #f1f2f4;
+}
+
+/* Inset Modal Scrollbars — Prevents scrollbars from overflowing rounded modal cards */
+.modal-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.modal-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+.modal-scroll::-webkit-scrollbar-thumb {
+  background: #1090F8;
+  border-radius: 999px;
+  border: none;
+}

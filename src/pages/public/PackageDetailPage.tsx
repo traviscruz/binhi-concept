@@ -22,7 +22,7 @@ export default function PackageDetailPage({
   toggleWishlist?: (id: string) => void;
 }) {
   const pkg = FEATURED_PACKAGES.find((p) => p.id === packageId) || FEATURED_PACKAGES[0];
-  const [selectedDate, setSelectedDate] = useState('2026-09-14');
+  const [selectedDate, setSelectedDate] = useState('September 14, 2026');
   const [guestCount, setGuestCount] = useState(100);
   const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
 
@@ -135,15 +135,15 @@ export default function PackageDetailPage({
               <div className="grid sm:grid-cols-3 gap-4 text-center">
                 <div className="bg-white/10 rounded-xl p-4">
                   <div className="text-xs text-white/50 uppercase tracking-wider">Power Req</div>
-                  <div className="text-sm font-bold mt-1">{pkg.specs.powerReq}</div>
+                  <div className="text-sm font-bold mt-1">{pkg.specs?.powerReq || '220V 30A Dedicated Line'}</div>
                 </div>
                 <div className="bg-white/10 rounded-xl p-4">
                   <div className="text-xs text-white/50 uppercase tracking-wider">Setup Time</div>
-                  <div className="text-sm font-bold mt-1">{pkg.specs.setupTime}</div>
+                  <div className="text-sm font-bold mt-1">{pkg.specs?.setupTime || '2.5 Hours'}</div>
                 </div>
                 <div className="bg-white/10 rounded-xl p-4">
                   <div className="text-xs text-white/50 uppercase tracking-wider">Crew Size</div>
-                  <div className="text-sm font-bold mt-1">{pkg.specs.crewSize}</div>
+                  <div className="text-sm font-bold mt-1">{pkg.specs?.crewSize || '3 Technicians'}</div>
                 </div>
               </div>
             </div>

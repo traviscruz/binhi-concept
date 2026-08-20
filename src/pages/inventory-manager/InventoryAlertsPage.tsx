@@ -8,9 +8,9 @@ const inputClass =
 
 export default function InventoryAlertsPage({ go }: { go: (p: Page) => void }) {
   const [alerts, setAlerts] = useState([
-    { id: 'alt-1', type: 'Maintenance Required', gear: 'P3 HD Indoor LED Wall Panel (LED-P3-001)', details: '100 operating hours reached. Optical tile recalibration & DMX test required.', severity: 'High', date: '2026-08-19' },
-    { id: 'alt-2', type: 'Low Stock Warning', gear: 'UHF Wireless Microphones', details: 'Only 2 unassigned mic pairs remaining for the upcoming weekend of Sep 14.', severity: 'Medium', date: '2026-08-20' },
-    { id: 'alt-3', type: 'Hardware Damage Log', gear: 'Moving Head Beam Fixture #08 (LGT-CHV-003)', details: 'Pan motor mechanism lagging slightly during fast strobe sequences. Gears need lubrication.', severity: 'High', date: '2026-08-18' },
+    { id: 'alt-1', type: 'Maintenance Required', gear: 'P3 HD Indoor LED Wall Panel (LED-P3-001)', details: '100 operating hours reached. Optical tile recalibration & DMX test required.', severity: 'High', date: 'August 19, 2026' },
+    { id: 'alt-2', type: 'Low Stock Warning', gear: 'UHF Wireless Microphones', details: 'Only 2 unassigned mic pairs remaining for the upcoming weekend of Sep 14.', severity: 'Medium', date: 'August 20, 2026' },
+    { id: 'alt-3', type: 'Hardware Damage Log', gear: 'Moving Head Beam Fixture #08 (LGT-CHV-003)', details: 'Pan motor mechanism lagging slightly during fast strobe sequences. Gears need lubrication.', severity: 'High', date: 'August 18, 2026' },
   ]);
 
   const [search, setSearch] = useState('');
@@ -18,7 +18,7 @@ export default function InventoryAlertsPage({ go }: { go: (p: Page) => void }) {
   const [showAddAlertModal, setShowAddAlertModal] = useState(false);
 
   // Form State
-  const [gearName, setGearName] = useState('');
+  const [gearName, setGearName] = useState('Yamaha Active PA 12" Speaker (SPK-YAM-005)');
   const [alertType, setAlertType] = useState('Maintenance Required');
   const [severity, setSeverity] = useState('High');
   const [details, setDetails] = useState('');
@@ -169,13 +169,19 @@ export default function InventoryAlertsPage({ go }: { go: (p: Page) => void }) {
             <form onSubmit={handleCreateAlert} className="space-y-4 text-xs">
               <div>
                 <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Target Equipment Model / Serial ID</label>
-                <input
+                <select
                   value={gearName}
                   onChange={(e) => setGearName(e.target.value)}
-                  placeholder="e.g. Yamaha DBR12 Speaker (SPK-YAM-005)"
-                  className={inputClass}
-                  required
-                />
+                  className={inputClass + ' font-semibold'}
+                >
+                  <option value="Yamaha Active PA 12&quot; Speaker (SPK-YAM-005)">Yamaha Active PA 12&quot; Speaker (SPK-YAM-005)</option>
+                  <option value="Yamaha Active PA 12&quot; Speaker (SPK-YAM-001)">Yamaha Active PA 12&quot; Speaker (SPK-YAM-001)</option>
+                  <option value="P3 HD Indoor LED Wall Panel (LED-P3-001)">P3 HD Indoor LED Wall Panel (LED-P3-001)</option>
+                  <option value="P3 HD Indoor LED Wall Panel (LED-P3-003)">P3 HD Indoor LED Wall Panel (LED-P3-003)</option>
+                  <option value="Chauvet Moving Head Light (LGT-CHV-003)">Chauvet Moving Head Light (LGT-CHV-003)</option>
+                  <option value="UHF Wireless Host Mic Pair (MIC-UHF-001)">UHF Wireless Host Mic Pair (MIC-UHF-001)</option>
+                  <option value="Low-Lying Fog Cloud Effect Generator (FOG-SMK-001)">Low-Lying Fog Cloud Effect Generator (FOG-SMK-001)</option>
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
