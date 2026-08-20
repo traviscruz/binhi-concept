@@ -50,7 +50,7 @@ export function InventoryLayout({
   };
 
   return (
-    <div className="min-h-screen bg-[#F8F9FB] flex flex-col lg:flex-row text-[var(--ink)]">
+    <div className="min-h-screen bg-white flex flex-col lg:flex-row text-[var(--ink)]">
       {/* Mobile Top Bar */}
       <div className="lg:hidden bg-[#161823] text-white px-4 py-3 flex items-center justify-between sticky top-0 z-40 shadow-md">
         <div className="flex items-center gap-2">
