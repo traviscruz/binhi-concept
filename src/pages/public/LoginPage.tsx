@@ -44,13 +44,20 @@ export default function LoginPage({ go }: { go: (p: Page) => void }) {
           </button>
         </div>
 
-        <div className="pt-3 border-t border-[#24252c]/[0.06]">
+        <div className="pt-3 border-t border-[#24252c]/[0.06] space-y-2">
           <button
             type="button"
             onClick={() => go('booking-tracker')}
             className="w-full bg-[#1090F8] text-white text-xs font-bold py-3 rounded-full hover:bg-[#1090F8]/90 transition-all shadow-md inline-flex items-center justify-center gap-1.5"
           >
-            <span>Demo: Log in as Customer (Preview Dashboard)</span> →
+            <span>Demo: Log in as Customer</span> →
+          </button>
+          <button
+            type="button"
+            onClick={() => go('inventory-dashboard')}
+            className="w-full bg-[var(--ink)] text-white text-xs font-bold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-all shadow-md inline-flex items-center justify-center gap-1.5"
+          >
+            <span>Demo: Log in as Inventory Manager</span> →
           </button>
         </div>
       </div>

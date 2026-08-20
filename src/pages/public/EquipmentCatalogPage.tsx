@@ -29,11 +29,10 @@ export default function EquipmentCatalogPage({ goItemDetail }: { goItemDetail: (
             <button
               key={cat}
               onClick={() => setCategory(cat)}
-              className={`text-xs px-3.5 sm:px-4 py-2 rounded-full font-medium transition-all ${
-                category === cat
+              className={`text-xs px-3.5 sm:px-4 py-2 rounded-full font-medium transition-all ${category === cat
                   ? 'bg-[var(--ink)] text-white shadow-sm'
                   : 'bg-[var(--mist)] text-[#24252c]/60 hover:text-[var(--ink)]'
-              }`}
+                }`}
             >
               {cat}
             </button>

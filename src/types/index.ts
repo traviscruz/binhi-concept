@@ -18,6 +18,11 @@ export type Page =
   | 'loyalty'
   | 'review-submit'
   | 'profile'
+  | 'inventory-dashboard'
+  | 'inventory-items'
+  | 'inventory-units'
+  | 'inventory-alerts'
+  | 'inventory-reports'
 
 export type UserRole = 'customer' | 'inventory_manager' | 'admin' | 'event_staff'
 

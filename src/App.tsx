@@ -4,6 +4,7 @@ import './App.css';
 import type { Page } from './types';
 import { Header } from './components/layout/Header';
 import { CustomerHeader } from './components/layout/CustomerHeader';
+import { InventoryLayout } from './components/layout/InventoryLayout';
 import { Footer } from './components/layout/Footer';
 
 import LandingPage from './pages/public/LandingPage';
@@ -26,6 +27,12 @@ import WishlistPage from './pages/customer/WishlistPage';
 import LoyaltyPage from './pages/customer/LoyaltyPage';
 import MyReviewsPage from './pages/customer/MyReviewsPage';
 import ProfilePage from './pages/customer/ProfilePage';
+
+import InventoryDashboard from './pages/inventory-manager/InventoryDashboard';
+import InventoryItemsPage from './pages/inventory-manager/InventoryItemsPage';
+import UnitAssignmentPage from './pages/inventory-manager/UnitAssignmentPage';
+import InventoryAlertsPage from './pages/inventory-manager/InventoryAlertsPage';
+import UsageReportsPage from './pages/inventory-manager/UsageReportsPage';
 
 export default function App() {
   const [page, setPage] = useState<Page>('landing');
@@ -80,6 +87,13 @@ export default function App() {
     go('checkout');
   };
 
+  const isInventoryPage =
+    page === 'inventory-dashboard' ||
+    page === 'inventory-items' ||
+    page === 'inventory-units' ||
+    page === 'inventory-alerts' ||
+    page === 'inventory-reports';
+
   const isAuthOrCheckout =
     page === 'checkout' ||
     page === 'login' ||
@@ -87,9 +101,21 @@ export default function App() {
     page === 'forgot' ||
     page === 'otp';
 
-  const showPublicHeader = !isAuthOrCheckout && !isCustomerSession;
-  const showCustomerHeader = !isAuthOrCheckout && isCustomerSession;
-  const showFooter = !isAuthOrCheckout && !isCustomerSession;
+  const showPublicHeader = !isAuthOrCheckout && !isCustomerSession && !isInventoryPage;
+  const showCustomerHeader = !isAuthOrCheckout && isCustomerSession && !isInventoryPage;
+  const showFooter = !isAuthOrCheckout && !isCustomerSession && !isInventoryPage;
+
+  if (isInventoryPage) {
+    return (
+      <InventoryLayout page={page} go={go}>
+        {page === 'inventory-dashboard' && <InventoryDashboard go={go} />}
+        {page === 'inventory-items' && <InventoryItemsPage go={go} />}
+        {page === 'inventory-units' && <UnitAssignmentPage go={go} />}
+        {page === 'inventory-alerts' && <InventoryAlertsPage go={go} />}
+        {page === 'inventory-reports' && <UsageReportsPage go={go} />}
+      </InventoryLayout>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white text-[var(--ink)]">
