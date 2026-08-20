@@ -33,7 +33,7 @@ export default function RegisterPage({ go }: { go: (p: Page) => void }) {
       subtitle="Track bookings and earn rewards."
       onBack={() => (step > 0 ? setStep((s) => s - 1) : go('landing'))}
     >
-      <div className="mb-6 p-1.5 bg-[#EEEEEE] rounded-full flex items-center justify-between gap-1.5 border border-[#24252c]/[0.06]">
+      <div className="mb-6 p-1.5 bg-[#EEEEEE] rounded-full flex items-center justify-between gap-1 sm:gap-1.5 border border-[#24252c]/[0.06]">
         {STEPS.map((label, i) => {
           const isActive = i === step;
           const isDone = i < step;
@@ -41,7 +41,7 @@ export default function RegisterPage({ go }: { go: (p: Page) => void }) {
             <div
               key={label}
               onClick={() => isDone && setStep(i)}
-              className={`flex-1 flex items-center justify-center py-2 px-2.5 rounded-full text-xs transition-all duration-300 ${
+              className={`flex-1 flex items-center justify-center py-2 px-1.5 sm:px-2.5 rounded-full text-[11px] sm:text-xs transition-all duration-300 ${
                 isDone ? 'cursor-pointer' : ''
               } ${
                 isActive
@@ -51,12 +51,12 @@ export default function RegisterPage({ go }: { go: (p: Page) => void }) {
                   : 'text-[#24252c]/40 font-medium'
               }`}
             >
-              <span className="flex items-center gap-1.5 truncate">
+              <span className="flex items-center gap-1 sm:gap-1.5 truncate">
                 {isDone ? (
                   <span className="text-emerald-500 font-extrabold text-xs">✓</span>
                 ) : (
                   <span
-                    className={`w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-extrabold shrink-0 ${
+                    className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full text-[9px] sm:text-[10px] flex items-center justify-center font-extrabold shrink-0 ${
                       isActive ? 'bg-[#1090F8] text-white' : 'bg-[#24252c]/10 text-[#24252c]/50'
                     }`}
                   >

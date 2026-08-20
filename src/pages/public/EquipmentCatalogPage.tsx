@@ -14,22 +14,22 @@ export default function EquipmentCatalogPage({ goItemDetail }: { goItemDetail: (
       : EQUIPMENT_ITEMS.filter((item) => item.category === category);
 
   return (
-    <section className="pt-40 pb-24 px-6">
+    <section className="pt-28 sm:pt-36 md:pt-40 pb-20 sm:pb-24 px-4 sm:px-6">
       <div className="max-w-5xl mx-auto">
-        <div className="text-center mb-10">
+        <div className="text-center mb-8 sm:mb-10">
           <MonoBadge icon={IconBox}>Full Equipment Catalog</MonoBadge>
-          <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight mt-4">Individual Gear & Specifications</h1>
-          <p className="text-[#24252c]/60 mt-3 text-base max-w-xl mx-auto">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mt-4">Individual Gear & Specifications</h1>
+          <p className="text-[#24252c]/60 mt-3 text-sm sm:text-base max-w-xl mx-auto">
             Browse individual speakers, LED panels, moving head lights, and stage effect units with full technical specs.
           </p>
         </div>
 
-        <div className="flex justify-center gap-2 mb-10 flex-wrap">
+        <div className="flex justify-center gap-1.5 sm:gap-2 mb-8 sm:mb-10 flex-wrap">
           {categories.map((cat) => (
             <button
               key={cat}
               onClick={() => setCategory(cat)}
-              className={`text-xs px-4 py-2 rounded-full font-medium transition-all ${
+              className={`text-xs px-3.5 sm:px-4 py-2 rounded-full font-medium transition-all ${
                 category === cat
                   ? 'bg-[var(--ink)] text-white shadow-sm'
                   : 'bg-[var(--mist)] text-[#24252c]/60 hover:text-[var(--ink)]'
@@ -40,7 +40,7 @@ export default function EquipmentCatalogPage({ goItemDetail }: { goItemDetail: (
           ))}
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
           {filteredItems.map((item) => (
             <div
               key={item.id}

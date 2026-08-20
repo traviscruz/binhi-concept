@@ -8,9 +8,14 @@ export function Header({ page, go }: { page: Page; go: (p: Page) => void }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const authPage = page === 'login' || page === 'signup' || page === 'forgot' || page === 'otp';
 
+  const handleNav = (target: Page) => {
+    setMobileOpen(false);
+    go(target);
+  };
+
   const navItem = (label: string, target: Page) => (
     <button
-      onClick={() => go(target)}
+      onClick={() => handleNav(target)}
       className={`px-3.5 py-2 rounded-full text-sm font-medium transition-all outline-none focus:outline-none focus:ring-0 focus-visible:outline-none ${
         page === target || (target === 'packages' && page === 'package-detail') || (target === 'equipment' && page === 'item-detail')
           ? 'bg-[var(--ink)] text-white font-semibold shadow-sm'
@@ -22,9 +27,9 @@ export function Header({ page, go }: { page: Page; go: (p: Page) => void }) {
   );
 
   return (
-    <header className="fixed top-5 inset-x-0 z-50 px-4 md:px-8">
-      <div className="mx-auto max-w-6xl bg-white/90 backdrop-blur-md border border-[#24252c]/[0.08] rounded-full shadow-[0_4px_24px_-4px_rgba(0,0,0,.08)] px-6 py-3 flex items-center justify-between">
-        <button onClick={() => go('landing')} className="pl-1 outline-none focus:outline-none focus-visible:outline-none">
+    <header className="fixed top-4 sm:top-5 inset-x-0 z-50 px-3 sm:px-4 md:px-8">
+      <div className="mx-auto max-w-6xl bg-white/90 backdrop-blur-md border border-[#24252c]/[0.08] rounded-full shadow-[0_4px_24px_-4px_rgba(0,0,0,.08)] px-4 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between">
+        <button onClick={() => handleNav('landing')} className="pl-1 outline-none focus:outline-none focus-visible:outline-none">
           <Logo />
         </button>
 
@@ -40,7 +45,7 @@ export function Header({ page, go }: { page: Page; go: (p: Page) => void }) {
         <div className="hidden md:flex items-center gap-3">
           {authPage ? (
             <button
-              onClick={() => go('landing')}
+              onClick={() => handleNav('landing')}
               className="text-sm font-medium px-5 py-2 rounded-full border border-[#24252c]/10 hover:bg-[var(--mist)] transition-colors outline-none focus:outline-none focus-visible:outline-none"
             >
               Back to site
@@ -48,13 +53,13 @@ export function Header({ page, go }: { page: Page; go: (p: Page) => void }) {
           ) : (
             <>
               <button
-                onClick={() => go('login')}
+                onClick={() => handleNav('login')}
                 className="text-sm font-medium px-4.5 py-2 rounded-full hover:bg-[var(--mist)] transition-colors outline-none focus:outline-none focus-visible:outline-none text-[#24252c]/70 hover:text-[var(--ink)]"
               >
                 Log in
               </button>
               <button
-                onClick={() => go('packages')}
+                onClick={() => handleNav('packages')}
                 className="text-sm font-semibold px-5 py-2.5 rounded-full bg-[var(--ink)] text-white hover:bg-[var(--ink-soft)] transition-colors inline-flex items-center gap-1.5 outline-none focus:outline-none focus-visible:outline-none shadow-sm"
               >
                 Book an event

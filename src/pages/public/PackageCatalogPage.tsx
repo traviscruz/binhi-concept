@@ -14,17 +14,17 @@ export default function PackageCatalogPage({
   toggleWishlist?: (id: string) => void;
 }) {
   return (
-    <section className="pt-40 pb-24 px-6">
+    <section className="pt-28 sm:pt-36 md:pt-40 pb-20 sm:pb-24 px-4 sm:px-6">
       <div className="max-w-5xl mx-auto">
-        <div className="text-center mb-12">
+        <div className="text-center mb-8 sm:mb-12">
           <MonoBadge icon={IconTicket}>All Packages</MonoBadge>
-          <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight mt-4">Pick your event setup</h1>
-          <p className="text-[#24252c]/60 mt-3 text-base max-w-xl mx-auto">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mt-4">Pick your event setup</h1>
+          <p className="text-[#24252c]/60 mt-3 text-sm sm:text-base max-w-xl mx-auto">
             Browse our signature sound, lighting, and stage production packages. Click any package to view photos, equipment inclusions, and date availability.
           </p>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {FEATURED_PACKAGES.map((pkg) => {
             const isSaved = wishlistIds.includes(pkg.id);
             return (

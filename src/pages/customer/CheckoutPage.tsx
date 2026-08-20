@@ -62,7 +62,7 @@ export default function CheckoutPage({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-3">
             {[
               { num: '01', title: 'Contact & Event', desc: 'Who & When', s: 1 },
               { num: '02', title: 'Venue & Logistics', desc: 'Location Fee', s: 2 },
@@ -76,7 +76,7 @@ export default function CheckoutPage({
                 <div
                   key={st.s}
                   onClick={() => canClick && setStep(st.s as 1 | 2 | 3)}
-                  className={`p-4 rounded-2xl border transition-all duration-300 ${
+                  className={`p-2.5 sm:p-4 rounded-2xl border transition-all duration-300 ${
                     canClick ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'
                   } ${
                     isActive
@@ -86,9 +86,9 @@ export default function CheckoutPage({
                       : 'bg-white border-[#24252c]/[0.08] text-[var(--ink)]'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center justify-between mb-1 sm:mb-2">
                     <span
-                      className={`text-[11px] font-extrabold mono ${
+                      className={`text-[9px] sm:text-[11px] font-extrabold mono ${
                         isActive
                           ? 'text-[#1090F8]'
                           : isDone
@@ -98,14 +98,13 @@ export default function CheckoutPage({
                     >
                       {isDone ? '✓ DONE' : `STEP ${st.num}`}
                     </span>
-                    {isActive && (
-                      <span className="w-2 h-2 rounded-full bg-[#1090F8] animate-pulse" />
-                    )}
                   </div>
-                  <h4 className={`font-bold text-xs sm:text-sm leading-tight ${isActive ? 'text-white' : 'text-[var(--ink)]'}`}>
-                    {st.title}
-                  </h4>
-                  <p className={`text-[10px] mt-0.5 ${isActive ? 'text-white/60' : 'text-[#24252c]/50'}`}>
+                  <h4 className="font-extrabold text-[11px] sm:text-xs tracking-tight truncate">{st.title}</h4>
+                  <p
+                    className={`text-[9px] sm:text-[10px] mt-0.5 truncate ${
+                      isActive ? 'text-white/60' : 'text-[#24252c]/50'
+                    }`}
+                  >
                     {st.desc}
                   </p>
                 </div>

@@ -11,21 +11,21 @@ export default function AboutPage({ go }: { go: (p: Page) => void }) {
   ];
 
   return (
-    <section className="pt-40 pb-24 px-6">
+    <section className="pt-28 sm:pt-36 md:pt-40 pb-20 sm:pb-24 px-4 sm:px-6">
       <div className="max-w-5xl mx-auto">
-        <div className="text-center mb-16">
+        <div className="text-center mb-12 sm:mb-16">
           <MonoBadge icon={IconBox}>How BINHI Works</MonoBadge>
-          <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight mt-4">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mt-4">
             Boutique Event Production,
             <br />
             Built for Modern Hosts.
           </h1>
-          <p className="text-[#24252c]/60 mt-4 text-base max-w-xl mx-auto leading-relaxed">
+          <p className="text-[#24252c]/60 mt-4 text-sm sm:text-base max-w-xl mx-auto leading-relaxed">
             We removed the friction from booking sound, stage lighting, and video walls in the Philippines.
           </p>
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-20">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 mb-16 sm:mb-20">
           {steps.map((s, i) => (
             <div key={i} className="p-6 rounded-[2rem] bg-[var(--mist)] border border-[#24252c]/[0.05] flex flex-col justify-between">
               <div>

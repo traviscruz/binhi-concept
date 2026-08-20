@@ -55,10 +55,10 @@ export default function ContactPage() {
   }
 
   return (
-    <section className="pt-40 pb-24 px-6">
+    <section className="pt-28 sm:pt-36 md:pt-40 pb-20 sm:pb-24 px-4 sm:px-6">
       <div className="max-w-xl mx-auto text-center">
         <MonoBadge icon={IconMail}>Contact</MonoBadge>
-        <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight mt-4 leading-[1.03]">Got an event?<br />We're here to help.</h1>
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mt-4 leading-[1.03]">Got an event?<br />We're here to help.</h1>
       </div>
 
       <form onSubmit={handleSubmit} noValidate className="max-w-xl mx-auto mt-10 bg-[var(--mist)] rounded-[2rem] p-6 md:p-8">

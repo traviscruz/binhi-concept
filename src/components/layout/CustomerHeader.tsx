@@ -14,10 +14,15 @@ export function CustomerHeader({
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  const handleNav = (target: Page) => {
+    setMobileOpen(false);
+    go(target);
+  };
+
   const navItem = (label: string, target: Page, count?: number) => (
     <button
-      onClick={() => go(target)}
-      className={`px-3.5 py-2 rounded-full text-sm font-medium transition-all outline-none focus:outline-none focus:ring-0 focus-visible:outline-none flex items-center gap-1.5 ${
+      onClick={() => handleNav(target)}
+      className={`px-3.5 py-2 rounded-full text-sm font-medium transition-all outline-none focus:outline-none focus:ring-0 focus-visible:outline-none flex items-center justify-between lg:justify-start gap-1.5 ${
         page === target || (target === 'packages' && page === 'package-detail')
           ? 'bg-[var(--ink)] text-white font-semibold shadow-sm'
           : 'text-black/60 hover:text-[var(--ink)] hover:bg-black/5'
@@ -37,9 +42,9 @@ export function CustomerHeader({
   );
 
   return (
-    <header className="fixed top-5 inset-x-0 z-50 px-4 md:px-8">
-      <div className="mx-auto max-w-6xl bg-white/90 backdrop-blur-md border border-[#24252c]/[0.08] rounded-full shadow-[0_4px_24px_-4px_rgba(0,0,0,.08)] px-6 py-3 flex items-center justify-between">
-        <button onClick={() => go('landing')} className="pl-1 outline-none focus:outline-none focus-visible:outline-none">
+    <header className="fixed top-4 sm:top-5 inset-x-0 z-50 px-3 sm:px-4 md:px-8">
+      <div className="mx-auto max-w-6xl bg-white/90 backdrop-blur-md border border-[#24252c]/[0.08] rounded-full shadow-[0_4px_24px_-4px_rgba(0,0,0,.08)] px-4 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between">
+        <button onClick={() => handleNav('landing')} className="pl-1 outline-none focus:outline-none focus-visible:outline-none">
           <Logo />
         </button>
 
@@ -54,7 +59,7 @@ export function CustomerHeader({
 
         <div className="hidden md:flex items-center gap-3">
           <button
-            onClick={() => go('profile')}
+            onClick={() => handleNav('profile')}
             className={`flex items-center gap-2 pl-1 pr-3 py-1 rounded-full border transition-all outline-none cursor-pointer ${
               page === 'profile'
                 ? 'bg-[var(--ink)] text-white border-[var(--ink)] shadow-sm'
@@ -72,7 +77,7 @@ export function CustomerHeader({
           </button>
 
           <button
-            onClick={() => go('landing')}
+            onClick={() => handleNav('landing')}
             className="p-2 rounded-full border border-rose-200 text-rose-600 hover:bg-rose-50 hover:border-rose-300 transition-colors outline-none focus:outline-none"
             title="Log out"
             aria-label="Log out"
@@ -97,7 +102,7 @@ export function CustomerHeader({
           {navItem('Profile Settings', 'profile')}
           <div className="h-px bg-[#24252c]/[0.06] my-1" />
           <button
-            onClick={() => go('landing')}
+            onClick={() => handleNav('landing')}
             className="w-full text-left px-4 py-2 rounded-full text-sm font-medium text-rose-600 hover:bg-rose-50 flex items-center gap-2"
           >
             <IconLogOut className="w-4 h-4" /> Log out
