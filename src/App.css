@@ -1,0 +1,159 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300..700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&display=swap');
+
+:root {
+  --ink: #24252c;
+  --ink-soft: #33353f;
+  --paper: #ffffff;
+  --mist: #f7f7f7;
+  --mist-2: #eceef1;
+  --line: #e4e6ea;
+  --accent: #1090F8;
+  --accent-ink: #ffffff;
+  --signal: #16a34a;
+  --muted: #6b7280;
+  --muted-2: #9aa1ac;
+}
+
+.font-handwriting {
+  font-family: 'Caveat', cursive;
+}
+
+@keyframes blurIn {
+  0% {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+.animate-blur-in {
+  animation: blurIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.faq-card-transition {
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-weight: 400;
+  font-feature-settings: 'ss01' 1, 'cv11' 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom mono class — used instead of Tailwind's font-mono so we control
+   the exact typeface (Geist Mono, not the browser/Consolas fallback stack) */
+.mono {
+  font-family: 'Geist Mono', ui-monospace, 'SFMono-Regular', monospace;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::selection {
+  background: var(--accent);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: none;
+}
+
+header button:focus,
+header button:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Ticket perforation — the booking-stub motif used to divide package/summary cards */
+.ticket-notch {
+  position: relative;
+}
+.ticket-notch::before,
+.ticket-notch::after {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  background: var(--paper);
+  border-radius: 999px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+}
+.ticket-notch::before {
+  left: -10px;
+}
+.ticket-notch::after {
+  right: -10px;
+}
+.ticket-dash {
+  border-left: 2px dashed var(--line);
+}
+
+/* Scrollbar for horizontal chip rows */
+.chip-row::-webkit-scrollbar {
+  height: 0;
+}
+
+/* Fade/slide entrance used once per page load, not scattered everywhere */
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rise-in {
+  animation: riseIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.rise-in-delay-1 {
+  animation-delay: 0.08s;
+}
+.rise-in-delay-2 {
+  animation-delay: 0.16s;
+}
+.rise-in-delay-3 {
+  animation-delay: 0.24s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise-in {
+    animation: none;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* OTP input boxes */
+.otp-box {
+  caret-color: var(--accent);
+}
+
+/* Dev-only preview switcher, clearly separated from the product UI */
+.preview-switcher {
+  font-family: 'Inter', sans-serif;
+}
