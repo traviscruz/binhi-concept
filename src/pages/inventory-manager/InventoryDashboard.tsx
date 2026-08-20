@@ -92,7 +92,8 @@ export default function InventoryDashboard({ go }: { go: (p: Page) => void }) {
           </button>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* Desktop Table View */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-[#24252c]/[0.06] text-[#24252c]/50 uppercase tracking-wider">
@@ -127,6 +128,32 @@ export default function InventoryDashboard({ go }: { go: (p: Page) => void }) {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Row Cards View */}
+        <div className="block sm:hidden space-y-3">
+          {recentMovements.map((row, i) => (
+            <div key={i} className="p-4 rounded-xl bg-[var(--mist)] border border-[#24252c]/[0.06] space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-mono font-extrabold text-[#1090F8]">{row.unitId}</span>
+                <span
+                  className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                    row.status === 'Dispatched'
+                      ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
+                      : 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                  }`}
+                >
+                  {row.status}
+                </span>
+              </div>
+              <div className="font-bold text-[var(--ink)]">{row.name}</div>
+              <div className="text-[11px] text-[#24252c]/70 flex items-center justify-between">
+                <span>Ref: <strong className="font-mono text-[var(--ink)]">{row.booking}</strong></span>
+                <span className="text-[#24252c]/40">{row.time}</span>
+              </div>
+              <div className="text-[11px] text-[#24252c]/60">{row.destination}</div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

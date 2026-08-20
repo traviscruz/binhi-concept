@@ -112,7 +112,8 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
 
       {/* Serial Assignment Table */}
       <div className="bg-white rounded-2xl p-5 border border-[#24252c]/[0.08] shadow-sm">
-        <div className="overflow-x-auto">
+        {/* Desktop Table View */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-[#24252c]/[0.06] text-[#24252c]/50 uppercase tracking-wider">
@@ -161,6 +162,44 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Row Cards View */}
+        <div className="block sm:hidden space-y-3">
+          {filteredUnits.map((unit) => (
+            <div key={unit.serial} className="p-4 rounded-xl bg-[var(--mist)] border border-[#24252c]/[0.06] space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-mono font-extrabold text-[#1090F8]">{unit.serial}</span>
+                <span
+                  className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                    unit.status === 'Assigned'
+                      ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
+                      : 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                  }`}
+                >
+                  {unit.status}
+                </span>
+              </div>
+              <div className="font-bold text-[var(--ink)]">{unit.name}</div>
+              <div className="text-[11px] text-[#24252c]/70">
+                Target Date: <strong className="text-[var(--ink)]">{unit.date}</strong>
+              </div>
+              <div className="text-[11px] text-[#24252c]/60">
+                <div className="font-mono text-[var(--ink)] font-semibold">{unit.booking}</div>
+                <div>{unit.venue}</div>
+              </div>
+              <button
+                onClick={() => toggleAssignment(unit.serial)}
+                className={`w-full text-xs font-semibold py-2 rounded-full border transition-all ${
+                  unit.status === 'Assigned'
+                    ? 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100'
+                    : 'bg-[#1090F8] text-white border-[#1090F8]'
+                }`}
+              >
+                {unit.status === 'Assigned' ? 'Unbind Serial' : `Assign to ${selectedDate}`}
+              </button>
+            </div>
+          ))}
         </div>
       </div>
     </div>

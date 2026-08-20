@@ -42,9 +42,9 @@ export default function UsageReportsPage({ go }: { go: (p: Page) => void }) {
               <p className="text-xs text-[#24252c]/50 mt-0.5">Total Deployed: {item.totalHours} this quarter</p>
             </div>
 
-            <div className="h-2 rounded-full bg-[var(--mist)] overflow-hidden">
+            <div className="h-2.5 rounded-full bg-[var(--mist)] overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-[#1090F8] to-emerald-400 rounded-full"
+                className="h-full bg-gradient-to-r from-[var(--ink)] to-[#1090F8] rounded-full transition-all duration-500"
                 style={{ width: item.utilization }}
               />
             </div>

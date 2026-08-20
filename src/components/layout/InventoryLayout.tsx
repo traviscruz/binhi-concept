@@ -58,7 +58,7 @@ export function InventoryLayout({
             <Logo />
           </button>
           <span className="text-[10px] uppercase font-bold tracking-wider bg-[var(--mist)] text-[var(--ink)] px-2 py-0.5 rounded-full border border-[#24252c]/10">
-            Warehouse Lead
+            Inventory Manager
           </span>
         </div>
         <button
@@ -95,11 +95,11 @@ export function InventoryLayout({
           <div className="flex items-center justify-between bg-[var(--mist)] p-3 rounded-2xl border border-[#24252c]/[0.08] mb-3">
             <div className="flex items-center gap-2.5">
               <span className="w-8 h-8 rounded-full bg-[var(--ink)] text-white text-xs font-bold flex items-center justify-center">
-                RM
+                EB
               </span>
               <div>
-                <div className="text-xs font-bold text-[var(--ink)]">Raymund M.</div>
-                <div className="text-[10px] text-[#24252c]/50">Warehouse Lead</div>
+                <div className="text-xs font-bold text-[var(--ink)]">Ely Buendia</div>
+                <div className="text-[10px] text-[#24252c]/50">Inventory Manager</div>
               </div>
             </div>
           </div>
