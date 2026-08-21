@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Supabase Edge Function: create-checkout
 // Handles PayMongo Checkout API integration (QR Ph, GCash, PayMaya, Cards, DOB)
 
@@ -11,7 +12,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-serve(async (req: Request) => {
+Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }

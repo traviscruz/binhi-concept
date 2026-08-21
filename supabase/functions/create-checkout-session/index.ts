@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Supabase Edge Function: create-checkout-session
 // Calls PayMongo Create Checkout Session API (POST https://api.paymongo.com/v1/checkout_sessions)
 // Reads PAYMONGO_SECRET_KEY from Deno environment secrets.
@@ -9,7 +10,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-serve(async (req: Request) => {
+Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }

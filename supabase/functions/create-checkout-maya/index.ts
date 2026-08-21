@@ -1,17 +1,18 @@
+// @ts-nocheck
 // Saved Backup: Maya Checkout Supabase Edge Function
 // Can be re-enabled anytime by deploying or invoking this function.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 
-const MAYA_PUBLIC_KEY = Deno.env.get('MAYA_PUBLIC_KEY') || 'pk-eo4sL393CWU5KmveJUaW8V730TTei2zY8zE4dHJDxkF';
-const MAYA_SECRET_KEY = Deno.env.get('MAYA_SECRET_KEY') || 'sk-KfmfLJXFdV5t1inYN8lIOwSrueC1G27SCAklBqYCdrU';
+const MAYA_PUBLIC_KEY = Deno.env.get('MAYA_PUBLIC_KEY') || '';
+const MAYA_SECRET_KEY = Deno.env.get('MAYA_SECRET_KEY') || '';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-serve(async (req: Request) => {
+Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
