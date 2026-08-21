@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconShield, IconSearch, IconX } from '../../components/shared/icons';
+import { IconCalendar, IconX, IconSearch } from '../../components/shared/icons';
+import { ModalOverlay } from '../../components/shared/ModalOverlay';
+import { EmptyState } from '../../components/shared/EmptyState';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -63,7 +65,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.06]">
         <div>
-          <MonoBadge icon={IconShield}>Bookings Management</MonoBadge>
+          <MonoBadge icon={IconCalendar}>Bookings Management</MonoBadge>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ink)] mt-1.5">
             Customer Event Bookings
           </h1>
@@ -119,7 +121,17 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#24252c]/[0.04]">
-              {filtered.map((row) => (
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-4">
+                    <EmptyState
+                      title="No Bookings Found"
+                      description="No event reservations match your current search terms or filter status."
+                    />
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((row) => (
                 <tr key={row.id} className="hover:bg-[var(--mist)] transition-colors">
                   <td className="py-3.5 px-3 font-mono font-extrabold text-[#1090F8]">{row.id}</td>
                   <td className="py-3.5 px-3">
@@ -176,8 +188,9 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                     </div>
                   </td>
                 </tr>
-              ))}
-            </tbody>
+              ))
+            )}
+          </tbody>
           </table>
         </div>
 
@@ -227,9 +240,9 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
 
       {/* Deposit Receipt Preview Modal */}
       {selectedReceipt && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setSelectedReceipt(null)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button onClick={() => setSelectedReceipt(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setSelectedReceipt(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Verify GCash Deposit Slip</h3>
@@ -260,19 +273,19 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
 
             <button
               onClick={() => handleApproveDeposit(selectedReceipt.id)}
-              className="w-full bg-emerald-600 text-white font-semibold py-3.5 rounded-full hover:bg-emerald-700 transition-colors shadow-md"
+              className="w-full bg-emerald-600 text-white font-semibold py-3.5 rounded-full hover:bg-emerald-700 transition-colors shadow-md cursor-pointer"
             >
               Approve Deposit & Confirm Reservation
             </button>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* Reschedule Date Modal */}
       {rescheduleBooking && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setRescheduleBooking(null)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button onClick={() => setRescheduleBooking(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setRescheduleBooking(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Reschedule Event Date</h3>
@@ -292,20 +305,20 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
 
               <button
                 type="submit"
-                className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors"
+                className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
               >
                 Save Rescheduled Date
               </button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* Confirm Cancellation Modal Overlay */}
       {cancelBookingId && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setCancelBookingId(null)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative text-center">
-            <button onClick={() => setCancelBookingId(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setCancelBookingId(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 font-extrabold text-xl flex items-center justify-center mx-auto mb-3 border border-rose-200">
@@ -319,19 +332,19 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
             <div className="flex items-center gap-3 text-xs">
               <button
                 onClick={() => setCancelBookingId(null)}
-                className="flex-1 bg-[var(--mist)] text-[var(--ink)] font-semibold py-3 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors"
+                className="flex-1 bg-[var(--mist)] text-[var(--ink)] font-semibold py-3 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer"
               >
                 Keep Booking
               </button>
               <button
                 onClick={handleConfirmCancel}
-                className="flex-1 bg-rose-600 text-white font-semibold py-3 rounded-full hover:bg-rose-700 transition-colors shadow-md"
+                className="flex-1 bg-rose-600 text-white font-semibold py-3 rounded-full hover:bg-rose-700 transition-colors shadow-md cursor-pointer"
               >
                 Yes, Cancel Booking
               </button>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

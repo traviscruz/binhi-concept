@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
 import { IconTicket, IconX, IconBox, IconUser } from '../../components/shared/icons';
+import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { FEATURED_PACKAGES, type PackageData } from '../../data/packages';
 
 const inputClass =
@@ -240,14 +241,14 @@ export default function AdminPackagesPage({ go }: { go: (p: Page) => void }) {
 
       {/* Spacious 4XL Non-Crowded Package Builder Modal */}
       {(showCreateModal || editingPkg) && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => { setShowCreateModal(false); setEditingPkg(null); }}>
           <div className="bg-white rounded-[2.5rem] max-w-4xl w-full shadow-2xl border border-[#24252c]/10 relative p-1.5 sm:p-2.5 overflow-hidden">
             <button
               onClick={() => {
                 setShowCreateModal(false);
                 setEditingPkg(null);
               }}
-              className="absolute top-6 right-6 z-20 text-[#24252c]/50 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors bg-white/90 backdrop-blur-md shadow-sm border border-[#24252c]/10"
+              className="absolute top-6 right-6 z-20 text-[#24252c]/50 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors bg-white/90 backdrop-blur-md shadow-sm border border-[#24252c]/10 cursor-pointer"
             >
               <IconX className="w-5 h-5" />
             </button>
@@ -258,15 +259,15 @@ export default function AdminPackagesPage({ go }: { go: (p: Page) => void }) {
                   {editingPkg ? `Editing ID: ${editingPkg.id}` : 'New Package Setup'}
                 </span>
                 <h2 className="text-2xl font-extrabold text-[var(--ink)] mt-0.5">
-                  {editingPkg ? `Edit Package: ${editingPkg.name}` : 'Create Signature Production Package'}
+                  {editingPkg ? `Edit ${editingPkg.name}` : 'Create New Event Package'}
                 </h2>
-                <p className="text-xs text-[#24252c]/50 mt-1">
-                  Configure public detail page content, technical specifications, and mapped inventory equipment.
+                <p className="text-xs text-[#24252c]/60 mt-1">
+                  Define package details, venue capacity specs, base rate, and map equipment units from inventory.
                 </p>
               </div>
 
-            <form onSubmit={handleSavePackage} className="space-y-6 text-xs">
-              {/* Grid 1: Basic Details & Pricing */}
+              <form onSubmit={handleSavePackage} className="space-y-6">
+
               <div className="bg-[var(--mist)] p-5 rounded-2xl border border-[#24252c]/[0.08] space-y-4">
                 <h3 className="font-extrabold text-sm text-[var(--ink)] flex items-center gap-2">
                   <span className="w-5 h-5 rounded-full bg-[#1090F8] text-white text-[10px] flex items-center justify-center">1</span>
@@ -477,7 +478,7 @@ export default function AdminPackagesPage({ go }: { go: (p: Page) => void }) {
             </form>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

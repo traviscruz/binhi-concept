@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
 import { IconBox, IconX, IconChevronDown, IconChevronUp, IconSearch } from '../../components/shared/icons';
+import { ModalOverlay } from '../../components/shared/ModalOverlay';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -82,6 +83,7 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
   const [showAddModelModal, setShowAddModelModal] = useState(false);
   const [editingModel, setEditingModel] = useState<MasterEquipmentModel | null>(null);
   const [selectedUnitForEdit, setSelectedUnitForEdit] = useState<{ modelId: string; unit: PhysicalUnit } | null>(null);
+  const [deleteModelId, setDeleteModelId] = useState<string | null>(null);
 
   // Add Model Form State
   const [newModelName, setNewModelName] = useState('');
@@ -98,6 +100,7 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
   const [editModelCat, setEditModelCat] = useState('');
   const [editModelPrice, setEditModelPrice] = useState('');
   const [editModelDesc, setEditModelDesc] = useState('');
+  const [editModelImg, setEditModelImg] = useState('');
 
   // Unit Condition Edit Form State
   const [unitEditSerialId, setUnitEditSerialId] = useState('');
@@ -153,6 +156,7 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
     setEditModelCat(model.category);
     setEditModelPrice(model.price);
     setEditModelDesc(model.desc);
+    setEditModelImg(model.img);
   };
 
   const handleSaveModelEdits = (e: React.FormEvent) => {
@@ -169,12 +173,18 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
               category: editModelCat,
               price: editModelPrice,
               desc: editModelDesc,
+              img: editModelImg || m.img,
             }
           : m
       )
     );
 
     setEditingModel(null);
+  };
+
+  const handleConfirmDeleteModel = (modelId: string) => {
+    setModels((prev) => prev.filter((m) => m.modelId !== modelId));
+    setDeleteModelId(null);
   };
 
   const handleAddUnitToModel = (modelId: string) => {
@@ -235,14 +245,6 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
     );
 
     setSelectedUnitForEdit(null);
-  };
-
-  const [deleteModelId, setDeleteModelId] = useState<string | null>(null);
-
-  const handleConfirmDeleteModel = () => {
-    if (!deleteModelId) return;
-    setModels((prev) => prev.filter((m) => m.modelId !== deleteModelId));
-    setDeleteModelId(null);
   };
 
   return (
@@ -425,9 +427,9 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
 
       {/* Layer 1: Edit Master Model Modal */}
       {editingModel && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setEditingModel(null)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button onClick={() => setEditingModel(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setEditingModel(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Edit Master Model Details</h3>
@@ -478,19 +480,19 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
                 <textarea rows={3} value={editModelDesc} onChange={(e) => setEditModelDesc(e.target.value)} className="w-full rounded-2xl border px-4 py-2.5 bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] border-transparent transition-colors" />
               </div>
 
-              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors">
+              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer">
                 Save Model Details
               </button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* Add Master Model Modal */}
       {showAddModelModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setShowAddModelModal(false)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-lg w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button onClick={() => setShowAddModelModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setShowAddModelModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <h3 className="text-xl font-extrabold text-[var(--ink)] mb-4">Add Master Equipment Model</h3>
@@ -547,19 +549,19 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
                 <textarea rows={2} value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Inclusions, wattage, dimensions..." className="w-full rounded-2xl border px-4 py-2.5 bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] border-transparent transition-colors" />
               </div>
 
-              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors">
+              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer">
                 Generate Equipment Model & Serial Units
               </button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* Layer 2: Edit Individual Physical Unit Serial & Status Modal */}
       {selectedUnitForEdit && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setSelectedUnitForEdit(null)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button onClick={() => setSelectedUnitForEdit(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setSelectedUnitForEdit(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Edit Layer 2 Physical Serial Unit</h3>
@@ -602,19 +604,19 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
                 <textarea rows={2} value={unitEditNotes} onChange={(e) => setUnitEditNotes(e.target.value)} placeholder="Notes about wear, repair parts, or decommissioning..." className="w-full rounded-2xl border px-4 py-2.5 bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] border-transparent transition-colors" />
               </div>
 
-              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors">
+              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer">
                 Save Physical Unit Changes
               </button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* Delete Equipment Model Modal Overlay */}
       {deleteModelId && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setDeleteModelId(null)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative text-center">
-            <button onClick={() => setDeleteModelId(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setDeleteModelId(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 font-extrabold text-xl flex items-center justify-center mx-auto mb-3 border border-rose-200">
@@ -628,19 +630,19 @@ export default function InventoryItemsPage({ go }: { go: (p: Page) => void }) {
             <div className="flex items-center gap-3 text-xs">
               <button
                 onClick={() => setDeleteModelId(null)}
-                className="flex-1 bg-[var(--mist)] text-[var(--ink)] font-semibold py-3 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors"
+                className="flex-1 bg-[var(--mist)] text-[var(--ink)] font-semibold py-3 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer"
               >
-                Keep Model
+                Cancel
               </button>
               <button
-                onClick={handleConfirmDeleteModel}
-                className="flex-1 bg-rose-600 text-white font-semibold py-3 rounded-full hover:bg-rose-700 transition-colors shadow-md"
+                onClick={() => handleConfirmDeleteModel(deleteModelId)}
+                className="flex-1 bg-rose-600 text-white font-semibold py-3 rounded-full hover:bg-rose-700 transition-colors shadow-md cursor-pointer"
               >
-                Delete Model
+                Yes, Delete Model
               </button>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconBox, IconX } from '../../components/shared/icons';
+import { IconBox, IconPlus, IconX } from '../../components/shared/icons';
+import { ModalOverlay } from '../../components/shared/ModalOverlay';
+import { EmptyState } from '../../components/shared/EmptyState';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -89,7 +91,17 @@ export default function AdminTransportPage({ go }: { go: (p: Page) => void }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#24252c]/[0.04]">
-              {rules.map((r) => (
+            {rules.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="py-4">
+                  <EmptyState
+                    title="No Regional Zones Configured"
+                    description="Click '+ Add Regional Zone' above to add transport fee rules for regional locations."
+                  />
+                </td>
+              </tr>
+            ) : (
+              rules.map((r) => (
                 <tr key={r.id} className="hover:bg-[var(--mist)] transition-colors">
                   <td className="py-3.5 px-3 font-bold text-[var(--ink)]">{r.region}</td>
                   <td className="py-3.5 px-3 font-extrabold text-[#1090F8]">{r.baseFee}</td>
@@ -111,8 +123,9 @@ export default function AdminTransportPage({ go }: { go: (p: Page) => void }) {
                     </button>
                   </td>
                 </tr>
-              ))}
-            </tbody>
+              ))
+            )}
+          </tbody>
           </table>
         </div>
 
@@ -144,9 +157,9 @@ export default function AdminTransportPage({ go }: { go: (p: Page) => void }) {
 
       {/* Edit Logistics Fee Modal */}
       {editingRule && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setEditingRule(null)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button onClick={() => setEditingRule(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setEditingRule(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Edit Regional Transport Fee</h3>
@@ -163,19 +176,19 @@ export default function AdminTransportPage({ go }: { go: (p: Page) => void }) {
                 />
               </div>
 
-              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors">
+              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer">
                 Save Fee Changes
               </button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* Add Regional Zone Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setShowAddModal(false)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button onClick={() => setShowAddModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setShowAddModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <h3 className="text-xl font-extrabold text-[var(--ink)] mb-4">Add Regional Transport Zone</h3>
@@ -189,12 +202,12 @@ export default function AdminTransportPage({ go }: { go: (p: Page) => void }) {
                 <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Base Transport Fee</label>
                 <input value={newFee} onChange={(e) => setNewFee(e.target.value)} className={inputClass + ' font-bold text-[#1090F8]'} />
               </div>
-              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors">
-                Save Logistics Rule
+              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer">
+                Create Regional Zone Rule
               </button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

@@ -32,31 +32,41 @@ export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
           <div className="text-xs opacity-90 mt-1">1,450 Available Points</div>
         </div>
         <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/20 text-xs font-semibold">
-          ✦ Gold Perks Active
+          <MonoBadge icon={IconShield}>Host Loyalty Program</MonoBadge>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ink)] mt-1.5">
+            Loyalty Rewards & VIP Status
+          </h1>
+          <p className="text-xs text-[#24252c]/60 mt-1">Earn points for every event production booked with BINHI.</p>
+        </div>
+
+        <div className="bg-white px-5 py-3 rounded-2xl border border-[#24252c]/10 shadow-sm flex items-center gap-3 shrink-0 self-start sm:self-auto">
+          <div className="text-right">
+            <div className="text-[10px] uppercase font-bold text-[#24252c]/50">Your Points Balance</div>
+            <div className="text-xl font-extrabold text-[#1090F8]">{points} PTS</div>
+          </div>
         </div>
       </div>
 
-      {/* Redeemable Rewards */}
-      <div className="space-y-4 pt-2">
-        <h3 className="font-extrabold text-lg text-[var(--ink)]">Redeemable Host Rewards</h3>
-        <div className="grid md:grid-cols-3 gap-4">
-          {rewardsList.map((r) => (
-            <div
-              key={r.id}
-              className="bg-white rounded-2xl p-5 border border-[#24252c]/[0.08] shadow-sm flex flex-col justify-between"
-            >
+      <div className="bg-white rounded-[2rem] p-6 border border-[#24252c]/[0.08] shadow-sm space-y-4">
+        <h2 className="text-base font-bold text-[var(--ink)]">Available Reward Vouchers</h2>
+
+        <div className="grid sm:grid-cols-3 gap-4 text-xs">
+          {rewards.map((r) => (
+            <div key={r.id} className="p-5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.06] space-y-3 flex flex-col justify-between">
               <div>
-                <span className="text-xs font-bold text-[#1090F8] bg-[#1090F8]/10 px-3 py-1 rounded-full">
-                  {r.pts}
+                <span className="text-xs font-extrabold text-[#1090F8] bg-white px-3 py-1 rounded-full border border-[#1090F8]/20 inline-block mb-2">
+                  {r.cost} PTS
                 </span>
-                <h4 className="font-bold text-base text-[var(--ink)] mt-3">{r.title}</h4>
-                <p className="text-xs text-[#24252c]/60 mt-1 leading-relaxed">{r.desc}</p>
+                <h3 className="font-bold text-sm text-[var(--ink)]">{r.title}</h3>
+                <p className="text-xs text-[#24252c]/60 mt-1">{r.desc}</p>
               </div>
+
               <button
-                onClick={() => setRedeemedTitle(r.title)}
-                className="mt-5 w-full bg-[var(--ink)] text-white text-xs font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-sm"
+                onClick={() => handleRedeem(r)}
+                disabled={points < r.cost}
+                className="w-full bg-[var(--ink)] text-white text-xs font-semibold py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors disabled:opacity-40 cursor-pointer"
               >
-                Redeem Reward Voucher
+                {points >= r.cost ? 'Claim Reward' : 'Need More Points'}
               </button>
             </div>
           ))}
@@ -64,9 +74,9 @@ export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
       </div>
 
       {redeemedTitle && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setRedeemedTitle(null)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl border border-[#24252c]/10 relative text-center">
-            <button onClick={() => setRedeemedTitle(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setRedeemedTitle(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 font-extrabold text-xl flex items-center justify-center mx-auto mb-3 border border-emerald-200">
@@ -78,12 +88,12 @@ export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
             </p>
             <button
               onClick={() => setRedeemedTitle(null)}
-              className="w-full bg-[var(--ink)] text-white font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors"
+              className="w-full bg-[var(--ink)] text-white font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
             >
-              Done
+              Great!
             </button>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconShield, IconX, IconSearch } from '../../components/shared/icons';
+import { IconBox, IconPlus, IconX, IconShield, IconSearch } from '../../components/shared/icons';
+import { ModalOverlay } from '../../components/shared/ModalOverlay';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -155,11 +156,10 @@ export default function InventoryAlertsPage({ go }: { go: (p: Page) => void }) {
         </div>
       )}
 
-      {/* Input Modal Form for Maintenance & Low Stock Alert Creation */}
       {showAddAlertModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setShowAddAlertModal(false)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button onClick={() => setShowAddAlertModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setShowAddAlertModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
 
@@ -178,50 +178,61 @@ export default function InventoryAlertsPage({ go }: { go: (p: Page) => void }) {
                   <option value="Yamaha Active PA 12&quot; Speaker (SPK-YAM-001)">Yamaha Active PA 12&quot; Speaker (SPK-YAM-001)</option>
                   <option value="P3 HD Indoor LED Wall Panel (LED-P3-001)">P3 HD Indoor LED Wall Panel (LED-P3-001)</option>
                   <option value="P3 HD Indoor LED Wall Panel (LED-P3-003)">P3 HD Indoor LED Wall Panel (LED-P3-003)</option>
-                  <option value="Chauvet Moving Head Light (LGT-CHV-003)">Chauvet Moving Head Light (LGT-CHV-003)</option>
-                  <option value="UHF Wireless Host Mic Pair (MIC-UHF-001)">UHF Wireless Host Mic Pair (MIC-UHF-001)</option>
-                  <option value="Low-Lying Fog Cloud Effect Generator (FOG-SMK-001)">Low-Lying Fog Cloud Effect Generator (FOG-SMK-001)</option>
+                  <option value="Chauvet DJ Intimidator Spot 360 (LGT-[#1090F8]-001)">Chauvet DJ Intimidator Spot 360 (LGT-[#1090F8]-001)</option>
+                  <option value="Chauvet DJ Intimidator Spot 360 (LGT-[#1090F8]-002)">Chauvet DJ Intimidator Spot 360 (LGT-[#1090F8]-002)</option>
+                  <option value="Antari Z-1500 II Stage Fog Machine (HAZ-ANT-001)">Antari Z-1500 II Stage Fog Machine (HAZ-ANT-001)</option>
                 </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Alert Category</label>
-                  <select value={alertType} onChange={(e) => setAlertType(e.target.value)} className={inputClass + ' font-semibold'}>
-                    <option>Maintenance Required</option>
-                    <option>Low Stock Warning</option>
-                    <option>Hardware Damage Log</option>
-                    <option>DMX Calibration Due</option>
+                  <select
+                    value={alertType}
+                    onChange={(e) => setAlertType(e.target.value)}
+                    className={inputClass + ' font-semibold'}
+                  >
+                    <option value="Maintenance Required">Maintenance Required</option>
+                    <option value="Low Stock Warning">Low Stock Warning</option>
+                    <option value="Hardware Damage Log">Hardware Damage Log</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Priority Severity</label>
-                  <select value={severity} onChange={(e) => setSeverity(e.target.value)} className={inputClass + ' font-semibold'}>
-                    <option>High</option>
-                    <option>Medium</option>
-                    <option>Low</option>
+                  <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Alert Severity</label>
+                  <select
+                    value={severity}
+                    onChange={(e) => setSeverity(e.target.value)}
+                    className={inputClass + ' font-semibold'}
+                  >
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Maintenance Details & Notes</label>
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Diagnostic Issue Description</label>
                 <textarea
                   rows={3}
                   value={details}
                   onChange={(e) => setDetails(e.target.value)}
-                  placeholder="Describe inspection finding, motor lag, or tile damage..."
+                  placeholder="Describe crackling audio, blown bulb, worn XLR jack, or missing spare parts..."
                   className="w-full rounded-2xl border px-4 py-2.5 bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] border-transparent transition-colors"
+                  required
                 />
               </div>
 
-              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors">
-                Publish Alert to Dashboard
+              <button
+                type="submit"
+                className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
+              >
+                Log Maintenance Alert Record
               </button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

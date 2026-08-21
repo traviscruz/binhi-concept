@@ -1,7 +1,8 @@
-import { useState, ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import type { Page } from '../../types';
 import { Logo } from './Logo';
 import { IconBox, IconTicket, IconShield, IconLogOut, IconMenu, IconX, IconCalendar, IconMail, IconUser } from '../shared/icons';
+import { supabase } from '../../utils/supabase';
 
 export function AdminLayout({
   page,
@@ -17,10 +18,62 @@ export function AdminLayout({
   inquiryCount?: number;
 }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [adminName, setAdminName] = useState('Francis Cruz');
+  const [adminAvatar, setAdminAvatar] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchAdminProfile() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const meta = user.user_metadata || {};
+        let name = meta.full_name || (meta.first_name ? `${meta.first_name} ${meta.last_name || ''}`.trim() : '');
+        let avatar = meta.avatar_url || null;
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name, first_name, last_name, avatar_url')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (profile) {
+          if (profile.full_name) name = profile.full_name;
+          else if (profile.first_name) name = `${profile.first_name} ${profile.last_name || ''}`.trim();
+          if (profile.avatar_url) avatar = profile.avatar_url;
+        }
+
+        if (name) setAdminName(name);
+        setAdminAvatar(avatar);
+      } catch (err) {
+        console.error('Error loading admin header profile:', err);
+      }
+    }
+
+    fetchAdminProfile();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      fetchAdminProfile();
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   const handleNav = (target: Page) => {
     setMobileSidebarOpen(false);
     go(target);
+  };
+
+  const handleLogout = async () => {
+    setMobileSidebarOpen(false);
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('Admin logout error:', err);
+    }
+    go('landing');
   };
 
   const navItem = (label: string, target: Page, icon: ReactNode, count?: number) => {
@@ -28,7 +81,7 @@ export function AdminLayout({
     return (
       <button
         onClick={() => handleNav(target)}
-        className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl text-xs transition-all outline-none ${
+        className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl text-xs transition-all outline-none cursor-pointer ${
           isActive
             ? 'bg-[var(--ink)] text-white font-semibold shadow-sm'
             : 'text-black/60 hover:text-[var(--ink)] hover:bg-black/5 font-medium'
@@ -60,12 +113,12 @@ export function AdminLayout({
             <Logo />
           </button>
           <span className="text-[10px] uppercase font-bold tracking-wider bg-[var(--mist)] text-[var(--ink)] px-2 py-0.5 rounded-full border border-[#24252c]/10">
-            System Admin
+            Admin
           </span>
         </div>
         <button
           onClick={() => setMobileSidebarOpen((v) => !v)}
-          className="p-2 text-[var(--ink)] hover:bg-[var(--mist)] rounded-full"
+          className="p-2 text-[var(--ink)] hover:bg-[var(--mist)] rounded-full cursor-pointer"
         >
           {mobileSidebarOpen ? <IconX /> : <IconMenu />}
         </button>
@@ -79,7 +132,7 @@ export function AdminLayout({
       >
         <div>
           <div className="pb-4 mb-4 border-b border-[#24252c]/[0.08] flex items-center justify-between">
-            <button onClick={() => handleNav('landing')} className="outline-none">
+            <button onClick={() => handleNav('landing')} className="outline-none cursor-pointer">
               <Logo />
             </button>
           </div>
@@ -99,29 +152,46 @@ export function AdminLayout({
         </div>
 
         <div className="pt-4 mt-4 border-t border-[#24252c]/[0.08]">
-          <div className="flex items-center justify-between bg-[var(--mist)] p-3 rounded-2xl border border-[#24252c]/[0.08] mb-3">
+          <button
+            onClick={() => handleNav('admin-profile')}
+            className={`w-full text-left flex items-center justify-between p-3 rounded-2xl border transition-all cursor-pointer ${
+              page === 'admin-profile'
+                ? 'bg-[var(--ink)] text-white border-[var(--ink)] shadow-sm'
+                : 'bg-[var(--mist)] text-[var(--ink)] border-[#24252c]/[0.08] hover:border-[#1090F8]/40'
+            }`}
+          >
             <div className="flex items-center gap-2.5 min-w-0">
-              <span className="w-8 h-8 rounded-full bg-[var(--ink)] text-white text-xs font-bold flex items-center justify-center shrink-0">
-                FC
-              </span>
+              {adminAvatar ? (
+                <img
+                  src={adminAvatar}
+                  alt={adminName}
+                  className="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0"
+                />
+              ) : (
+                <span className="w-8 h-8 rounded-full bg-white text-[var(--ink)] border border-[#24252c]/15 text-xs font-bold flex items-center justify-center shrink-0">
+                  <IconUser className="w-4 h-4" />
+                </span>
+              )}
               <div className="min-w-0">
-                <div className="text-xs font-bold text-[var(--ink)] truncate">Francis Cruz</div>
-                <div className="text-[10px] text-[#24252c]/50 truncate">System Administrator</div>
+                <div className="text-xs font-bold truncate">{adminName}</div>
+                <div className={`text-[10px] truncate ${page === 'admin-profile' ? 'text-white/70' : 'text-[#24252c]/50'}`}>
+                  Admin Account
+                </div>
               </div>
             </div>
-          </div>
+          </button>
 
           <button
-            onClick={() => handleNav('landing')}
-            className="w-full py-2.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-semibold transition-colors flex items-center justify-center gap-2"
+            onClick={handleLogout}
+            className="w-full mt-2 py-2.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer"
           >
             <IconLogOut className="w-4 h-4" /> Log out
           </button>
         </div>
       </aside>
 
-      {/* Main Content Area */}
-      <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto w-full overflow-hidden">
+      {/* Main Content Area - Wide, Spacious & Smooth Blur-in Transition */}
+      <main key={page} className="animate-blur-in flex-1 p-4 sm:p-6 lg:p-8 2xl:p-10 max-w-7xl 2xl:max-w-[1600px] mx-auto w-full min-w-0 overflow-x-hidden">
         {children}
       </main>
     </div>

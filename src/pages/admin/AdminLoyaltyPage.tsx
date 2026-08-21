@@ -2,58 +2,62 @@ import { useState } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
 import { IconShield, IconX } from '../../components/shared/icons';
+import { ModalOverlay } from '../../components/shared/ModalOverlay';
 
 const inputClass =
-  'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
+  'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors font-bold';
 
 export default function AdminLoyaltyPage({ go }: { go: (p: Page) => void }) {
-  const [earnRate, setEarnRate] = useState('1 PTS per ₱100 spent');
-  const [reviewBonus, setReviewBonus] = useState('+100 PTS per verified review');
-  const [goldThreshold, setGoldThreshold] = useState('1,000 PTS');
-  const [platThreshold, setPlatThreshold] = useState('3,000 PTS');
-
+  const [ptsPerPeso, setPtsPerPeso] = useState('100');
+  const [silverThreshold, setSilverThreshold] = useState('500');
+  const [goldThreshold, setGoldThreshold] = useState('1,500');
+  const [platThreshold, setPlatThreshold] = useState('4,000');
   const [showSavedModal, setShowSavedModal] = useState(false);
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    setShowSavedModal(true);
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.06]">
         <div>
-          <MonoBadge icon={IconShield}>Rewards Program Rules</MonoBadge>
+          <MonoBadge icon={IconShield}>Loyalty & Rewards Program</MonoBadge>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ink)] mt-1.5">
-            Loyalty Program & Voucher Settings
+            Loyalty Engine Settings
           </h1>
           <p className="text-xs text-[#24252c]/60 mt-1">
-            Configure host point earning rates, tier thresholds, and redeemable gear upgrade vouchers.
+            Configure point conversion formulas, VIP host tier qualification rules, and reward vouchers.
           </p>
         </div>
 
         <button
-          onClick={() => setShowSavedModal(true)}
-          className="bg-[var(--ink)] text-white text-xs font-semibold px-5 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-sm self-start sm:self-auto"
+          onClick={handleSave}
+          className="bg-[var(--ink)] hover:bg-[var(--ink-soft)] text-white text-xs font-semibold px-5 py-2.5 rounded-full transition-colors shrink-0 self-start sm:self-auto cursor-pointer"
         >
-          Save Loyalty Settings
+          Save Loyalty Configuration
         </button>
       </div>
 
-      <div className="bg-white rounded-2xl p-6 border border-[#24252c]/[0.08] shadow-sm space-y-4">
-        <h3 className="font-extrabold text-base text-[var(--ink)] mb-2">Points Earning Rules</h3>
-
-        <div className="grid sm:grid-cols-2 gap-4 text-xs">
+      <div className="grid md:grid-cols-2 gap-6 text-xs">
+        <div className="bg-white rounded-[2rem] p-6 border border-[#24252c]/[0.08] shadow-sm space-y-4">
+          <h2 className="text-sm font-bold text-[var(--ink)]">Points Earning Formula</h2>
           <div>
-            <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Booking Spend Earning Rate</label>
-            <input value={earnRate} onChange={(e) => setEarnRate(e.target.value)} className={inputClass} />
-          </div>
-          <div>
-            <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Verified Review Bonus</label>
-            <input value={reviewBonus} onChange={(e) => setReviewBonus(e.target.value)} className={inputClass} />
+            <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Spent Amount Required per 1 Point (₱)</label>
+            <input value={ptsPerPeso} onChange={(e) => setPtsPerPeso(e.target.value)} className={inputClass} />
+            <p className="text-[10px] text-[#24252c]/50 mt-1">Default: ₱100 spent = 1 Binhi Point</p>
           </div>
         </div>
 
-        <h3 className="font-extrabold text-base text-[var(--ink)] pt-4 mb-2">VIP Tier Thresholds</h3>
-
-        <div className="grid sm:grid-cols-2 gap-4 text-xs">
+        <div className="bg-white rounded-[2rem] p-6 border border-[#24252c]/[0.08] shadow-sm space-y-4">
+          <h2 className="text-sm font-bold text-[var(--ink)]">VIP Host Tier Requirements</h2>
           <div>
-            <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">VIP Gold Host Minimum PTS</label>
+            <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Silver Host Minimum PTS</label>
+            <input value={silverThreshold} onChange={(e) => setSilverThreshold(e.target.value)} className={inputClass} />
+          </div>
+          <div>
+            <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Gold Host Minimum PTS</label>
             <input value={goldThreshold} onChange={(e) => setGoldThreshold(e.target.value)} className={inputClass} />
           </div>
           <div>
@@ -64,9 +68,9 @@ export default function AdminLoyaltyPage({ go }: { go: (p: Page) => void }) {
       </div>
 
       {showSavedModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setShowSavedModal(false)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl border border-[#24252c]/10 relative text-center">
-            <button onClick={() => setShowSavedModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setShowSavedModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 font-extrabold text-xl flex items-center justify-center mx-auto mb-3 border border-emerald-200">
@@ -78,12 +82,12 @@ export default function AdminLoyaltyPage({ go }: { go: (p: Page) => void }) {
             </p>
             <button
               onClick={() => setShowSavedModal(false)}
-              className="w-full bg-[var(--ink)] text-white font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors"
+              className="w-full bg-[var(--ink)] text-white font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
             >
               Close
             </button>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

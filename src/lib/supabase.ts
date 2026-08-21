@@ -1,1 +1,1 @@
-export const supabase = {}
+export { supabase } from '../utils/supabase';

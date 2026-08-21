@@ -19,7 +19,7 @@ export default function AdminDashboard({ go }: { go: (p: Page) => void }) {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.06]">
         <div>
-          <MonoBadge icon={IconShield}>System Admin Control</MonoBadge>
+          <MonoBadge icon={IconShield}>Admin Control</MonoBadge>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ink)] mt-1.5">
             Admin System Overview
           </h1>

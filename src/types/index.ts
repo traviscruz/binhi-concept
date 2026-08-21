@@ -23,6 +23,7 @@ export type Page =
   | 'inventory-units'
   | 'inventory-alerts'
   | 'inventory-reports'
+  | 'inventory-profile'
   | 'admin-dashboard'
   | 'admin-bookings'
   | 'admin-packages'
@@ -33,9 +34,11 @@ export type Page =
   | 'admin-inquiries'
   | 'admin-loyalty'
   | 'admin-reviews'
+  | 'admin-profile'
   | 'crew-assigned-bookings'
   | 'crew-booking-detail'
   | 'crew-setup-teardown'
+  | 'crew-profile'
 
 export type UserRole = 'customer' | 'inventory_manager' | 'admin' | 'crew'
 

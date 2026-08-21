@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
 import { IconMail, IconX } from '../../components/shared/icons';
+import { ModalOverlay } from '../../components/shared/ModalOverlay';
+import { EmptyState } from '../../components/shared/EmptyState';
 
 export interface InquiryItem {
   id: string;
@@ -50,7 +52,16 @@ export default function AdminInquiriesPage({ go }: { go: (p: Page) => void }) {
       </div>
 
       <div className="space-y-4">
-        {inquiries.map((item) => (
+        {inquiries.length === 0 ? (
+          <div className="bg-white p-6 rounded-2xl border border-[#24252c]/[0.08]">
+            <EmptyState
+              icon={IconMail}
+              title="No Inquiries in Inbox"
+              description="New custom event inquiries submitted from the contact page will appear here."
+            />
+          </div>
+        ) : (
+          inquiries.map((item) => (
           <div key={item.id} className="p-6 rounded-2xl bg-white border border-[#24252c]/[0.08] shadow-sm space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -80,20 +91,21 @@ export default function AdminInquiriesPage({ go }: { go: (p: Page) => void }) {
                   setReplyInquiry(item);
                   setReplyMessage(`Hi ${item.name},\n\nThank you for reaching out to BINHI Production! Regarding your inquiry for ${item.eventType} on ${item.date}...`);
                 }}
-                className="bg-[var(--ink)] text-white text-xs font-semibold px-4 py-2 rounded-full hover:bg-[var(--ink-soft)] transition-colors"
+                className="bg-[var(--ink)] text-white text-xs font-semibold px-4 py-2 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
               >
                 Send Email Reply
               </button>
             </div>
           </div>
-        ))}
+        ))
+        )}
       </div>
 
       {/* Send Email Reply Modal */}
       {replyInquiry && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setReplyInquiry(null)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button onClick={() => setReplyInquiry(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setReplyInquiry(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Reply to Inquiry</h3>
@@ -111,12 +123,12 @@ export default function AdminInquiriesPage({ go }: { go: (p: Page) => void }) {
                 />
               </div>
 
-              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors">
+              <button type="submit" className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer">
                 Send Email & Mark as Replied
               </button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

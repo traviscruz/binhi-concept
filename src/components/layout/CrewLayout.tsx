@@ -1,13 +1,14 @@
-import { useState, ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import type { Page } from '../../types';
 import { Logo } from './Logo';
-import { IconBox, IconTicket, IconLogOut, IconMenu, IconX, IconCalendar, IconCheck } from '../shared/icons';
+import { IconCalendar, IconBox, IconCheck, IconLogOut, IconMenu, IconX, IconUser } from '../shared/icons';
+import { supabase } from '../../utils/supabase';
 
 export function CrewLayout({
   page,
   go,
   children,
-  assignedCount = 3,
+  assignedCount = 4,
 }: {
   page: Page;
   go: (p: Page) => void;
@@ -15,10 +16,62 @@ export function CrewLayout({
   assignedCount?: number;
 }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [crewName, setCrewName] = useState('Marco Valenzuela');
+  const [crewAvatar, setCrewAvatar] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchCrewProfile() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const meta = user.user_metadata || {};
+        let name = meta.full_name || (meta.first_name ? `${meta.first_name} ${meta.last_name || ''}`.trim() : '');
+        let avatar = meta.avatar_url || null;
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name, first_name, last_name, avatar_url')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (profile) {
+          if (profile.full_name) name = profile.full_name;
+          else if (profile.first_name) name = `${profile.first_name} ${profile.last_name || ''}`.trim();
+          if (profile.avatar_url) avatar = profile.avatar_url;
+        }
+
+        if (name) setCrewName(name);
+        setCrewAvatar(avatar);
+      } catch (err) {
+        console.error('Error loading crew profile for layout:', err);
+      }
+    }
+
+    fetchCrewProfile();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      fetchCrewProfile();
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   const handleNav = (target: Page) => {
     setMobileSidebarOpen(false);
     go(target);
+  };
+
+  const handleLogout = async () => {
+    setMobileSidebarOpen(false);
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('Crew logout error:', err);
+    }
+    go('landing');
   };
 
   const navItem = (label: string, target: Page, icon: ReactNode, count?: number) => {
@@ -26,20 +79,20 @@ export function CrewLayout({
     return (
       <button
         onClick={() => handleNav(target)}
-        className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl text-xs transition-all outline-none ${
+        className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl text-xs transition-all outline-none cursor-pointer ${
           isActive
-            ? 'bg-[var(--ink)] text-white font-semibold shadow-sm'
-            : 'text-black/60 hover:text-[var(--ink)] hover:bg-black/5 font-medium'
+            ? 'bg-[var(--ink)] text-white font-bold shadow-sm'
+            : 'text-[#24252c]/70 hover:text-[var(--ink)] hover:bg-black/5 font-semibold'
         }`}
       >
-        <div className="flex items-center gap-2.5 truncate">
+        <div className="flex items-center gap-2.5 min-w-0">
           <span className={isActive ? 'text-white' : 'text-[#24252c]/50'}>{icon}</span>
           <span className="truncate">{label}</span>
         </div>
         {count !== undefined && count > 0 && (
           <span
-            className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full shrink-0 ${
-              isActive ? 'bg-white text-[var(--ink)]' : 'bg-[#1090F8] text-white'
+            className={`text-[10px] font-black px-2 py-0.5 rounded-full shrink-0 ${
+              isActive ? 'bg-white text-[var(--ink)]' : 'bg-emerald-600 text-white'
             }`}
           >
             {count}
@@ -50,49 +103,61 @@ export function CrewLayout({
   };
 
   const sidebarContent = (
-    <div className="flex flex-col h-full">
-      {/* Brand Header */}
-      <div className="flex items-center justify-between p-4 border-b border-[#24252c]/[0.06]">
-        <Logo onClick={() => handleNav('landing')} />
-        <button
-          onClick={() => setMobileSidebarOpen(false)}
-          className="md:hidden text-[#24252c]/50 hover:text-[var(--ink)] p-1"
-        >
-          <IconX className="w-5 h-5" />
-        </button>
-      </div>
-
-      {/* Navigation Links */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-1.5 modal-scroll">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/40 px-3 pb-1">
-          Event Operations
+    <div className="h-full flex flex-col justify-between p-4">
+      <div className="space-y-6">
+        {/* Brand Header */}
+        <div className="pb-4 mb-4 border-b border-[#24252c]/[0.08] flex items-center justify-between">
+          <button onClick={() => handleNav('landing')} className="outline-none cursor-pointer">
+            <Logo />
+          </button>
         </div>
-        {navItem('Assigned Bookings', 'crew-assigned-bookings', <IconCalendar className="w-4 h-4" />, assignedCount)}
-        {navItem('Gear Packing & Specs', 'crew-booking-detail', <IconBox className="w-4 h-4" />)}
-        {navItem('Setup / Teardown Status', 'crew-setup-teardown', <IconCheck className="w-4 h-4" />)}
+
+        {/* Navigation Items */}
+        <div className="space-y-1.5">
+          {navItem('Assigned Bookings', 'crew-assigned-bookings', <IconCalendar className="w-4 h-4" />, assignedCount)}
+          {navItem('Gear Packing & Specs', 'crew-booking-detail', <IconBox className="w-4 h-4" />)}
+          {navItem('Setup / Teardown Status', 'crew-setup-teardown', <IconCheck className="w-4 h-4" />)}
+        </div>
       </div>
 
       {/* Profile Card & Exit Options */}
-      <div className="p-4 border-t border-[#24252c]/[0.06] bg-gradient-to-b from-transparent to-[#24252c]/[0.02] space-y-3">
-        <div className="flex items-center gap-3 p-2.5 rounded-2xl bg-white border border-[#24252c]/[0.08] shadow-sm">
-          <div className="w-9 h-9 rounded-xl bg-[#1090F8]/10 text-[#1090F8] font-black text-xs flex items-center justify-center border border-[#1090F8]/20 shrink-0">
-            MV
+      <div className="pt-4 border-t border-[#24252c]/[0.06] space-y-2">
+        <button
+          onClick={() => handleNav('crew-profile')}
+          className={`w-full text-left flex items-center justify-between p-3 rounded-2xl border transition-all cursor-pointer ${
+            page === 'crew-profile'
+              ? 'bg-[var(--ink)] text-white border-[var(--ink)] shadow-sm'
+              : 'bg-white text-[var(--ink)] border-[#24252c]/[0.08] hover:border-[#1090F8]/40 shadow-xs'
+          }`}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            {crewAvatar ? (
+              <img
+                src={crewAvatar}
+                alt={crewName}
+                className="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0"
+              />
+            ) : (
+              <span className="w-8 h-8 rounded-full bg-white text-[var(--ink)] border border-[#24252c]/15 text-xs font-bold flex items-center justify-center shrink-0">
+                <IconUser className="w-4 h-4" />
+              </span>
+            )}
+            <div className="min-w-0">
+              <div className="text-xs font-extrabold truncate">{crewName}</div>
+              <div className={`text-[10px] truncate ${page === 'crew-profile' ? 'text-white/70' : 'text-[#24252c]/50'}`}>
+                Event Staff / Crew
+              </div>
+            </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-xs font-extrabold text-[var(--ink)] truncate">Marco Valenzuela</div>
-            <div className="text-[10px] text-[#24252c]/50 truncate">Lead Rigging Crew</div>
-          </div>
-        </div>
+        </button>
 
-        <div>
-          <button
-            onClick={() => handleNav('login')}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs text-rose-600 bg-rose-50 hover:bg-rose-100 font-semibold transition-colors border border-rose-200"
-          >
-            <IconLogOut className="w-4 h-4" />
-            Log Out Crew
-          </button>
-        </div>
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs text-rose-600 bg-rose-50 hover:bg-rose-100 font-semibold transition-colors border border-rose-200 cursor-pointer"
+        >
+          <IconLogOut className="w-4 h-4" />
+          Log Out Crew
+        </button>
       </div>
     </div>
   );
@@ -124,7 +189,7 @@ export function CrewLayout({
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileSidebarOpen(true)}
-              className="p-2 rounded-xl text-[var(--ink)] hover:bg-black/5 transition-colors"
+              className="p-2 rounded-xl text-[var(--ink)] hover:bg-black/5 transition-colors cursor-pointer"
             >
               <IconMenu className="w-5 h-5" />
             </button>
@@ -132,8 +197,8 @@ export function CrewLayout({
           </div>
         </header>
 
-        {/* Page Children Container */}
-        <main className="flex-1 p-4 sm:p-6 md:p-8 max-w-7xl w-full mx-auto">
+        {/* Page Children Container - Wide, Spacious & Smooth Blur-in Transition */}
+        <main key={page} className="animate-blur-in flex-1 p-4 sm:p-6 md:p-8 2xl:p-10 max-w-7xl 2xl:max-w-[1600px] w-full mx-auto overflow-x-hidden">
           {children}
         </main>
       </div>

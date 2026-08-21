@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Page } from '../../types';
-import { IconMenu, IconX, IconLogOut } from '../shared/icons';
+import { IconMenu, IconX, IconLogOut, IconUser } from '../shared/icons';
 import { Logo } from './Logo';
+import { supabase } from '../../utils/supabase';
 
 export function CustomerHeader({
   page,
@@ -13,10 +14,67 @@ export function CustomerHeader({
   wishlistCount?: number;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [customerName, setCustomerName] = useState('Customer');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+  // Load and listen to Supabase customer user state
+  useEffect(() => {
+    async function fetchCustomerProfile() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const meta = user.user_metadata || {};
+        let name = meta.full_name || (meta.first_name ? `${meta.first_name} ${meta.last_name || ''}`.trim() : '');
+        let avatar = meta.avatar_url || null;
+
+        // Fetch latest profile from database
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name, first_name, last_name, avatar_url')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (profile) {
+          if (profile.full_name) name = profile.full_name;
+          else if (profile.first_name) name = `${profile.first_name} ${profile.last_name || ''}`.trim();
+          if (profile.avatar_url) avatar = profile.avatar_url;
+        }
+
+        if (name) {
+          setCustomerName(name);
+        }
+        setAvatarUrl(avatar);
+      } catch (err) {
+        console.error('Error fetching customer profile for header:', err);
+      }
+    }
+
+    fetchCustomerProfile();
+
+    // Subscribe to auth state changes for real-time updates
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      fetchCustomerProfile();
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   const handleNav = (target: Page) => {
     setMobileOpen(false);
     go(target);
+  };
+
+  const handleLogout = async () => {
+    setMobileOpen(false);
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+    go('landing');
   };
 
   const navItem = (label: string, target: Page, count?: number) => (
@@ -67,18 +125,26 @@ export function CustomerHeader({
             }`}
             title="Open Account Profile"
           >
-            <span className="w-7 h-7 rounded-full bg-[#1090F8] text-white text-[11px] font-extrabold flex items-center justify-center shrink-0">
-              JD
-            </span>
-            <span className="text-sm font-medium">Juan Dela Cruz</span>
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={customerName}
+                className="w-7 h-7 rounded-full object-cover border border-[#24252c]/10 shrink-0"
+              />
+            ) : (
+              <span className="w-7 h-7 rounded-full bg-white text-[var(--ink)] border border-[#24252c]/15 shadow-xs flex items-center justify-center shrink-0">
+                <IconUser className="w-4 h-4" />
+              </span>
+            )}
+            <span className="text-sm font-medium">{customerName}</span>
             <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-400/20 text-amber-600 px-2 py-0.5 rounded-full">
               VIP Gold
             </span>
           </button>
 
           <button
-            onClick={() => handleNav('landing')}
-            className="p-2 rounded-full border border-rose-200 text-rose-600 hover:bg-rose-50 hover:border-rose-300 transition-colors outline-none focus:outline-none"
+            onClick={handleLogout}
+            className="p-2 rounded-full border border-rose-200 text-rose-600 hover:bg-rose-50 hover:border-rose-300 transition-colors outline-none focus:outline-none cursor-pointer"
             title="Log out"
             aria-label="Log out"
           >
@@ -102,10 +168,10 @@ export function CustomerHeader({
           {navItem('Profile Settings', 'profile')}
           <div className="h-px bg-[#24252c]/[0.06] my-1" />
           <button
-            onClick={() => handleNav('landing')}
-            className="w-full text-left px-4 py-2 rounded-full text-sm font-medium text-rose-600 hover:bg-rose-50 flex items-center gap-2"
+            onClick={handleLogout}
+            className="w-full text-left px-4 py-2 rounded-full text-sm font-medium text-rose-600 hover:bg-rose-50 flex items-center gap-2 cursor-pointer"
           >
-            <IconLogOut className="w-4 h-4" /> Log out
+            <IconLogOut className="w-4 h-4" /> Log out ({customerName})
           </button>
         </div>
       )}

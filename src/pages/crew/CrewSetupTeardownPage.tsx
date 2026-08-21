@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
 import { IconCheck, IconBox, IconCalendar, IconPin, IconX, IconShield } from '../../components/shared/icons';
+import { ModalOverlay } from '../../components/shared/ModalOverlay';
 
 export interface SetupStage {
   id: string;
@@ -171,9 +172,9 @@ export default function CrewSetupTeardownPage({ go }: { go: (p: Page) => void })
 
       {/* Confirmation Modal */}
       {confirmCompleteModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setConfirmCompleteModal(false)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative text-center">
-            <button onClick={() => setConfirmCompleteModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setConfirmCompleteModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 font-extrabold text-xl flex items-center justify-center mx-auto mb-3 border border-emerald-200">
@@ -187,28 +188,22 @@ export default function CrewSetupTeardownPage({ go }: { go: (p: Page) => void })
             <div className="flex items-center gap-3 text-xs">
               <button
                 onClick={() => setConfirmCompleteModal(false)}
-                className="flex-1 bg-[var(--mist)] text-[var(--ink)] font-semibold py-3 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors"
+                className="flex-1 bg-[var(--mist)] text-[var(--ink)] font-semibold py-3 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={() => {
-                  setStages((prev) =>
-                    prev.map((st) => ({
-                      ...st,
-                      completed: true,
-                      completedAt: st.completedAt || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    }))
-                  );
+                  setStages((prev) => prev.map((s) => ({ ...s, completed: true })));
                   setConfirmCompleteModal(false);
                 }}
-                className="flex-1 bg-emerald-600 text-white font-semibold py-3 rounded-full hover:bg-emerald-700 transition-colors shadow-md"
+                className="flex-1 bg-emerald-600 text-white font-semibold py-3 rounded-full hover:bg-emerald-700 transition-colors shadow-md cursor-pointer"
               >
-                Confirm Complete
+                Yes, Complete Event
               </button>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

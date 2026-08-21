@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
 import { IconTicket, IconX } from '../../components/shared/icons';
+import { ModalOverlay } from '../../components/shared/ModalOverlay';
 
 export default function AdminReportsPage({ go }: { go: (p: Page) => void }) {
   const [showPdfModal, setShowPdfModal] = useState(false);
@@ -28,7 +29,7 @@ export default function AdminReportsPage({ go }: { go: (p: Page) => void }) {
 
         <button
           onClick={() => setShowPdfModal(true)}
-          className="bg-[var(--ink)] text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-sm self-start sm:self-auto"
+          className="bg-[var(--ink)] text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-sm self-start sm:self-auto cursor-pointer"
         >
           Export System Report PDF
         </button>
@@ -45,9 +46,9 @@ export default function AdminReportsPage({ go }: { go: (p: Page) => void }) {
       </div>
 
       {showPdfModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-blur-in">
+        <ModalOverlay onClose={() => setShowPdfModal(false)}>
           <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl border border-[#24252c]/10 relative text-center">
-            <button onClick={() => setShowPdfModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1">
+            <button onClick={() => setShowPdfModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
               <IconX className="w-5 h-5" />
             </button>
             <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 font-extrabold text-xl flex items-center justify-center mx-auto mb-3 border border-emerald-200">
@@ -59,12 +60,12 @@ export default function AdminReportsPage({ go }: { go: (p: Page) => void }) {
             </p>
             <button
               onClick={() => setShowPdfModal(false)}
-              className="w-full bg-[var(--ink)] text-white font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors"
+              className="w-full bg-[var(--ink)] text-white font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
             >
               Done
             </button>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );
