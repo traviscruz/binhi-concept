@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from 'react';
-
 import { MonoBadge } from './Badges';
+import binhiLogo from '../../assets/branding/BINHI Concept Logo.webp';
 
 export function AuthShell({
   badgeText,
@@ -20,6 +20,11 @@ export function AuthShell({
   return (
     <section className="min-h-screen flex flex-col items-center justify-center py-12 px-6 relative bg-white">
       <div className="w-full max-w-md">
+        {/* Logo */}
+        <div className="flex justify-center mb-8">
+          <img src={binhiLogo} alt="BINHI Concept" className="h-10 w-auto object-contain" draggable={false} />
+        </div>
+
         {onBack && (
           <button
             onClick={onBack}

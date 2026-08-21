@@ -21,6 +21,12 @@ export function ModalOverlay({ children, onClose, className = '', isOpen }: Moda
     if (isOpen) {
       setShouldRender(true);
       setAnimatingOut(false);
+
+      // Prevent scrollbar layout shifting when locking body overflow
+      const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+      if (scrollbarWidth > 0) {
+        document.body.style.paddingRight = `${scrollbarWidth}px`;
+      }
       document.body.style.overflow = 'hidden';
     } else {
       setAnimatingOut(true);
@@ -28,6 +34,8 @@ export function ModalOverlay({ children, onClose, className = '', isOpen }: Moda
       const timer = setTimeout(() => {
         setShouldRender(false);
         setAnimatingOut(false);
+        document.body.style.overflow = '';
+        document.body.style.paddingRight = '';
       }, 300); // Match transition duration
       return () => clearTimeout(timer);
     }
@@ -49,10 +57,18 @@ export function ModalOverlay({ children, onClose, className = '', isOpen }: Moda
   // Handle body overflow in uncontrolled mode
   useEffect(() => {
     if (!isControlled) {
+      const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
       const originalOverflow = document.body.style.overflow;
+      const originalPadding = document.body.style.paddingRight;
+
+      if (scrollbarWidth > 0) {
+        document.body.style.paddingRight = `${scrollbarWidth}px`;
+      }
       document.body.style.overflow = 'hidden';
+
       return () => {
         document.body.style.overflow = originalOverflow;
+        document.body.style.paddingRight = originalPadding;
       };
     }
   }, [isControlled]);
@@ -71,7 +87,7 @@ export function ModalOverlay({ children, onClose, className = '', isOpen }: Moda
       }}
     >
       <div
-        className={`transition-all duration-300 cubic-bezier(0.16, 1, 0.3, 1) transform ${
+        className={`transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] transform ${
           active && !animatingOut
             ? 'scale-100 opacity-100 blur-none translate-y-0'
             : 'scale-95 opacity-0 blur-sm -translate-y-2'
@@ -83,4 +99,3 @@ export function ModalOverlay({ children, onClose, className = '', isOpen }: Moda
     document.body
   );
 }
-

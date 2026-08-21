@@ -78,7 +78,10 @@ export default function LoginPage({ go }: { go: (p: Page) => void }) {
 
       // Determine target portal page
       let target: Page = 'booking-tracker';
-      if (userRole === 'admin') target = 'admin-dashboard';
+      if (localStorage.getItem('binhi_pending_checkout') === 'true' && userRole === 'customer') {
+        target = 'checkout';
+        localStorage.removeItem('binhi_pending_checkout');
+      } else if (userRole === 'admin') target = 'admin-dashboard';
       else if (userRole === 'inventory_manager') target = 'inventory-dashboard';
       else if (userRole === 'crew') target = 'crew-assigned-bookings';
 
@@ -262,99 +265,97 @@ export default function LoginPage({ go }: { go: (p: Page) => void }) {
       </div>
 
       {/* MANDATORY FIRST-TIME PASSWORD CHANGE MODAL */}
-      {showForcePasswordModal && (
-        <ModalOverlay>
-          <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <div className="text-center mb-5">
-              <span className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 font-bold text-lg flex items-center justify-center mx-auto mb-3">
-                <IconShield className="w-6 h-6" />
-              </span>
-              <h3 className="text-2xl font-extrabold text-[var(--ink)]">First-Time Login</h3>
-              <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
-                As an Admin logging in for the first time, you must replace your temporary initial password with a new personal password.
-              </p>
+      <ModalOverlay isOpen={showForcePasswordModal}>
+        <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
+          <div className="text-center mb-5">
+            <span className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 font-bold text-lg flex items-center justify-center mx-auto mb-3">
+              <IconShield className="w-6 h-6" />
+            </span>
+            <h3 className="text-2xl font-extrabold text-[var(--ink)]">First-Time Login</h3>
+            <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
+              As an Admin logging in for the first time, you must replace your temporary initial password with a new personal password.
+            </p>
+          </div>
+
+          {changePasswordError && (
+            <div className="mb-4 p-3.5 rounded-2xl text-xs bg-rose-50 border border-rose-200 text-rose-700 font-medium">
+              {changePasswordError}
+            </div>
+          )}
+
+          <form onSubmit={handleForcePasswordChange} className="space-y-4">
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-1">
+                New Password
+              </label>
+              <div className="relative">
+                <input
+                  type={showNewPassword ? 'text' : 'password'}
+                  required
+                  placeholder="Enter new password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className={inputClass + ' pr-12 text-xs'}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword((v) => !v)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+                >
+                  {showNewPassword ? <IconEyeOff className="w-4 h-4" /> : <IconEye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
 
-            {changePasswordError && (
-              <div className="mb-4 p-3.5 rounded-2xl text-xs bg-rose-50 border border-rose-200 text-rose-700 font-medium">
-                {changePasswordError}
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-1">
+                Confirm New Password
+              </label>
+              <div className="relative">
+                <input
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  required
+                  placeholder="Confirm new password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className={inputClass + ' pr-12 text-xs'}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword((v) => !v)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+                >
+                  {showConfirmPassword ? <IconEyeOff className="w-4 h-4" /> : <IconEye className="w-4 h-4" />}
+                </button>
               </div>
+            </div>
+
+            <PasswordChecklist password={newPassword} />
+
+            {isSameAsCurrentPassword && (
+              <p className="text-[11px] text-rose-500 font-semibold ml-2">
+                New password must be different from your current temporary password.
+              </p>
             )}
 
-            <form onSubmit={handleForcePasswordChange} className="space-y-4">
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-1">
-                  New Password
-                </label>
-                <div className="relative">
-                  <input
-                    type={showNewPassword ? 'text' : 'password'}
-                    required
-                    placeholder="Enter new password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className={inputClass + ' pr-12 text-xs'}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowNewPassword((v) => !v)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
-                  >
-                    {showNewPassword ? <IconEyeOff className="w-4 h-4" /> : <IconEye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
+            {newPassword && confirmPassword && newPassword !== confirmPassword && (
+              <p className="text-[11px] text-rose-500 ml-2">Passwords do not match.</p>
+            )}
 
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-1">
-                  Confirm New Password
-                </label>
-                <div className="relative">
-                  <input
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    required
-                    placeholder="Confirm new password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className={inputClass + ' pr-12 text-xs'}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword((v) => !v)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
-                  >
-                    {showConfirmPassword ? <IconEyeOff className="w-4 h-4" /> : <IconEye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <PasswordChecklist password={newPassword} />
-
-              {isSameAsCurrentPassword && (
-                <p className="text-[11px] text-rose-500 font-semibold ml-2">
-                  New password must be different from your current temporary password.
-                </p>
+            <button
+              type="submit"
+              disabled={changePasswordLoading || !isNewPasswordValid}
+              className="w-full bg-[var(--ink)] text-white text-xs font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-md disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer mt-4"
+            >
+              {changePasswordLoading ? (
+                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+              ) : (
+                'Update Password & Continue'
               )}
-
-              {newPassword && confirmPassword && newPassword !== confirmPassword && (
-                <p className="text-[11px] text-rose-500 ml-2">Passwords do not match.</p>
-              )}
-
-              <button
-                type="submit"
-                disabled={changePasswordLoading || !isNewPasswordValid}
-                className="w-full bg-[var(--ink)] text-white text-xs font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-md disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer mt-4"
-              >
-                {changePasswordLoading ? (
-                  <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                ) : (
-                  'Update Password & Continue'
-                )}
-              </button>
-            </form>
-          </div>
-        </ModalOverlay>
-      )}
+            </button>
+          </form>
+        </div>
+      </ModalOverlay>
     </AuthShell>
   );
 }

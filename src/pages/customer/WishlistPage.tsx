@@ -1,20 +1,25 @@
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { FEATURED_PACKAGES } from '../../data/packages';
+import { FEATURED_PACKAGES, type PackageData } from '../../data/packages';
 import { IconHeart, IconArrow } from '../../components/shared/icons';
+import { EmptyState } from '../../components/shared/EmptyState';
+import { ImageWithSkeleton } from '../../components/shared/ImageWithSkeleton';
 
 export default function WishlistPage({
   go,
   goPackageDetail,
   wishlistIds = [],
   toggleWishlist,
+  packages = [],
 }: {
   go: (p: Page) => void;
   goPackageDetail: (id: string) => void;
   wishlistIds?: string[];
   toggleWishlist?: (id: string) => void;
+  packages?: PackageData[];
 }) {
-  const wishlistItems = FEATURED_PACKAGES.filter((pkg) => wishlistIds.includes(pkg.id));
+  const allPackages = packages && packages.length > 0 ? packages : FEATURED_PACKAGES;
+  const wishlistItems = allPackages.filter((pkg) => wishlistIds.includes(pkg.id));
 
   return (
     <section className="pt-36 pb-24 px-6 min-h-screen bg-white">
@@ -37,18 +42,12 @@ export default function WishlistPage({
           </div>
 
           {wishlistItems.length === 0 ? (
-            <div className="text-center py-16 bg-[var(--mist)] rounded-2xl border border-[#24252c]/[0.05]">
-              <span className="w-12 h-12 rounded-full bg-white text-[#24252c]/40 flex items-center justify-center mx-auto mb-3 shadow-sm">
-                <IconHeart className="w-6 h-6" />
-              </span>
-              <h3 className="font-bold text-base text-[var(--ink)]">Your wishlist is empty</h3>
-              <p className="text-xs text-[#24252c]/50 mt-1">Browse packages and click "Add to Wishlist" to save setups.</p>
-              <button
-                onClick={() => go('packages')}
-                className="mt-5 bg-[var(--ink)] text-white text-xs font-semibold px-6 py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors"
-              >
-                Browse Packages
-              </button>
+            <div className="bg-[var(--mist)] rounded-2xl border border-[#24252c]/[0.05]">
+              <EmptyState
+                icon={IconHeart}
+                title="Your Wishlist is Empty"
+                description="Browse packages and click 'Add to Wishlist' to save your favourite event setups here."
+              />
             </div>
           ) : (
             <div className="grid md:grid-cols-2 gap-6">
@@ -59,7 +58,7 @@ export default function WishlistPage({
                 >
                   <div>
                     <div className="aspect-[16/9] rounded-xl overflow-hidden mb-4 relative bg-white">
-                      <img src={pkg.img} alt={pkg.name} className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-500" />
+                      <ImageWithSkeleton src={pkg.img} alt={pkg.name} className="w-full h-full group-hover:scale-[1.03] transition-transform duration-500" />
                       <button
                         onClick={() => toggleWishlist?.(pkg.id)}
                         className="absolute top-3 right-3 bg-white/90 hover:bg-rose-50 hover:text-rose-600 text-[var(--ink)] text-xs font-semibold px-3 py-1 rounded-full border border-black/10 transition-colors shadow-sm"

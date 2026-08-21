@@ -18,14 +18,18 @@ export function AdminLayout({
   inquiryCount?: number;
 }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [adminName, setAdminName] = useState('Francis Cruz');
+  const [adminName, setAdminName] = useState('');
   const [adminAvatar, setAdminAvatar] = useState<string | null>(null);
+  const [loadingProfile, setLoadingProfile] = useState(true);
 
   useEffect(() => {
     async function fetchAdminProfile() {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!user) {
+          setAdminName('Admin');
+          return;
+        }
 
         const meta = user.user_metadata || {};
         let name = meta.full_name || (meta.first_name ? `${meta.first_name} ${meta.last_name || ''}`.trim() : '');
@@ -43,10 +47,13 @@ export function AdminLayout({
           if (profile.avatar_url) avatar = profile.avatar_url;
         }
 
-        if (name) setAdminName(name);
+        setAdminName(name || 'Admin');
         setAdminAvatar(avatar);
       } catch (err) {
         console.error('Error loading admin header profile:', err);
+        setAdminName('Admin');
+      } finally {
+        setLoadingProfile(false);
       }
     }
 
@@ -109,7 +116,7 @@ export function AdminLayout({
       {/* Mobile Top Bar */}
       <div className="lg:hidden bg-white border-b border-[#24252c]/[0.08] text-[var(--ink)] px-4 py-3 flex items-center justify-between sticky top-0 z-40 shadow-sm">
         <div className="flex items-center gap-2">
-          <button onClick={() => handleNav('landing')}>
+          <button onClick={() => handleNav('admin-dashboard')}>
             <Logo />
           </button>
           <span className="text-[10px] uppercase font-bold tracking-wider bg-[var(--mist)] text-[var(--ink)] px-2 py-0.5 rounded-full border border-[#24252c]/10">
@@ -132,7 +139,7 @@ export function AdminLayout({
       >
         <div>
           <div className="pb-4 mb-4 border-b border-[#24252c]/[0.08] flex items-center justify-between">
-            <button onClick={() => handleNav('landing')} className="outline-none cursor-pointer">
+            <button onClick={() => handleNav('admin-dashboard')} className="outline-none cursor-pointer">
               <Logo />
             </button>
           </div>
@@ -173,7 +180,11 @@ export function AdminLayout({
                 </span>
               )}
               <div className="min-w-0">
-                <div className="text-xs font-bold truncate">{adminName}</div>
+                {loadingProfile ? (
+                  <div className="h-3.5 w-20 bg-black/10 animate-pulse rounded my-0.5" />
+                ) : (
+                  <div className="text-xs font-bold truncate">{adminName}</div>
+                )}
                 <div className={`text-[10px] truncate ${page === 'admin-profile' ? 'text-white/70' : 'text-[#24252c]/50'}`}>
                   Admin Account
                 </div>

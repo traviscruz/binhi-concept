@@ -8,7 +8,7 @@ export function InventoryLayout({
   page,
   go,
   children,
-  alertCount = 3,
+  alertCount,
 }: {
   page: Page;
   go: (p: Page) => void;
@@ -16,8 +16,46 @@ export function InventoryLayout({
   alertCount?: number;
 }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [managerName, setManagerName] = useState('Ely Buendia');
+  const [managerName, setManagerName] = useState('');
   const [managerAvatar, setManagerAvatar] = useState<string | null>(null);
+  const [dynamicAlertCount, setDynamicAlertCount] = useState<number>(0);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+
+  const fetchActiveAlertsCount = async () => {
+    try {
+      let count = 0;
+
+      // 1. Count physical units requiring maintenance/inspection
+      const { data: units } = await supabase
+        .from('physical_units')
+        .select('condition, status');
+
+      if (units) {
+        count += units.filter(
+          (u: any) =>
+            u.condition === 'In Repair' ||
+            u.condition === 'Needs Inspection' ||
+            u.condition === 'Minor Wear' ||
+            u.status === 'Maintenance / Repair' ||
+            u.status === 'Decommissioned / Inactive'
+        ).length;
+      }
+
+      // 2. Count active logged maintenance alerts
+      const { data: customAlerts } = await supabase
+        .from('inventory_alerts')
+        .select('id, alert_type')
+        .eq('status', 'active');
+
+      if (customAlerts) {
+        count += customAlerts.filter((ca: any) => ca.alert_type !== 'Low Stock Warning').length;
+      }
+
+      setDynamicAlertCount(count);
+    } catch (err) {
+      console.warn('Error fetching dynamic alerts count for menu bar:', err);
+    }
+  };
 
   useEffect(() => {
     async function fetchInventoryProfile() {
@@ -41,23 +79,49 @@ export function InventoryLayout({
           if (profile.avatar_url) avatar = profile.avatar_url;
         }
 
-        if (name) setManagerName(name);
+        setManagerName(name || 'Inventory Manager');
         setManagerAvatar(avatar);
       } catch (err) {
         console.error('Error loading inventory profile for layout:', err);
+        setManagerName('Inventory Manager');
+      } finally {
+        setLoadingProfile(false);
       }
     }
 
     fetchInventoryProfile();
+    fetchActiveAlertsCount();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
       fetchInventoryProfile();
+      fetchActiveAlertsCount();
     });
+
+    // Custom Event & Realtime listeners for immediate dynamic count updates
+    const handleInventoryUpdated = () => {
+      fetchActiveAlertsCount();
+    };
+
+    window.addEventListener('inventory-updated', handleInventoryUpdated);
+
+    const channel = supabase
+      .channel('inventory_alerts_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'physical_units' }, () => {
+        fetchActiveAlertsCount();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_alerts' }, () => {
+        fetchActiveAlertsCount();
+      })
+      .subscribe();
 
     return () => {
       subscription.unsubscribe();
+      window.removeEventListener('inventory-updated', handleInventoryUpdated);
+      supabase.removeChannel(channel);
     };
-  }, []);
+  }, [page]);
+
+  const activeAlertCount = alertCount !== undefined ? alertCount : dynamicAlertCount;
 
   const handleNav = (target: Page) => {
     setMobileSidebarOpen(false);
@@ -107,7 +171,7 @@ export function InventoryLayout({
       {/* Mobile Top Bar */}
       <div className="lg:hidden bg-white border-b border-[#24252c]/[0.08] text-[var(--ink)] px-4 py-3 flex items-center justify-between sticky top-0 z-40 shadow-sm">
         <div className="flex items-center gap-2">
-          <button onClick={() => handleNav('landing')}>
+          <button onClick={() => handleNav('inventory-dashboard')}>
             <Logo />
           </button>
           <span className="text-[10px] uppercase font-bold tracking-wider bg-[var(--mist)] text-[var(--ink)] px-2 py-0.5 rounded-full border border-[#24252c]/10">
@@ -130,16 +194,16 @@ export function InventoryLayout({
       >
         <div>
           <div className="pb-4 mb-4 border-b border-[#24252c]/[0.08] flex items-center justify-between">
-            <button onClick={() => handleNav('landing')} className="outline-none cursor-pointer">
+            <button onClick={() => handleNav('inventory-dashboard')} className="outline-none cursor-pointer">
               <Logo />
             </button>
           </div>
 
           <nav className="space-y-1.5">
             {navItem('Overview KPI', 'inventory-dashboard', <IconBox className="w-4 h-4" />)}
-            {navItem('Equipment List (CRUD)', 'inventory-items', <IconTicket className="w-4 h-4" />)}
+            {navItem('Equipment List', 'inventory-items', <IconTicket className="w-4 h-4" />)}
             {navItem('Unit Assignments', 'inventory-units', <IconShield className="w-4 h-4" />)}
-            {navItem('Alerts & Repairs', 'inventory-alerts', <IconBox className="w-4 h-4" />, alertCount)}
+            {navItem('Alerts & Repairs', 'inventory-alerts', <IconBox className="w-4 h-4" />, activeAlertCount)}
             {navItem('Usage Reports', 'inventory-reports', <IconTicket className="w-4 h-4" />)}
           </nav>
         </div>
@@ -166,7 +230,11 @@ export function InventoryLayout({
                 </span>
               )}
               <div className="min-w-0">
-                <div className="text-xs font-bold truncate">{managerName}</div>
+                {loadingProfile ? (
+                  <div className="h-3.5 w-20 bg-black/10 animate-pulse rounded my-0.5" />
+                ) : (
+                  <div className="text-xs font-bold truncate">{managerName}</div>
+                )}
                 <div className={`text-[10px] truncate ${page === 'inventory-profile' ? 'text-white/70' : 'text-[#24252c]/50'}`}>
                   Inventory Manager
                 </div>

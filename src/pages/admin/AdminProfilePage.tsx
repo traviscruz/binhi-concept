@@ -16,9 +16,9 @@ const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp
 
 export default function AdminProfilePage({ go }: { go: (p: Page) => void }) {
   const [userId, setUserId] = useState<string | null>(null);
-  const [firstName, setFirstName] = useState('System');
-  const [lastName, setLastName] = useState('Admin');
-  const [email, setEmail] = useState('admin@binhiconcept.com');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
   const [countryCode, setCountryCode] = useState('+63');
   const [phoneDigits, setPhoneDigits] = useState('');
   const [isPhoneVerified, setIsPhoneVerified] = useState(true);
@@ -41,7 +41,7 @@ export default function AdminProfilePage({ go }: { go: (p: Page) => void }) {
   
   const [profileSuccessMsg, setProfileSuccessMsg] = useState('');
   const [profileErrorMsg, setProfileErrorMsg] = useState('');
-  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   const [passwordSuccessMsg, setPasswordSuccessMsg] = useState('');
   const [passwordErrorMsg, setPasswordErrorMsg] = useState('');
@@ -96,6 +96,8 @@ export default function AdminProfilePage({ go }: { go: (p: Page) => void }) {
         }
       } catch (err) {
         console.error('Error loading admin profile:', err);
+      } finally {
+        setProfileLoading(false);
       }
     }
 
@@ -661,103 +663,92 @@ export default function AdminProfilePage({ go }: { go: (p: Page) => void }) {
       </div>
 
       {/* OTP MODAL */}
-      {showPasswordOtpModal && (
-        <ModalOverlay onClose={() => setShowPasswordOtpModal(false)}>
-          <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button
-              type="button"
-              onClick={() => setShowPasswordOtpModal(false)}
-              className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
-            >
-              <IconX className="w-5 h-5" />
-            </button>
+      <ModalOverlay isOpen={showPasswordOtpModal} onClose={() => setShowPasswordOtpModal(false)}>
+        <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
+          <button
+            type="button"
+            onClick={() => setShowPasswordOtpModal(false)}
+            className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+          >
+            <IconX className="w-5 h-5" />
+          </button>
 
-            <div className="text-center mb-6">
-              <span className="w-12 h-12 rounded-full bg-[#1090F8]/10 text-[#1090F8] font-bold text-lg flex items-center justify-center mx-auto mb-3">
-                <IconShield className="w-6 h-6" />
-              </span>
-              <h3 className="text-2xl font-extrabold text-[var(--ink)]">Verify Password Change</h3>
-              <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
-                We sent a 6-digit verification code to <strong className="text-[var(--ink)]">{email}</strong>. Enter it below to update your Admin password.
-              </p>
-            </div>
-
-            {passwordInfoMsg && (
-              <div className="mb-4 p-3 rounded-xl text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 font-medium">
-                {passwordInfoMsg}
-              </div>
-            )}
-
-            {passwordErrorMsg && (
-              <div className="mb-4 p-3 rounded-xl text-xs bg-rose-50 border border-rose-200 text-rose-700 font-medium">
-                {passwordErrorMsg}
-              </div>
-            )}
-
-            <div className="my-6">
-              <OtpInput
-                value={passwordOtpToken}
-                onChange={(val) => setPasswordOtpToken(val)}
-                onResend={handleResendPasswordOtp}
-                disabled={passwordLoading}
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={handleConfirmPasswordChangeWithOtp}
-              disabled={passwordLoading || passwordOtpToken.length < 6}
-              className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors text-xs disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
-            >
-              {passwordLoading ? (
-                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-              ) : (
-                'Confirm & Save New Password'
-              )}
-            </button>
+          <div className="text-center mb-6">
+            <span className="w-12 h-12 rounded-full bg-[#1090F8]/10 text-[#1090F8] font-bold text-lg flex items-center justify-center mx-auto mb-3">
+              <IconShield className="w-6 h-6" />
+            </span>
+            <h3 className="text-2xl font-extrabold text-[var(--ink)]">Verify Password Change</h3>
+            <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
+              We sent a 6-digit verification code to <strong className="text-[var(--ink)]">{email}</strong>. Enter it below to update your Admin password.
+            </p>
           </div>
-        </ModalOverlay>
-      )}
+
+          {passwordInfoMsg && (
+            <div className="mb-4 p-3 rounded-xl text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 font-medium">
+              {passwordInfoMsg}
+            </div>
+          )}
+
+          {passwordErrorMsg && (
+            <div className="mb-4 p-3 rounded-xl text-xs bg-rose-50 border border-rose-200 text-rose-700 font-medium">
+              {passwordErrorMsg}
+            </div>
+          )}
+
+          <div className="my-6">
+            <OtpInput
+              value={passwordOtpToken}
+              onChange={(val) => setPasswordOtpToken(val)}
+              onResend={handleResendPasswordOtp}
+              disabled={passwordLoading}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={handleConfirmPasswordChangeWithOtp}
+            disabled={passwordLoading || passwordOtpToken.length < 6}
+            className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors text-xs disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+          >
+            {passwordLoading ? (
+              <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+            ) : (
+              'Confirm & Save New Password'
+            )}
+          </button>
+        </div>
+      </ModalOverlay>
 
       {/* Static Phone Modal */}
-      {showPhoneModal && (
-        <ModalOverlay onClose={() => setShowPhoneModal(false)}>
-          <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button
-              type="button"
-              onClick={() => setShowPhoneModal(false)}
-              className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
-            >
-              <IconX className="w-5 h-5" />
-            </button>
+      <ModalOverlay isOpen={showPhoneModal} onClose={() => setShowPhoneModal(false)}>
+        <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
+          <button
+            type="button"
+            onClick={() => setShowPhoneModal(false)}
+            className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+          >
+            <IconX className="w-5 h-5" />
+          </button>
 
-            <div className="text-center mb-6">
-              <span className="w-12 h-12 rounded-full bg-[#1090F8]/10 text-[#1090F8] font-bold text-lg flex items-center justify-center mx-auto mb-3">
-                <IconShield className="w-6 h-6" />
-              </span>
-              <h3 className="text-2xl font-extrabold text-[var(--ink)]">Verify Phone Number</h3>
-              <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
-                Demo: Verification code sent to phone.
-              </p>
-            </div>
-
-            <div className="my-6">
-              <OtpInput />
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setIsPhoneVerified(true);
-                setShowPhoneModal(false);
-              }}
-              className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors text-xs cursor-pointer"
-            >
-              Confirm Verification Code
-            </button>
+          <div className="text-center mb-6">
+            <span className="w-12 h-12 rounded-full bg-[#1090F8]/10 text-[#1090F8] font-bold text-lg flex items-center justify-center mx-auto mb-3">
+              <IconShield className="w-6 h-6" />
+            </span>
+            <h3 className="text-2xl font-extrabold text-[var(--ink)]">Verify Phone Number</h3>
+            <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
+              Demo: Verification code sent to phone.
+            </p>
           </div>
-        </ModalOverlay>
-      )}
+
+          <button
+            type="button"
+            onClick={() => setShowPhoneModal(false)}
+            className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors text-xs cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
+      </ModalOverlay>
     </div>
   );
 }

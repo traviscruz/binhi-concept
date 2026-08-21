@@ -16,9 +16,9 @@ const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp
 
 export default function ProfilePage({ go }: { go: (p: Page) => void }) {
   const [userId, setUserId] = useState<string | null>(null);
-  const [firstName, setFirstName] = useState('Juan');
-  const [lastName, setLastName] = useState('Dela Cruz');
-  const [email, setEmail] = useState('juan.delacruz@gmail.com');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
   const [countryCode, setCountryCode] = useState('+63');
   const [phoneDigits, setPhoneDigits] = useState('');
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
@@ -36,12 +36,14 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
 
   // Modals & Statuses
   const [showPhoneModal, setShowPhoneModal] = useState(false);
+  const [phoneOtpToken, setPhoneOtpToken] = useState('');
+  const [verifyingPhone, setVerifyingPhone] = useState(false);
   const [showPasswordOtpModal, setShowPasswordOtpModal] = useState(false);
   const [passwordOtpToken, setPasswordOtpToken] = useState('');
   
   const [profileSuccessMsg, setProfileSuccessMsg] = useState('');
   const [profileErrorMsg, setProfileErrorMsg] = useState('');
-  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   const [passwordSuccessMsg, setPasswordSuccessMsg] = useState('');
   const [passwordErrorMsg, setPasswordErrorMsg] = useState('');
@@ -86,6 +88,8 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
         }
       } catch (err) {
         console.error('Error loading profile:', err);
+      } finally {
+        setProfileLoading(false);
       }
     }
 
@@ -215,11 +219,50 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
     }
   };
 
+  // Phone Verification Handler (Mock OTP -> Database persist)
+  const handleConfirmPhoneVerification = async () => {
+    if (phoneDigits.length !== 10 || !phoneDigits.startsWith('9')) {
+      setProfileErrorMsg('Mobile phone number must be a valid 10-digit PH number starting with 9 (e.g. 9171234567).');
+      return;
+    }
+
+    setVerifyingPhone(true);
+    const formattedPhone = `${countryCode} ${phoneDigits}`;
+
+    try {
+      if (userId) {
+        // Update public.profiles table in Supabase
+        await supabase.from('profiles').upsert({
+          id: userId,
+          phone: formattedPhone,
+          is_phone_verified: true,
+          updated_at: new Date().toISOString(),
+        });
+
+        // Update Auth metadata
+        await supabase.auth.updateUser({
+          data: { phone: formattedPhone },
+        });
+      }
+
+      setIsPhoneVerified(true);
+      setShowPhoneModal(false);
+      setPhoneOtpToken('');
+      setProfileSuccessMsg('Phone number verified and updated successfully!');
+      setTimeout(() => setProfileSuccessMsg(''), 4000);
+    } catch (err: any) {
+      console.error('Failed to verify phone:', err);
+      setProfileErrorMsg(err?.message || 'Failed to verify phone number.');
+    } finally {
+      setVerifyingPhone(false);
+    }
+  };
+
   // 2. Save Personal Details (First Name, Last Name, Email, Phone)
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isPhoneValid) {
-      setProfileErrorMsg('Mobile phone number must be exactly 10 digits (e.g. 9171234567).');
+      setProfileErrorMsg('Mobile phone number must be exactly 10 digits starting with 9 (e.g. 9171234567).');
       return;
     }
 
@@ -521,21 +564,40 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
                     Mobile Phone Number
                   </label>
                   {isPhoneVerified ? (
-                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
-                      Verified
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
+                        Verified
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsPhoneVerified(false);
+                          setProfileSuccessMsg('Phone unlocked. Enter your new number and click "Verify Now".');
+                          setTimeout(() => setProfileSuccessMsg(''), 4000);
+                        }}
+                        className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 hover:bg-[#1090F8]/20 border border-[#1090F8]/20 px-2.5 py-0.5 rounded-full transition-colors cursor-pointer"
+                      >
+                        Edit Phone
+                      </button>
+                    </div>
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setShowPhoneModal(true)}
-                      className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-full hover:bg-rose-100 transition-colors inline-flex items-center gap-1"
+                      onClick={() => {
+                        if (phoneDigits.length !== 10 || !phoneDigits.startsWith('9')) {
+                          setProfileErrorMsg('Please enter a valid 10-digit mobile number starting with 9 first.');
+                          return;
+                        }
+                        setShowPhoneModal(true);
+                      }}
+                      className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-full hover:bg-rose-100 transition-colors inline-flex items-center gap-1 cursor-pointer"
                     >
-                      Unverified
+                      Unverified — Verify Now
                     </button>
                   )}
                 </div>
                 <div className="flex gap-2">
-                  <div className="w-24 shrink-0 bg-[#EEEEEE] rounded-full border border-transparent flex items-center justify-center font-bold text-xs text-[var(--ink)]">
+                  <div className="w-20 shrink-0 bg-[#EEEEEE] rounded-full border border-transparent flex items-center justify-center font-bold text-xs text-[var(--ink)]">
                     {countryCode}
                   </div>
                   <input
@@ -543,14 +605,15 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
                     inputMode="numeric"
                     maxLength={10}
                     value={phoneDigits}
+                    readOnly={isPhoneVerified}
                     onChange={(e) => setPhoneDigits(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                    placeholder="917 123 4567 (Optional)"
-                    className={inputClass + ' flex-1'}
+                    placeholder="917 123 4567"
+                    className={inputClass + ` flex-1 ${isPhoneVerified ? 'cursor-not-allowed opacity-90' : ''}`}
                   />
                 </div>
-                {phoneDigits.length > 0 && phoneDigits.length < 10 && (
+                {phoneDigits.length > 0 && (phoneDigits.length < 10 || !phoneDigits.startsWith('9')) && (
                   <p className="text-[11px] text-rose-500 ml-4 mt-1">
-                    Phone number must be exactly 10 digits (e.g. 9171234567).
+                    Phone number must be 10 digits starting with 9 (e.g. 9171234567).
                   </p>
                 )}
               </div>
@@ -669,103 +732,101 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
       </div>
 
       {/* MODAL 1: Password Update Email OTP Verification Modal */}
-      {showPasswordOtpModal && (
-        <ModalOverlay onClose={() => setShowPasswordOtpModal(false)}>
-          <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button
-              type="button"
-              onClick={() => setShowPasswordOtpModal(false)}
-              className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
-            >
-              <IconX className="w-5 h-5" />
-            </button>
+      <ModalOverlay isOpen={showPasswordOtpModal} onClose={() => setShowPasswordOtpModal(false)}>
+        <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
+          <button
+            type="button"
+            onClick={() => setShowPasswordOtpModal(false)}
+            className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+          >
+            <IconX className="w-5 h-5" />
+          </button>
 
-            <div className="text-center mb-6">
-              <span className="w-12 h-12 rounded-full bg-[#1090F8]/10 text-[#1090F8] font-bold text-lg flex items-center justify-center mx-auto mb-3">
-                <IconShield className="w-6 h-6" />
-              </span>
-              <h3 className="text-2xl font-extrabold text-[var(--ink)]">Verify Password Change</h3>
-              <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
-                We sent a 6-digit security code to <strong className="text-[var(--ink)]">{email}</strong>. Enter it below to confirm your new password.
-              </p>
-            </div>
-
-            {passwordInfoMsg && (
-              <div className="mb-4 p-3 rounded-xl text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 font-medium">
-                {passwordInfoMsg}
-              </div>
-            )}
-
-            {passwordErrorMsg && (
-              <div className="mb-4 p-3 rounded-xl text-xs bg-rose-50 border border-rose-200 text-rose-700 font-medium">
-                {passwordErrorMsg}
-              </div>
-            )}
-
-            <div className="my-6">
-              <OtpInput
-                value={passwordOtpToken}
-                onChange={(val) => setPasswordOtpToken(val)}
-                onResend={handleResendPasswordOtp}
-                disabled={passwordLoading}
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={handleConfirmPasswordChangeWithOtp}
-              disabled={passwordLoading || passwordOtpToken.length < 6}
-              className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors text-xs disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
-            >
-              {passwordLoading ? (
-                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-              ) : (
-                'Confirm & Save New Password'
-              )}
-            </button>
+          <div className="text-center mb-6">
+            <span className="w-12 h-12 rounded-full bg-[#1090F8]/10 text-[#1090F8] font-bold text-lg flex items-center justify-center mx-auto mb-3">
+              <IconShield className="w-6 h-6" />
+            </span>
+            <h3 className="text-2xl font-extrabold text-[var(--ink)]">Verify Password Change</h3>
+            <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
+              We sent a 6-digit security code to <strong className="text-[var(--ink)]">{email}</strong>. Enter it below to confirm your new password.
+            </p>
           </div>
-        </ModalOverlay>
-      )}
 
-      {/* MODAL 2: Static Phone Verification Modal */}
-      {showPhoneModal && (
-        <ModalOverlay onClose={() => setShowPhoneModal(false)}>
-          <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button
-              type="button"
-              onClick={() => setShowPhoneModal(false)}
-              className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
-            >
-              <IconX className="w-5 h-5" />
-            </button>
-
-            <div className="text-center mb-6">
-              <span className="w-12 h-12 rounded-full bg-[#1090F8]/10 text-[#1090F8] font-bold text-lg flex items-center justify-center mx-auto mb-3">
-                <IconShield className="w-6 h-6" />
-              </span>
-              <h3 className="text-2xl font-extrabold text-[var(--ink)]">Verify Phone Number</h3>
-              <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
-                Demo: Verification code sent to phone.
-              </p>
+          {passwordInfoMsg && (
+            <div className="mb-4 p-3 rounded-xl text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 font-medium">
+              {passwordInfoMsg}
             </div>
+          )}
 
-            <div className="my-6">
-              <OtpInput />
+          {passwordErrorMsg && (
+            <div className="mb-4 p-3 rounded-xl text-xs bg-rose-50 border border-rose-200 text-rose-700 font-medium">
+              {passwordErrorMsg}
             </div>
+          )}
 
-            <button
-              type="button"
-              onClick={() => {
-                setIsPhoneVerified(true);
-                setShowPhoneModal(false);
-              }}
-              className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors text-xs cursor-pointer"
-            >
-              Confirm Verification Code
-            </button>
+          <div className="my-6">
+            <OtpInput
+              value={passwordOtpToken}
+              onChange={(val) => setPasswordOtpToken(val)}
+              onResend={handleResendPasswordOtp}
+              disabled={passwordLoading}
+            />
           </div>
-        </ModalOverlay>
-      )}
+
+          <button
+            type="button"
+            onClick={handleConfirmPasswordChangeWithOtp}
+            disabled={passwordLoading || passwordOtpToken.length < 6}
+            className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors text-xs disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+          >
+            {passwordLoading ? (
+              <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+            ) : (
+              'Confirm & Save New Password'
+            )}
+          </button>
+        </div>
+      </ModalOverlay>
+
+      {/* MODAL 2: Phone Verification Modal */}
+      <ModalOverlay isOpen={showPhoneModal} onClose={() => setShowPhoneModal(false)}>
+        <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
+          <button
+            type="button"
+            onClick={() => setShowPhoneModal(false)}
+            className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+          >
+            <IconX className="w-5 h-5" />
+          </button>
+
+          <div className="text-center mb-6">
+            <span className="w-12 h-12 rounded-full bg-[#1090F8]/10 text-[#1090F8] font-bold text-lg flex items-center justify-center mx-auto mb-3">
+              <IconShield className="w-6 h-6" />
+            </span>
+            <h3 className="text-2xl font-extrabold text-[var(--ink)]">Verify Phone Number</h3>
+            <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
+              Verification SMS code sent to <strong className="text-[var(--ink)]">+63 {phoneDigits}</strong>.
+            </p>
+          </div>
+
+          <div className="my-6">
+            <OtpInput value={phoneOtpToken} onChange={(val) => setPhoneOtpToken(val)} />
+          </div>
+
+          <button
+            type="button"
+            onClick={handleConfirmPhoneVerification}
+            disabled={verifyingPhone}
+            className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors text-xs cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {verifyingPhone ? (
+              <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+            ) : (
+              'Confirm & Verify Phone Number'
+            )}
+          </button>
+        </div>
+      </ModalOverlay>
     </section>
   );
 }

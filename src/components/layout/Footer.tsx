@@ -1,6 +1,7 @@
 import type { Page } from '../../types';
 import { MonoBadge } from '../shared/Badges';
-import { IconChevronUp, IconExternal, IconTicket, IconX } from '../shared/icons';
+import { IconChevronUp, IconExternal, IconX } from '../shared/icons';
+import binhiLogo from '../../assets/branding/BINHI Concept Logo.webp';
 
 const WORDMARK_BARS = [
   { h: 34, w: 10 }, { h: 58, w: 10 }, { h: 22, w: 8 },
@@ -15,9 +16,7 @@ export function Footer({ go }: { go: (p: Page) => void }) {
     <footer className="border-t border-[#24252c]/[0.06] pt-10 pb-8 px-6 bg-white">
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between">
-          <span className="w-11 h-11 rounded-2xl bg-[var(--ink)] text-white flex items-center justify-center">
-            <IconTicket className="w-5 h-5" />
-          </span>
+          <img src={binhiLogo} alt="BINHI Concept" className="h-9 w-auto object-contain" draggable={false} />
           <button
             onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
             aria-label="Back to top"

@@ -21,12 +21,8 @@ export const EQUIPMENT_ITEMS: EquipmentItem[] = [
     price: '₱18,000',
     rawPrice: 18000,
     desc: 'High-definition 3mm pixel pitch indoor LED video display. Supports live camera feeds, visual loops, and 4K video playback.',
-    img: 'https://picsum.photos/seed/binhi-ledwall/640/480',
-    photos: [
-      { url: 'https://picsum.photos/seed/binhi-eq-led1/800/500', label: 'EQUIPMENT' },
-      { url: 'https://picsum.photos/seed/binhi-eq-led2/800/500', label: 'Sample Event Setup' },
-      { url: 'https://picsum.photos/seed/binhi-eq-led3/800/500', label: 'Video Controller' },
-    ],
+    img: '',
+    photos: [],
     specs: [
       'Pixel Pitch: 3.91mm HD Indoor',
       'Screen Size: 3.5m Width x 2m Height (7 sqm)',
@@ -43,12 +39,8 @@ export const EQUIPMENT_ITEMS: EquipmentItem[] = [
     price: '₱14,000',
     rawPrice: 14000,
     desc: 'Professional dual 8-inch line array modules with 18-inch powered subwoofers for crystal-clear vocals and punchy bass.',
-    img: 'https://picsum.photos/seed/binhi-linearray/640/480',
-    photos: [
-      { url: 'https://picsum.photos/seed/binhi-eq-la1/800/500', label: 'EQUIPMENT' },
-      { url: 'https://picsum.photos/seed/binhi-eq-la2/800/500', label: 'Sample Event Setup' },
-      { url: 'https://picsum.photos/seed/binhi-eq-la3/800/500', label: 'Amplifier Rack' },
-    ],
+    img: '',
+    photos: [],
     specs: [
       'Total Output: 4800W RMS Continuous',
       'Coverage Pattern: 110° Horizontal x 10° Vertical per module',
@@ -65,12 +57,8 @@ export const EQUIPMENT_ITEMS: EquipmentItem[] = [
     price: '₱8,500',
     rawPrice: 8500,
     desc: 'High-power 230W 7R moving head lights with gobo wheels, prism effects, and synchronized DMX lightshow control.',
-    img: 'https://picsum.photos/seed/binhi-lights/640/480',
-    photos: [
-      { url: 'https://picsum.photos/seed/binhi-eq-mh1/800/500', label: 'EQUIPMENT' },
-      { url: 'https://picsum.photos/seed/binhi-eq-mh2/800/500', label: 'Sample Event Setup' },
-      { url: 'https://picsum.photos/seed/binhi-eq-mh3/800/500', label: 'DMX Controller' },
-    ],
+    img: '',
+    photos: [],
     specs: [
       'Lamp Source: 230W 7R Discharge Lamp',
       'Color Wheel: 14 colors + open with rainbow effect',
@@ -87,11 +75,8 @@ export const EQUIPMENT_ITEMS: EquipmentItem[] = [
     price: '₱4,500',
     rawPrice: 4500,
     desc: 'Water-based low fog generator for "dancing on clouds" bridal entrance effect and dramatic stage atmospheres.',
-    img: 'https://picsum.photos/seed/binhi-smoke/640/480',
-    photos: [
-      { url: 'https://picsum.photos/seed/binhi-eq-sm1/800/500', label: 'EQUIPMENT' },
-      { url: 'https://picsum.photos/seed/binhi-eq-sm2/800/500', label: 'Sample Event Setup' },
-    ],
+    img: '',
+    photos: [],
     specs: [
       'Fluid Type: Water-based non-toxic fog fluid',
       'Output: 15,000 cu.ft / min',

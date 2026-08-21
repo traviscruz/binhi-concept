@@ -16,8 +16,9 @@ export function CrewLayout({
   assignedCount?: number;
 }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [crewName, setCrewName] = useState('Marco Valenzuela');
+  const [crewName, setCrewName] = useState('');
   const [crewAvatar, setCrewAvatar] = useState<string | null>(null);
+  const [loadingProfile, setLoadingProfile] = useState(true);
 
   useEffect(() => {
     async function fetchCrewProfile() {
@@ -41,10 +42,13 @@ export function CrewLayout({
           if (profile.avatar_url) avatar = profile.avatar_url;
         }
 
-        if (name) setCrewName(name);
+        setCrewName(name || 'Event Staff');
         setCrewAvatar(avatar);
       } catch (err) {
         console.error('Error loading crew profile for layout:', err);
+        setCrewName('Event Staff');
+      } finally {
+        setLoadingProfile(false);
       }
     }
 
@@ -107,7 +111,7 @@ export function CrewLayout({
       <div className="space-y-6">
         {/* Brand Header */}
         <div className="pb-4 mb-4 border-b border-[#24252c]/[0.08] flex items-center justify-between">
-          <button onClick={() => handleNav('landing')} className="outline-none cursor-pointer">
+          <button onClick={() => handleNav('crew-assigned-bookings')} className="outline-none cursor-pointer">
             <Logo />
           </button>
         </div>
@@ -143,7 +147,11 @@ export function CrewLayout({
               </span>
             )}
             <div className="min-w-0">
-              <div className="text-xs font-extrabold truncate">{crewName}</div>
+              {loadingProfile ? (
+                <div className="h-3.5 w-20 bg-black/10 animate-pulse rounded my-0.5" />
+              ) : (
+                <div className="text-xs font-extrabold truncate">{crewName}</div>
+              )}
               <div className={`text-[10px] truncate ${page === 'crew-profile' ? 'text-white/70' : 'text-[#24252c]/50'}`}>
                 Event Staff / Crew
               </div>
@@ -193,7 +201,7 @@ export function CrewLayout({
             >
               <IconMenu className="w-5 h-5" />
             </button>
-            <Logo onClick={() => handleNav('landing')} />
+            <Logo onClick={() => handleNav('crew-assigned-bookings')} />
           </div>
         </header>
 

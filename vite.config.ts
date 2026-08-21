@@ -8,5 +8,13 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  server: {
+    proxy: {
+      '/paymongo-api': {
+        target: 'https://api.paymongo.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/paymongo-api/, ''),
+      },
+    },
+  },
 })
-

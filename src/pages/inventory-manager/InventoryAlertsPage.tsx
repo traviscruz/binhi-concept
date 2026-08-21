@@ -1,50 +1,249 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconBox, IconPlus, IconX, IconShield, IconSearch } from '../../components/shared/icons';
+import { IconX, IconShield, IconSearch, IconPlus } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
+import { EmptyState } from '../../components/shared/EmptyState';
+import { supabase } from '../../lib/supabase';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
 
-export default function InventoryAlertsPage({ go }: { go: (p: Page) => void }) {
-  const [alerts, setAlerts] = useState([
-    { id: 'alt-1', type: 'Maintenance Required', gear: 'P3 HD Indoor LED Wall Panel (LED-P3-001)', details: '100 operating hours reached. Optical tile recalibration & DMX test required.', severity: 'High', date: 'August 19, 2026' },
-    { id: 'alt-2', type: 'Low Stock Warning', gear: 'UHF Wireless Microphones', details: 'Only 2 unassigned mic pairs remaining for the upcoming weekend of Sep 14.', severity: 'Medium', date: 'August 20, 2026' },
-    { id: 'alt-3', type: 'Hardware Damage Log', gear: 'Moving Head Beam Fixture #08 (LGT-CHV-003)', details: 'Pan motor mechanism lagging slightly during fast strobe sequences. Gears need lubrication.', severity: 'High', date: 'August 18, 2026' },
-  ]);
+export interface InventoryAlertItem {
+  id: string;
+  type: string; // 'Maintenance Required', 'Hardware Damage Log'
+  gear: string;
+  details: string;
+  severity: 'High' | 'Medium' | 'Low';
+  date: string;
+  modelId?: string;
+  serialId?: string;
+  isCustomAlert?: boolean;
+}
 
+export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void }) {
+  const [alerts, setAlerts] = useState<InventoryAlertItem[]>([]);
+  const [equipmentModels, setEquipmentModels] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [severityFilter, setSeverityFilter] = useState('All');
   const [showAddAlertModal, setShowAddAlertModal] = useState(false);
 
   // Form State
-  const [gearName, setGearName] = useState('Yamaha Active PA 12" Speaker (SPK-YAM-005)');
+  const [selectedTarget, setSelectedTarget] = useState('');
   const [alertType, setAlertType] = useState('Maintenance Required');
-  const [severity, setSeverity] = useState('High');
+  const [severity, setSeverity] = useState<'High' | 'Medium' | 'Low'>('High');
   const [details, setDetails] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleCreateAlert = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!gearName.trim()) return;
+  // =========================================================================
+  // SUPABASE READ (FETCH MODELS, UNITS & MAINTENANCE ALERTS)
+  // =========================================================================
+  const fetchAlertsAndInventory = async () => {
+    setLoading(true);
+    try {
+      // 1. Fetch equipment models & physical units
+      const { data: modelsData, error: modelsError } = await supabase
+        .from('equipment_models')
+        .select('*, units:physical_units(*)')
+        .order('created_at', { ascending: false });
 
-    const newAlert = {
-      id: `alt-${Date.now()}`,
-      type: alertType,
-      gear: gearName,
-      details: details || 'Scheduled bench maintenance log.',
-      severity,
-      date: new Date().toISOString().split('T')[0],
-    };
+      if (modelsError) throw modelsError;
 
-    setAlerts([newAlert, ...alerts]);
-    setShowAddAlertModal(false);
-    setGearName('');
-    setDetails('');
+      // 2. Fetch active custom maintenance alerts
+      const { data: customAlertsData, error: alertsError } = await supabase
+        .from('inventory_alerts')
+        .select('*')
+        .eq('status', 'active')
+        .order('created_at', { ascending: false });
+
+      if (alertsError) {
+        console.warn('Custom alerts table fetch note:', alertsError);
+      }
+
+      setEquipmentModels(modelsData || []);
+
+      const derivedAlerts: InventoryAlertItem[] = [];
+
+      if (modelsData && modelsData.length > 0) {
+        modelsData.forEach((m: any) => {
+          const units = m.units || [];
+
+          // Maintenance & Hardware Damage Alerts for physical units
+          units.forEach((u: any) => {
+            if (
+              u.condition === 'In Repair' ||
+              u.condition === 'Needs Inspection' ||
+              u.condition === 'Minor Wear' ||
+              u.status === 'Maintenance / Repair' ||
+              u.status === 'Decommissioned / Inactive'
+            ) {
+              const isHigh = u.condition === 'In Repair' || u.status === 'Decommissioned / Inactive';
+              derivedAlerts.push({
+                id: `unit-${u.serial_id}`,
+                type: u.condition === 'In Repair' ? 'Hardware Damage Log' : 'Maintenance Required',
+                gear: `${m.name} (${u.serial_id})`,
+                details: u.notes || `Unit condition is currently flagged as ${u.condition} (${u.status}).`,
+                severity: isHigh ? 'High' : 'Medium',
+                date: u.last_maintenance || new Date().toISOString().split('T')[0],
+                modelId: m.model_id,
+                serialId: u.serial_id,
+              });
+            }
+          });
+        });
+      }
+
+      // Add custom logged alerts from database (excluding stock warnings)
+      if (customAlertsData && customAlertsData.length > 0) {
+        customAlertsData.forEach((ca: any) => {
+          if (ca.alert_type !== 'Low Stock Warning') {
+            derivedAlerts.push({
+              id: ca.id,
+              type: ca.alert_type,
+              gear: ca.gear_name,
+              details: ca.details,
+              severity: ca.severity as any,
+              date: ca.created_at ? ca.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+              modelId: ca.model_id,
+              serialId: ca.serial_id,
+              isCustomAlert: true,
+            });
+          }
+        });
+      }
+
+      setAlerts(derivedAlerts);
+    } catch (err) {
+      console.warn('Supabase alerts fetch note:', err);
+      setAlerts([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const resolveAlert = (id: string) => {
-    setAlerts((prev) => prev.filter((a) => a.id !== id));
+  useEffect(() => {
+    fetchAlertsAndInventory();
+  }, []);
+
+  // Helper: Log Action to Audit Logs
+  const logAuditToSupabase = async (action: string, targetId: string, details: string) => {
+    try {
+      await supabase.from('audit_logs').insert({
+        action,
+        module: 'inventory',
+        target_id: targetId,
+        details,
+        user_role: 'inventory_manager',
+      });
+    } catch (err) {
+      console.warn('Audit log insert note:', err);
+    }
+  };
+
+  // =========================================================================
+  // SUPABASE CREATE MAINTENANCE ALERT
+  // =========================================================================
+  const handleCreateAlert = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!details.trim()) return;
+
+    setIsSubmitting(true);
+    const gearDisplayName = selectedTarget || (equipmentModels[0]?.name ? `${equipmentModels[0].name}` : 'General Equipment');
+
+    try {
+      // 1. Insert into inventory_alerts table
+      const { error: alertInsertError } = await supabase.from('inventory_alerts').insert({
+        alert_type: alertType,
+        severity: severity,
+        gear_name: gearDisplayName,
+        details: details.trim(),
+        status: 'active',
+      });
+
+      if (alertInsertError) {
+        console.warn('Supabase DB Insert Alert Note:', alertInsertError);
+      }
+
+      // 2. If target is a physical unit serial tag, update unit condition in physical_units table
+      if (selectedTarget.includes('(') && selectedTarget.includes(')')) {
+        const serialTagMatch = selectedTarget.match(/\(([^)]+)\)/);
+        const serialTag = serialTagMatch ? serialTagMatch[1] : null;
+
+        if (serialTag) {
+          const newCondition = alertType === 'Hardware Damage Log' ? 'In Repair' : 'Needs Inspection';
+          await supabase
+            .from('physical_units')
+            .update({
+              condition: newCondition,
+              notes: details.trim(),
+              last_maintenance: new Date().toISOString().split('T')[0],
+            })
+            .eq('serial_id', serialTag);
+        }
+      }
+
+      await logAuditToSupabase(
+        'CREATE_MAINTENANCE_ALERT',
+        gearDisplayName,
+        `Logged ${severity} priority maintenance alert: ${alertType} (${details.trim()})`
+      );
+
+      // Re-fetch database alerts
+      await fetchAlertsAndInventory();
+
+      setShowAddAlertModal(false);
+      setDetails('');
+      window.dispatchEvent(new Event('inventory-updated'));
+    } catch (err) {
+      console.warn('Create alert error:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // =========================================================================
+  // SUPABASE UPDATE / RESOLVE ALERT
+  // =========================================================================
+  const resolveAlert = async (item: InventoryAlertItem) => {
+    try {
+      // 1. If it's a physical serial unit alert, reset unit condition to Operational (Good)
+      if (item.serialId) {
+        await supabase
+          .from('physical_units')
+          .update({
+            condition: 'Operational (Good)',
+            status: 'Available in Warehouse',
+            last_maintenance: new Date().toISOString().split('T')[0],
+            notes: null,
+          })
+          .eq('serial_id', item.serialId);
+      }
+
+      // 2. If it's a custom alert in inventory_alerts table, update status to resolved
+      if (item.isCustomAlert) {
+        await supabase
+          .from('inventory_alerts')
+          .update({
+            status: 'resolved',
+            resolved_at: new Date().toISOString(),
+          })
+          .eq('id', item.id);
+      }
+
+      await logAuditToSupabase(
+        'RESOLVE_MAINTENANCE_ALERT',
+        item.serialId || item.modelId || item.id,
+        `Marked maintenance alert for ${item.gear} as resolved.`
+      );
+
+      setAlerts((prev) => prev.filter((a) => a.id !== item.id));
+      window.dispatchEvent(new Event('inventory-updated'));
+    } catch (err) {
+      console.warn('Resolve alert error:', err);
+      setAlerts((prev) => prev.filter((a) => a.id !== item.id));
+      window.dispatchEvent(new Event('inventory-updated'));
+    }
   };
 
   const filteredAlerts = alerts.filter((a) => {
@@ -57,23 +256,24 @@ export default function InventoryAlertsPage({ go }: { go: (p: Page) => void }) {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-12">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.06]">
         <div>
-          <MonoBadge icon={IconShield}>Action Required ({alerts.length})</MonoBadge>
+          <MonoBadge icon={IconShield}>Maintenance Logs ({alerts.length})</MonoBadge>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ink)] mt-1.5">
-            Maintenance & Low Stock Alerts
+            Maintenance & Repair Alerts
           </h1>
           <p className="text-xs text-[#24252c]/60 mt-1">
-            Log new equipment repair logs, monitor low stock thresholds, and mark maintenance as resolved.
+            Real-time equipment repair logs, bench maintenance inspections, and hardware damage reports.
           </p>
         </div>
 
         <button
           onClick={() => setShowAddAlertModal(true)}
-          className="bg-[#1090F8] text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm self-start sm:self-auto"
+          className="bg-[#1090F8] text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-all shadow-md self-start sm:self-auto flex items-center gap-2 cursor-pointer"
         >
-          + Log New Maintenance / Stock Alert
+          <IconPlus className="w-4 h-4" /> Log Maintenance Alert
         </button>
       </div>
 
@@ -85,7 +285,7 @@ export default function InventoryAlertsPage({ go }: { go: (p: Page) => void }) {
             <button
               key={sev}
               onClick={() => setSeverityFilter(sev)}
-              className={`text-xs px-3.5 py-1.5 rounded-full font-medium transition-all ${
+              className={`text-xs px-3.5 py-1.5 rounded-full font-medium transition-all cursor-pointer ${
                 severityFilter === sev
                   ? 'bg-[var(--ink)] text-white shadow-sm font-semibold'
                   : 'bg-[var(--mist)] text-[#24252c]/60 hover:text-[var(--ink)]'
@@ -108,13 +308,17 @@ export default function InventoryAlertsPage({ go }: { go: (p: Page) => void }) {
       </div>
 
       {/* Alerts Cards List */}
-      {filteredAlerts.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-2xl border border-[#24252c]/[0.08] shadow-sm">
-          <span className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-600 font-bold text-xl flex items-center justify-center mx-auto mb-3">
-            ✓
-          </span>
-          <h3 className="font-bold text-base text-[var(--ink)]">No Active Alerts</h3>
-          <p className="text-xs text-[#24252c]/50 mt-1">All equipment units are fully operational and verified.</p>
+      {loading ? (
+        <div className="bg-white rounded-2xl p-12 text-center text-xs text-[#24252c]/50 border border-[#24252c]/[0.08]">
+          Fetching maintenance alerts from database...
+        </div>
+      ) : filteredAlerts.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-[#24252c]/[0.08] shadow-sm p-8 text-center">
+          <EmptyState
+            icon={IconShield}
+            title="No Active Maintenance Alerts"
+            description="All registered equipment models and physical serial units are operational and in good condition."
+          />
         </div>
       ) : (
         <div className="space-y-4">
@@ -145,8 +349,8 @@ export default function InventoryAlertsPage({ go }: { go: (p: Page) => void }) {
 
               <div className="flex items-center gap-2 shrink-0">
                 <button
-                  onClick={() => resolveAlert(item.id)}
-                  className="bg-[#1090F8] text-white text-xs font-semibold px-4.5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm"
+                  onClick={() => resolveAlert(item)}
+                  className="bg-[#1090F8] text-white text-xs font-semibold px-4.5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm cursor-pointer"
                 >
                   Mark as Resolved
                 </button>
@@ -156,84 +360,104 @@ export default function InventoryAlertsPage({ go }: { go: (p: Page) => void }) {
         </div>
       )}
 
-      {showAddAlertModal && (
-        <ModalOverlay onClose={() => setShowAddAlertModal(false)}>
-          <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-            <button onClick={() => setShowAddAlertModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
-              <IconX className="w-5 h-5" />
-            </button>
+      {/* Log New Alert Modal */}
+      <ModalOverlay isOpen={showAddAlertModal} onClose={() => setShowAddAlertModal(false)}>
+        <div className="bg-white rounded-[2rem] p-6 max-w-lg w-full shadow-2xl border border-[#24252c]/10 relative">
+          <button
+            onClick={() => setShowAddAlertModal(false)}
+            className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+          >
+            <IconX className="w-5 h-5" />
+          </button>
 
-            <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Log Maintenance or Stock Alert</h3>
-            <p className="text-xs text-[#24252c]/50 mb-4">Input equipment repair notes, low stock warnings, or calibration logs.</p>
+          <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">
+            Log Maintenance Alert
+          </h3>
+          <p className="text-xs text-[#24252c]/50 mb-4">
+            Input equipment repair notes, damage reports, or bench inspection logs.
+          </p>
 
-            <form onSubmit={handleCreateAlert} className="space-y-4 text-xs">
+          <form onSubmit={handleCreateAlert} className="space-y-4 text-xs">
+            <div>
+              <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
+                Target Equipment Model / Serial Unit
+              </label>
+              <select
+                value={selectedTarget}
+                onChange={(e) => setSelectedTarget(e.target.value)}
+                className={inputClass + ' font-semibold py-3'}
+              >
+                <option value="">Select Equipment Target...</option>
+                {equipmentModels.map((m) => (
+                  <optgroup key={m.model_id} label={`${m.brand} ${m.name} (${m.model_id})`}>
+                    <option value={`${m.name} (${m.model_id})`}>
+                      Master Model: {m.brand} {m.name}
+                    </option>
+                    {(m.units || []).map((u: any) => (
+                      <option key={u.serial_id} value={`${m.name} (${u.serial_id})`}>
+                        Serial Unit: {u.serial_id} — {u.condition}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Target Equipment Model / Serial ID</label>
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
+                  Alert Category
+                </label>
                 <select
-                  value={gearName}
-                  onChange={(e) => setGearName(e.target.value)}
-                  className={inputClass + ' font-semibold'}
+                  value={alertType}
+                  onChange={(e) => setAlertType(e.target.value)}
+                  className={inputClass + ' font-semibold py-3'}
                 >
-                  <option value="Yamaha Active PA 12&quot; Speaker (SPK-YAM-005)">Yamaha Active PA 12&quot; Speaker (SPK-YAM-005)</option>
-                  <option value="Yamaha Active PA 12&quot; Speaker (SPK-YAM-001)">Yamaha Active PA 12&quot; Speaker (SPK-YAM-001)</option>
-                  <option value="P3 HD Indoor LED Wall Panel (LED-P3-001)">P3 HD Indoor LED Wall Panel (LED-P3-001)</option>
-                  <option value="P3 HD Indoor LED Wall Panel (LED-P3-003)">P3 HD Indoor LED Wall Panel (LED-P3-003)</option>
-                  <option value="Chauvet DJ Intimidator Spot 360 (LGT-[#1090F8]-001)">Chauvet DJ Intimidator Spot 360 (LGT-[#1090F8]-001)</option>
-                  <option value="Chauvet DJ Intimidator Spot 360 (LGT-[#1090F8]-002)">Chauvet DJ Intimidator Spot 360 (LGT-[#1090F8]-002)</option>
-                  <option value="Antari Z-1500 II Stage Fog Machine (HAZ-ANT-001)">Antari Z-1500 II Stage Fog Machine (HAZ-ANT-001)</option>
+                  <option value="Maintenance Required">Maintenance Required</option>
+                  <option value="Hardware Damage Log">Hardware Damage Log</option>
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Alert Category</label>
-                  <select
-                    value={alertType}
-                    onChange={(e) => setAlertType(e.target.value)}
-                    className={inputClass + ' font-semibold'}
-                  >
-                    <option value="Maintenance Required">Maintenance Required</option>
-                    <option value="Low Stock Warning">Low Stock Warning</option>
-                    <option value="Hardware Damage Log">Hardware Damage Log</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Alert Severity</label>
-                  <select
-                    value={severity}
-                    onChange={(e) => setSeverity(e.target.value)}
-                    className={inputClass + ' font-semibold'}
-                  >
-                    <option value="High">High</option>
-                    <option value="Medium">Medium</option>
-                    <option value="Low">Low</option>
-                  </select>
-                </div>
-              </div>
-
               <div>
-                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Diagnostic Issue Description</label>
-                <textarea
-                  rows={3}
-                  value={details}
-                  onChange={(e) => setDetails(e.target.value)}
-                  placeholder="Describe crackling audio, blown bulb, worn XLR jack, or missing spare parts..."
-                  className="w-full rounded-2xl border px-4 py-2.5 bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] border-transparent transition-colors"
-                  required
-                />
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
+                  Alert Severity
+                </label>
+                <select
+                  value={severity}
+                  onChange={(e) => setSeverity(e.target.value as any)}
+                  className={inputClass + ' font-semibold py-3'}
+                >
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
               </div>
+            </div>
 
-              <button
-                type="submit"
-                className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
-              >
-                Log Maintenance Alert Record
-              </button>
-            </form>
-          </div>
-        </ModalOverlay>
-      )}
+            <div>
+              <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
+                Diagnostic Issue Description
+              </label>
+              <textarea
+                rows={3}
+                value={details}
+                onChange={(e) => setDetails(e.target.value)}
+                placeholder="Describe crackling audio, blown bulb, worn XLR jack, or hardware damage..."
+                className="w-full rounded-2xl border px-4 py-2.5 bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] border-transparent transition-colors"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {isSubmitting ? 'Saving Alert...' : 'Log Maintenance Alert Record'}
+            </button>
+          </form>
+        </div>
+      </ModalOverlay>
     </div>
   );
 }

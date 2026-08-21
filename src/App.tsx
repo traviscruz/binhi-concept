@@ -22,6 +22,7 @@ import ForgotPasswordPage from './pages/public/ForgotPasswordPage';
 import OtpPage from './pages/public/OtpPage';
 
 import CheckoutPage from './pages/customer/CheckoutPage';
+import PaymentResultPage from './pages/customer/PaymentResultPage';
 import BookingStatusPage from './pages/customer/BookingStatusPage';
 import BookingHistoryPage from './pages/customer/BookingHistoryPage';
 import WishlistPage from './pages/customer/WishlistPage';
@@ -53,12 +54,19 @@ import CrewSetupTeardownPage from './pages/crew/CrewSetupTeardownPage';
 import CrewProfilePage from './pages/crew/CrewProfilePage';
 import AdminReviewsPage from './pages/admin/AdminReviewsPage';
 import AdminProfilePage from './pages/admin/AdminProfilePage';
-
+import { FEATURED_PACKAGES, type PackageData } from './data/packages';
 import { supabase } from './utils/supabase';
 
 export default function App() {
   const [page, setPage] = useState<Page>(() => {
     try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const pageParam = urlParams.get('page');
+      if (pageParam) return pageParam as Page;
+
+      const hash = window.location.hash.replace('#', '');
+      if (hash) return hash as Page;
+
       const saved = localStorage.getItem('binhi_current_page');
       if (saved) return saved as Page;
     } catch (e) {
@@ -78,7 +86,56 @@ export default function App() {
   const [bookingDate, setBookingDate] = useState('September 14, 2026');
   const [bookingAddons, setBookingAddons] = useState<string[]>(['add-smoke']);
   const [isCustomerSession, setIsCustomerSession] = useState(false);
-  const [wishlistIds, setWishlistIds] = useState<string[]>(['a', 'b']);
+  const [wishlistIds, setWishlistIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('binhi_wishlist_ids');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return ['PKG-INTIMATE-01', 'a'];
+  });
+  const [packages, setPackages] = useState<PackageData[]>(FEATURED_PACKAGES);
+
+  // Fetch Packages from Supabase Database (Alphabetical order by name)
+  const fetchDbPackages = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('packages')
+        .select('*')
+        .order('name', { ascending: true });
+
+      if (!error && data && data.length > 0) {
+        const formatted: PackageData[] = data.map((item: any) => ({
+          id: item.package_id || item.id,
+          name: item.name,
+          tag: item.tag || '',
+          price: item.price,
+          rawPrice: Number(item.raw_price) || parseInt((item.price || '').replace(/\D/g, '')) || 0,
+          desc: item.description || '',
+          img: item.img || '',
+          photos: item.photos || [],
+          inclusions: item.inclusions || [],
+          recommendedFor: item.recommended_for || [],
+          specs: item.specs || {
+            setupTime: '2.5 Hours',
+            crewSize: '3 Technicians',
+          },
+        }));
+
+        formatted.sort((a, b) => a.name.localeCompare(b.name));
+        setPackages(formatted);
+      }
+    } catch (err) {
+      console.warn('Note fetching packages from Supabase:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchDbPackages();
+
+    const handlePackageUpdate = () => fetchDbPackages();
+    window.addEventListener('inventory-updated', handlePackageUpdate);
+    return () => window.removeEventListener('inventory-updated', handlePackageUpdate);
+  }, []);
 
   // Sync Supabase Auth session with App state
   useEffect(() => {
@@ -110,12 +167,23 @@ export default function App() {
   }, []);
 
   const toggleWishlist = (id: string) => {
-    setWishlistIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
+    setWishlistIds((prev) => {
+      const updated = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
+      try {
+        localStorage.setItem('binhi_wishlist_ids', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
   };
 
   const go = (p: Page) => {
+    // If navigating away from payment result pages, clean up URL search parameters
+    if (window.location.search && (window.location.search.includes('page=payment-') || window.location.search.includes('ref='))) {
+      try {
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch (e) {}
+    }
+
     if (
       p === 'booking-tracker' ||
       p === 'booking-history' ||
@@ -126,8 +194,13 @@ export default function App() {
     ) {
       setIsCustomerSession(true);
     }
+
     try {
-      localStorage.setItem('binhi_current_page', p);
+      if (!p.startsWith('payment-')) {
+        localStorage.setItem('binhi_current_page', p);
+      } else {
+        localStorage.setItem('binhi_current_page', 'booking-tracker');
+      }
     } catch (e) {
       console.error('Error saving current page:', e);
     }
@@ -161,10 +234,23 @@ export default function App() {
     go('item-detail');
   };
 
-  const startBooking = (id: string, date: string, _guestCount: number, addons: string[]) => {
+  const startBooking = async (id: string, date: string, _guestCount: number, addons: string[]) => {
     setSelectedPackageId(id);
     setBookingDate(date);
     setBookingAddons(addons);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        localStorage.setItem('binhi_pending_checkout', 'true');
+        go('login');
+        return;
+      }
+    } catch (e) {
+      console.error('Error checking auth state for booking:', e);
+    }
+
+    localStorage.removeItem('binhi_pending_checkout');
     go('checkout');
   };
 
@@ -244,25 +330,39 @@ export default function App() {
     );
   }
 
+  // Calculate exact wishlist count matching valid database packages
+  const validPackages = packages && packages.length > 0 ? packages : FEATURED_PACKAGES;
+  const activeWishlistCount = validPackages.filter((pkg) => wishlistIds.includes(pkg.id)).length;
+
+  const selectDateAndGoToPackages = (formattedDate: string) => {
+    setBookingDate(formattedDate);
+    try {
+      localStorage.setItem('binhi_selected_event_date', formattedDate);
+    } catch (e) {}
+    go('packages');
+  };
+
   return (
     <div className="min-h-screen bg-white text-[var(--ink)]">
-      {showPublicHeader && <Header page={page} go={go} />}
+      {showPublicHeader && <Header page={page} go={go} wishlistCount={activeWishlistCount} />}
       {showCustomerHeader && (
         <CustomerHeader
           page={page}
           go={(p) => (p === 'landing' ? handleLogout() : go(p))}
-          wishlistCount={wishlistIds.length}
+          wishlistCount={activeWishlistCount}
+          onSelectDateAndGoToPackages={selectDateAndGoToPackages}
         />
       )}
 
       <main key={page} className="animate-blur-in">
-        {page === 'landing' && <LandingPage go={go} goPackageDetail={goPackageDetail} />}
+        {page === 'landing' && <LandingPage go={go} goPackageDetail={goPackageDetail} packages={packages} />}
         {page === 'packages' && (
           <PackageCatalogPage
             goPackageDetail={goPackageDetail}
             isCustomer={isCustomerSession}
             wishlistIds={wishlistIds}
             toggleWishlist={toggleWishlist}
+            packages={packages}
           />
         )}
         {page === 'package-detail' && (
@@ -273,6 +373,7 @@ export default function App() {
             isCustomer={isCustomerSession}
             wishlistIds={wishlistIds}
             toggleWishlist={toggleWishlist}
+            packages={packages}
           />
         )}
         {page === 'equipment' && <EquipmentCatalogPage goItemDetail={goItemDetail} />}
@@ -291,8 +392,13 @@ export default function App() {
             initialDate={bookingDate}
             initialAddons={bookingAddons}
             go={go}
+            packages={packages}
           />
         )}
+
+        {page === 'payment-success' && <PaymentResultPage type="success" go={go} />}
+        {page === 'payment-failure' && <PaymentResultPage type="failure" go={go} />}
+        {page === 'payment-cancel' && <PaymentResultPage type="cancel" go={go} />}
 
         {/* Customer Portal Views */}
         {page === 'booking-tracker' && <BookingStatusPage go={go} />}
@@ -303,6 +409,7 @@ export default function App() {
             goPackageDetail={goPackageDetail}
             wishlistIds={wishlistIds}
             toggleWishlist={toggleWishlist}
+            packages={packages}
           />
         )}
         {page === 'loyalty' && <LoyaltyPage go={go} />}

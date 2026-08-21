@@ -1,4 +1,4 @@
-import { IconTicket } from '../shared/icons';
+import binhiLogo from '../../assets/branding/BINHI Concept Logo.webp';
 
 interface LogoProps {
   onClick?: () => void;
@@ -11,9 +11,12 @@ export function Logo({ onClick, className = '' }: LogoProps) {
       onClick={onClick}
       className={`flex items-center gap-2.5 ${onClick ? 'cursor-pointer' : ''} ${className}`}
     >
-      <span className="w-9 h-9 rounded-xl bg-[var(--ink)] text-white flex items-center justify-center shrink-0">
-        <IconTicket className="w-4 h-4" />
-      </span>
+      <img
+        src={binhiLogo}
+        alt="BINHI Concept"
+        className="h-8 w-auto object-contain shrink-0"
+        draggable={false}
+      />
       <span className="font-semibold tracking-tight text-base">BINHI Concept</span>
     </div>
   );

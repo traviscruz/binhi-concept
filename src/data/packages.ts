@@ -9,7 +9,39 @@ export interface PackageData {
   photos: { url: string; label: string }[];
   inclusions: string[];
   recommendedFor: string[];
-  specs: { powerReq: string; setupTime: string; crewSize: string };
+  specs: { powerReq?: string; setupTime: string; crewSize: string };
+}
+
+export function getPackagePhotoCount(pkg?: Partial<PackageData> | null): number {
+  if (!pkg) return 0;
+  let photoList: any[] = [];
+  if (Array.isArray(pkg.photos)) {
+    photoList = pkg.photos;
+  } else if (typeof pkg.photos === 'string') {
+    try {
+      const parsed = JSON.parse(pkg.photos as any);
+      if (Array.isArray(parsed)) photoList = parsed;
+    } catch (e) {}
+  }
+
+  const validGalleryCount = photoList.filter((p) => {
+    const url = typeof p === 'string' ? p : p?.url || p?.src || p?.image_url;
+    return Boolean(
+      url &&
+      typeof url === 'string' &&
+      url.trim().length > 0 &&
+      !url.includes('picsum.photos')
+    );
+  }).length;
+
+  const hasMainImg = Boolean(
+    pkg.img &&
+    typeof pkg.img === 'string' &&
+    pkg.img.trim().length > 0 &&
+    !pkg.img.includes('picsum.photos')
+  );
+
+  return validGalleryCount > 0 ? validGalleryCount : (hasMainImg ? 1 : 0);
 }
 
 export const FEATURED_PACKAGES: PackageData[] = [
@@ -20,13 +52,8 @@ export const FEATURED_PACKAGES: PackageData[] = [
     price: '₱15,000',
     rawPrice: 15000,
     desc: 'Sound system, basic lighting, one host mic. Built for debuts, small birthdays, and backyard gatherings.',
-    img: 'https://picsum.photos/seed/binhi-package-a/640/480',
-    photos: [
-      { url: 'https://picsum.photos/seed/binhi-a1/800/500', label: 'Sample Event Setup' },
-      { url: 'https://picsum.photos/seed/binhi-a2/800/500', label: 'EQUIPMENT' },
-      { url: 'https://picsum.photos/seed/binhi-a3/800/500', label: 'Audio Control Console' },
-      { url: 'https://picsum.photos/seed/binhi-a4/800/500', label: 'Lighting Rig' },
-    ],
+    img: '',
+    photos: [],
     inclusions: [
       '2x Active PA 12-inch Speakers (1000W RMS)',
       '4x LED Color Uplights',
@@ -53,13 +80,8 @@ export const FEATURED_PACKAGES: PackageData[] = [
     price: '₱28,000',
     rawPrice: 28000,
     desc: 'Full PA system, moving heads, LED uplights, two wireless mics. Built for birthdays, medium weddings, and reunions.',
-    img: 'https://picsum.photos/seed/binhi-package-b/640/480',
-    photos: [
-      { url: 'https://picsum.photos/seed/binhi-b1/800/500', label: 'Sample Event Setup' },
-      { url: 'https://picsum.photos/seed/binhi-b2/800/500', label: 'EQUIPMENT' },
-      { url: 'https://picsum.photos/seed/binhi-b3/800/500', label: 'Moving Head Lights' },
-      { url: 'https://picsum.photos/seed/binhi-b4/800/500', label: 'Live Sound Check' },
-    ],
+    img: '',
+    photos: [],
     inclusions: [
       '2x Dual 15-inch Subwoofers + 2x Top Speakers',
       '8x Moving Head Beam/Spot Lights with Trussing',
@@ -88,13 +110,8 @@ export const FEATURED_PACKAGES: PackageData[] = [
     price: '₱55,000',
     rawPrice: 55000,
     desc: 'P3 LED wall, line array truss rig, smoke machine, full band backline. Built for grand weddings, concerts, and corporate galas.',
-    img: 'https://picsum.photos/seed/binhi-package-c/640/480',
-    photos: [
-      { url: 'https://picsum.photos/seed/binhi-c1/800/500', label: 'Sample Event Setup' },
-      { url: 'https://picsum.photos/seed/binhi-c2/800/500', label: 'EQUIPMENT' },
-      { url: 'https://picsum.photos/seed/binhi-c3/800/500', label: 'P3 LED Wall Display' },
-      { url: 'https://picsum.photos/seed/binhi-c4/800/500', label: 'Line Array Rig' },
-    ],
+    img: '',
+    photos: [],
     inclusions: [
       '1x P3 HD Indoor LED Wall Panel (3.5m x 2m display)',
       '1x Active Line Array System (4x Tops + 2x Dual 18-inch Subs)',

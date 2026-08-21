@@ -67,28 +67,26 @@ export default function AdminLoyaltyPage({ go }: { go: (p: Page) => void }) {
         </div>
       </div>
 
-      {showSavedModal && (
-        <ModalOverlay onClose={() => setShowSavedModal(false)}>
-          <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl border border-[#24252c]/10 relative text-center">
-            <button onClick={() => setShowSavedModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
-              <IconX className="w-5 h-5" />
-            </button>
-            <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 font-extrabold text-xl flex items-center justify-center mx-auto mb-3 border border-emerald-200">
-              ✓
-            </div>
-            <h3 className="text-lg font-extrabold text-[var(--ink)] mb-1">Loyalty Settings Saved</h3>
-            <p className="text-xs text-[#24252c]/60 mb-5">
-              Host point earning rules and VIP tier thresholds updated successfully across the platform.
-            </p>
-            <button
-              onClick={() => setShowSavedModal(false)}
-              className="w-full bg-[var(--ink)] text-white font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
-            >
-              Close
-            </button>
+      <ModalOverlay isOpen={showSavedModal} onClose={() => setShowSavedModal(false)}>
+        <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl border border-[#24252c]/10 relative text-center">
+          <button onClick={() => setShowSavedModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
+            <IconX className="w-5 h-5" />
+          </button>
+          <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 font-extrabold text-xl flex items-center justify-center mx-auto mb-3 border border-emerald-200">
+            ✓
           </div>
-        </ModalOverlay>
-      )}
+          <h3 className="text-lg font-extrabold text-[var(--ink)] mb-1">Loyalty Settings Saved</h3>
+          <p className="text-xs text-[#24252c]/60 mb-5">
+            Host point earning rules and VIP tier thresholds updated successfully across the platform.
+          </p>
+          <button
+            onClick={() => setShowSavedModal(false)}
+            className="w-full bg-[var(--ink)] text-white font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
+          >
+            Great, Got It
+          </button>
+        </div>
+      </ModalOverlay>
     </div>
   );
 }

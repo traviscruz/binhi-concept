@@ -171,40 +171,38 @@ export default function CrewSetupTeardownPage({ go }: { go: (p: Page) => void })
       </div>
 
       {/* Confirmation Modal */}
-      {confirmCompleteModal && (
-        <ModalOverlay onClose={() => setConfirmCompleteModal(false)}>
-          <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative text-center">
-            <button onClick={() => setConfirmCompleteModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
-              <IconX className="w-5 h-5" />
-            </button>
-            <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 font-extrabold text-xl flex items-center justify-center mx-auto mb-3 border border-emerald-200">
-              <IconCheck className="w-6 h-6" />
-            </div>
-            <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Mark Event Complete?</h3>
-            <p className="text-xs text-[#24252c]/60 mb-5">
-              This will mark all 5 setup & teardown stages as complete and update inventory status back to warehouse storage.
-            </p>
-
-            <div className="flex items-center gap-3 text-xs">
-              <button
-                onClick={() => setConfirmCompleteModal(false)}
-                className="flex-1 bg-[var(--mist)] text-[var(--ink)] font-semibold py-3 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  setStages((prev) => prev.map((s) => ({ ...s, completed: true })));
-                  setConfirmCompleteModal(false);
-                }}
-                className="flex-1 bg-emerald-600 text-white font-semibold py-3 rounded-full hover:bg-emerald-700 transition-colors shadow-md cursor-pointer"
-              >
-                Yes, Complete Event
-              </button>
-            </div>
+      <ModalOverlay isOpen={confirmCompleteModal} onClose={() => setConfirmCompleteModal(false)}>
+        <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative text-center">
+          <button onClick={() => setConfirmCompleteModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
+            <IconX className="w-5 h-5" />
+          </button>
+          <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 font-extrabold text-xl flex items-center justify-center mx-auto mb-3 border border-emerald-200">
+            <IconCheck className="w-6 h-6" />
           </div>
-        </ModalOverlay>
-      )}
+          <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Mark Event Complete?</h3>
+          <p className="text-xs text-[#24252c]/60 mb-5">
+            This will mark all 5 setup & teardown stages as complete and update inventory status back to warehouse storage.
+          </p>
+
+          <div className="flex items-center gap-3 text-xs">
+            <button
+              onClick={() => setConfirmCompleteModal(false)}
+              className="flex-1 bg-[var(--mist)] text-[var(--ink)] font-semibold py-3 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                setStages((prev) => prev.map((s) => ({ ...s, completed: true })));
+                setConfirmCompleteModal(false);
+              }}
+              className="flex-1 bg-emerald-600 text-white font-semibold py-3 rounded-full hover:bg-emerald-700 transition-colors shadow-md cursor-pointer"
+            >
+              Yes, Complete Event
+            </button>
+          </div>
+        </div>
+      </ModalOverlay>
     </div>
   );
 }
