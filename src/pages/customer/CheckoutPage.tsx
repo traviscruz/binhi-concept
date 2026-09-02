@@ -150,7 +150,9 @@ export default function CheckoutPage({
     fetchDbTransportRules();
   }, []);
 
-  // ── 2. Load Google Maps & Places API Script using .env Key ───────────────
+  // ── 2. Load Google Maps & Places API Script using .env Key (if enabled) ──
+  const isGoogleMapsEnabled = Boolean(import.meta.env.VITE_GOOGLE_PLACES_API_KEY);
+
   useEffect(() => {
     const apiKey = import.meta.env.VITE_GOOGLE_PLACES_API_KEY;
     if (!apiKey) return;
@@ -178,9 +180,9 @@ export default function CheckoutPage({
     document.head.appendChild(script);
   }, []);
 
-  // Initialize Map and Autocomplete when Step 2 becomes active
+  // Initialize Map and Autocomplete when Step 2 becomes active (if enabled)
   useEffect(() => {
-    if (step === 2) {
+    if (step === 2 && isGoogleMapsEnabled) {
       mapInstanceRef.current = null;
       autocompleteRef.current = null;
       const timer = setTimeout(() => {
@@ -192,7 +194,7 @@ export default function CheckoutPage({
       mapInstanceRef.current = null;
       autocompleteRef.current = null;
     }
-  }, [step]);
+  }, [step, isGoogleMapsEnabled]);
 
   const initGooglePlacesAutocomplete = () => {
     if (!window.google || !window.google.maps || !window.google.maps.places || !addressInputRef.current) return;
@@ -954,8 +956,8 @@ export default function CheckoutPage({
         {step === 2 && (
           <div className="bg-white rounded-[2rem] p-6 md:p-8 border border-[#24252c]/[0.08] shadow-sm animate-blur-in space-y-5">
             <div>
-              <h2 className="text-2xl font-extrabold text-[var(--ink)]">Step 2: Venue Logistics & Location Picker</h2>
-              <p className="text-xs text-[#24252c]/60 mt-1">Specify venue location via search or Google Map pin to calculate crew transport fee.</p>
+              <h2 className="text-2xl font-extrabold text-[var(--ink)]">Step 2: Venue Logistics & Address</h2>
+              <p className="text-xs text-[#24252c]/60 mt-1">Specify your venue location and region to calculate crew transport fee.</p>
             </div>
 
             {step2Error && (
@@ -989,7 +991,7 @@ export default function CheckoutPage({
               )}
             </div>
 
-            {/* Venue Name & Full Address (Google Places Autocomplete Input) */}
+            {/* Venue Name & Full Address Input */}
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-1">
                 Venue Name & Full Address <span className="text-rose-500">*</span>
@@ -1001,7 +1003,7 @@ export default function CheckoutPage({
                   setVenueAddress(e.target.value);
                   validateAddressAgainstRegion(e.target.value, selectedRuleId);
                 }}
-                placeholder="Search venue or address (e.g. Shangri-La Fort, BGC)"
+                placeholder="Enter venue name & address (e.g. Shangri-La Fort, BGC, Taguig)"
                 className={`w-full rounded-full border px-4 py-3 text-sm bg-[var(--mist)] text-[var(--ink)] font-medium focus:outline-none ${
                   !isLocationValid ? 'border-rose-300 bg-rose-50/30' : 'border-transparent focus:border-[#1090F8]'
                 }`}
@@ -1012,19 +1014,21 @@ export default function CheckoutPage({
               </p>
             </div>
 
-            {/* Interactive Google Map Location Picker */}
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-2">
-                Choose Location on Google Map
-              </label>
-              <div
-                ref={mapContainerRef}
-                className="w-full h-64 rounded-2xl border border-[#24252c]/10 overflow-hidden bg-[var(--mist)] shadow-inner"
-              />
-              <p className="text-[10px] text-[#24252c]/50 mt-1.5 ml-1">
-                Tip: Click anywhere on the map or drag the pin marker to select your exact venue location.
-              </p>
-            </div>
+            {/* Interactive Google Map Location Picker (only shown when Google Maps API key is configured) */}
+            {isGoogleMapsEnabled && (
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-2">
+                  Choose Location on Google Map
+                </label>
+                <div
+                  ref={mapContainerRef}
+                  className="w-full h-64 rounded-2xl border border-[#24252c]/10 overflow-hidden bg-[var(--mist)] shadow-inner"
+                />
+                <p className="text-[10px] text-[#24252c]/50 mt-1.5 ml-1">
+                  Tip: Click anywhere on the map or drag the pin marker to select your exact venue location.
+                </p>
+              </div>
+            )}
 
             {/* Cost Summary Box (Package & Add-ons + Transpo Fee = Total) */}
             <div className="p-5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] space-y-2.5 text-xs">
