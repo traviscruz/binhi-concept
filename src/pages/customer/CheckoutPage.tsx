@@ -6,7 +6,7 @@ import type { Page } from '../../types';
 import { FEATURED_PACKAGES, type PackageData } from '../../data/packages';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { OtpInput } from '../../components/shared/OtpInput';
-import { IconShield, IconX, IconCheck, IconPin, IconSearch, IconArrow } from '../../components/shared/icons';
+import { IconShield, IconX, IconCheck, IconPin, IconSearch, IconArrow, IconTicket, IconChevronDown, IconChevronUp } from '../../components/shared/icons';
 import { supabase } from '../../lib/supabase';
 import { createPaymongoCheckoutSession } from '../../utils/paymongoPayment';
 import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
@@ -82,6 +82,66 @@ export default function CheckoutPage({
   const [selectedAddons] = useState<string[]>(initialAddons);
   const [receiptUploaded, setReceiptUploaded] = useState(false);
   const [paymentType, setPaymentType] = useState<'deposit' | 'full'>('deposit');
+
+  // ── Promo Code State ───────────────────────────────────────────────────────
+  const [promoOpen, setPromoOpen] = useState(false);
+  const [promoInput, setPromoInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<{
+    code: string;
+    description: string;
+    discountType: 'percentage' | 'fixed';
+    discountValue: number;
+  } | null>(null);
+  const [promoError, setPromoError] = useState('');
+
+  const PROMO_CODES: Record<
+    string,
+    { description: string; discountType: 'percentage' | 'fixed'; discountValue: number }
+  > = {
+    BINHI2026: {
+      description: '10% Seasonal Event Discount',
+      discountType: 'percentage',
+      discountValue: 10,
+    },
+    BINHI3K: {
+      description: '₱3,000 Loyalty Voucher',
+      discountType: 'fixed',
+      discountValue: 3000,
+    },
+    EARLYBIRD: {
+      description: '₱2,000 Early Booking Reward',
+      discountType: 'fixed',
+      discountValue: 2000,
+    },
+    WELCOME500: {
+      description: '₱500 Celebration Discount',
+      discountType: 'fixed',
+      discountValue: 500,
+    },
+  };
+
+  const handleApplyPromo = () => {
+    setPromoError('');
+    const cleaned = promoInput.trim().toUpperCase();
+    if (!cleaned) {
+      setPromoError('Please enter a promo code.');
+      return;
+    }
+
+    const found = PROMO_CODES[cleaned];
+    if (found) {
+      setAppliedPromo({ code: cleaned, ...found });
+      setPromoInput('');
+    } else {
+      setPromoError(`"${cleaned}" is not a valid promo code. Try "BINHI2026" or "BINHI3K".`);
+    }
+  };
+
+  const handleRemovePromo = () => {
+    setAppliedPromo(null);
+    setPromoError('');
+    setPromoInput('');
+  };
 
   // ── Error & Modal States ──────────────────────────────────────────────────
   const [showPhoneModal, setShowPhoneModal] = useState(false);
@@ -599,17 +659,29 @@ export default function CheckoutPage({
 
       const currentPkgPrice = (pkg as any)?.rawPrice ?? (pkg as any)?.raw_price ?? (pkg?.price ? parseInt(String(pkg.price).replace(/[^\d]/g, ''), 10) || 0 : 0);
 
-      const calculatedTotalCost = currentPkgPrice + currentAddonsCost + fee;
+      const subtotalBeforeDiscount = currentPkgPrice + currentAddonsCost + fee;
+      let currentDiscount = 0;
+      if (appliedPromo) {
+        if (appliedPromo.discountType === 'percentage') {
+          currentDiscount = Math.round((subtotalBeforeDiscount * appliedPromo.discountValue) / 100);
+        } else {
+          currentDiscount = Math.min(appliedPromo.discountValue, subtotalBeforeDiscount);
+        }
+      }
+
+      const calculatedTotalCost = Math.max(0, subtotalBeforeDiscount - currentDiscount);
       const calculatedDepositRequired = Math.round(calculatedTotalCost * 0.5);
       const isFull = paymentType === 'full';
       const calculatedPayAmount = isFull ? calculatedTotalCost : calculatedDepositRequired;
       const calculatedRemainingBalance = isFull ? 0 : calculatedTotalCost - calculatedDepositRequired;
 
+      const promoSuffix = appliedPromo ? ` [Promo: ${appliedPromo.code} -₱${currentDiscount.toLocaleString()}]` : '';
+
       const params = {
         amount: calculatedPayAmount,
         itemDesc: isFull
-          ? `Full Payment (100%) - ${pkg.name}`
-          : `50% Downpayment - ${pkg.name}`,
+          ? `Full Payment (100%) - ${pkg.name}${promoSuffix}`
+          : `50% Downpayment - ${pkg.name}${promoSuffix}`,
         referenceNumber: refNum,
         buyer: {
           firstName: firstName || 'Valued',
@@ -634,7 +706,9 @@ export default function CheckoutPage({
           addons_cost: currentAddonsCost,
           event_type: eventType,
           event_date: eventDate,
-          event_description: eventDescription,
+          event_description: appliedPromo
+            ? `${eventDescription}\n[Promo Code: ${appliedPromo.code} (-₱${currentDiscount.toLocaleString()})]`
+            : eventDescription,
           venue_address: venueAddress,
           region_rule_id: selectedRuleId,
           transport_fee: fee,
@@ -696,11 +770,23 @@ export default function CheckoutPage({
   const parsedPackagePrice = (pkg as any)?.rawPrice ?? (pkg as any)?.raw_price ?? (pkg?.price ? parseInt(String(pkg.price).replace(/[^\d]/g, ''), 10) || 0 : 0);
 
   const packageAndAddonPrice = parsedPackagePrice + addonsCost;
-  const totalCost = packageAndAddonPrice + transportFee;
+  const subtotalBeforeDiscount = packageAndAddonPrice + transportFee;
+
+  let discountAmount = 0;
+  if (appliedPromo) {
+    if (appliedPromo.discountType === 'percentage') {
+      discountAmount = Math.round((subtotalBeforeDiscount * appliedPromo.discountValue) / 100);
+    } else {
+      discountAmount = Math.min(appliedPromo.discountValue, subtotalBeforeDiscount);
+    }
+  }
+
+  const totalCost = Math.max(0, subtotalBeforeDiscount - discountAmount);
   const depositRequired = Math.round(totalCost * 0.5);
+  const balanceDueOnEventDate = totalCost - depositRequired;
   const isFullPayment = paymentType === 'full';
   const amountDueToday = isFullPayment ? totalCost : depositRequired;
-  const remainingBalanceAmount = isFullPayment ? 0 : totalCost - depositRequired;
+  const remainingBalanceAmount = isFullPayment ? 0 : balanceDueOnEventDate;
 
   return (
     <section className="pt-36 pb-24 px-6 min-h-screen bg-[var(--mist)]">
@@ -1192,6 +1278,12 @@ export default function CheckoutPage({
                 <span>Transport & Logistics Charge ({locationRegionName})</span>
                 <span className="font-bold text-[#1090F8]">+₱{transportFee.toLocaleString()}</span>
               </div>
+              {discountAmount > 0 && (
+                <div className="flex justify-between text-emerald-600 font-semibold">
+                  <span>Promo Discount ({appliedPromo?.code})</span>
+                  <span>-₱{discountAmount.toLocaleString()}</span>
+                </div>
+              )}
               <div className="pt-2 border-t border-[#24252c]/[0.08] flex justify-between items-center text-sm">
                 <span className="font-extrabold text-[var(--ink)]">Total Package & Transport Cost</span>
                 <span className="font-extrabold text-[var(--ink)] text-base">₱{totalCost.toLocaleString()}</span>
@@ -1276,7 +1368,7 @@ export default function CheckoutPage({
                   </div>
                   <div className="flex justify-between text-[11px] text-[#24252c]/60">
                     <span>Balance on Event Day</span>
-                    <span className="font-semibold text-[var(--ink)]">₱{remainingBalanceAmount.toLocaleString()}</span>
+                    <span className="font-semibold text-[var(--ink)]">₱{balanceDueOnEventDate.toLocaleString()}</span>
                   </div>
                 </div>
               </div>
@@ -1325,44 +1417,234 @@ export default function CheckoutPage({
               </div>
             </div>
 
-            {/* Comprehensive Payment Schedule Breakdown */}
-            <div className="p-5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] space-y-2.5 text-xs">
+            {/* ── Collapsible Promo Code Box ── */}
+            <div className="rounded-2xl border border-[#24252c]/[0.08] bg-white overflow-hidden transition-all shadow-xs">
+              <button
+                type="button"
+                onClick={() => setPromoOpen(!promoOpen)}
+                className="w-full px-5 py-3.5 flex items-center justify-between text-left hover:bg-[var(--mist)]/40 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full bg-[#1090F8]/10 text-[#1090F8] flex items-center justify-center shrink-0">
+                    <IconTicket className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-[var(--ink)] block">
+                      {appliedPromo ? (
+                        <span className="flex items-center gap-1.5 text-emerald-600">
+                          <IconCheck className="w-3.5 h-3.5" /> Promo Code Active: <strong>{appliedPromo.code}</strong>
+                        </span>
+                      ) : (
+                        'Have a promo code or voucher?'
+                      )}
+                    </span>
+                    <span className="text-[10px] text-[#24252c]/50">
+                      {appliedPromo
+                        ? `${appliedPromo.description} (-₱${discountAmount.toLocaleString()})`
+                        : 'Click to apply discount coupon or loyalty reward voucher'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {appliedPromo && (
+                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                      -₱{discountAmount.toLocaleString()}
+                    </span>
+                  )}
+                  <span className="text-[#24252c]/40">
+                    {promoOpen ? <IconChevronUp className="w-4 h-4" /> : <IconChevronDown className="w-4 h-4" />}
+                  </span>
+                </div>
+              </button>
+
+              {promoOpen && (
+                <div className="px-5 pb-5 pt-2 border-t border-[#24252c]/[0.06] bg-[var(--mist)]/20 space-y-3 animate-blur-in">
+                  {appliedPromo ? (
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-xs">
+                          ✓
+                        </span>
+                        <div>
+                          <span className="font-extrabold text-emerald-800 uppercase tracking-wide">
+                            {appliedPromo.code}
+                          </span>
+                          <span className="text-emerald-700 ml-1.5 font-medium text-[11px]">
+                            — {appliedPromo.description} (-₱{discountAmount.toLocaleString()} discount applied)
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRemovePromo}
+                        className="text-[11px] font-bold text-rose-600 hover:text-rose-800 hover:underline cursor-pointer ml-3 shrink-0"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={promoInput}
+                          onChange={(e) => {
+                            setPromoInput(e.target.value.toUpperCase());
+                            setPromoError('');
+                          }}
+                          placeholder="e.g. BINHI2026 or BINHI3K"
+                          className="flex-1 rounded-full border border-[#24252c]/15 px-4 py-2.5 text-xs bg-white text-[var(--ink)] font-mono font-bold tracking-wider placeholder:font-sans placeholder:font-normal focus:outline-none focus:border-[#1090F8]"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleApplyPromo();
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleApplyPromo}
+                          className="bg-[var(--ink)] text-white text-xs font-semibold px-5 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer shadow-sm shrink-0"
+                        >
+                          Apply Code
+                        </button>
+                      </div>
+
+                      {promoError && (
+                        <p className="text-[11px] font-semibold text-rose-600 mt-1.5 ml-2">
+                          {promoError}
+                        </p>
+                      )}
+
+                      {/* Available Promo Chips */}
+                      <div className="mt-2.5 pt-2 border-t border-[#24252c]/[0.06] flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] uppercase font-bold text-[#24252c]/40 mr-1">Available codes:</span>
+                        {Object.entries(PROMO_CODES).map(([code, p]) => (
+                          <button
+                            key={code}
+                            type="button"
+                            onClick={() => {
+                              setPromoInput(code);
+                              setPromoError('');
+                            }}
+                            className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-white border border-[#24252c]/10 text-[#1090F8] hover:border-[#1090F8] hover:bg-[#1090F8]/5 transition-colors cursor-pointer"
+                          >
+                            {code} ({p.discountType === 'percentage' ? `${p.discountValue}% off` : `₱${p.discountValue.toLocaleString()} off`})
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ── Comprehensive Payment Schedule Breakdown ── */}
+            <div className="p-5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] space-y-3 text-xs">
               <div className="flex items-center justify-between pb-2 border-b border-[#24252c]/[0.06]">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50">Selected Payment Plan</span>
                 <span className="font-bold text-[#1090F8]">
-                  {paymentType === 'full' ? 'Full Payment (100%)' : '50% Downpayment (Reservation)'}
+                  {paymentType === 'full' ? 'Full Payment (100% Settled)' : '50% Downpayment (Reservation)'}
                 </span>
               </div>
 
-              <div className="flex justify-between text-[#24252c]/60">
-                <span>Package Base Rate ({pkg.name})</span>
-                <span className="font-bold text-[var(--ink)]">₱{(Number(pkg.rawPrice) || 33500).toLocaleString()}</span>
-              </div>
-
-              {addonsCost > 0 && (
+              {/* Line items subtotal */}
+              <div className="space-y-1.5">
                 <div className="flex justify-between text-[#24252c]/60">
-                  <span>Equipment Add-ons ({selectedAddons.length})</span>
-                  <span className="font-bold text-[var(--ink)]">+₱{addonsCost.toLocaleString()}</span>
+                  <span>Package Base Rate ({pkg.name})</span>
+                  <span className="font-bold text-[var(--ink)]">₱{(Number(pkg.rawPrice) || 33500).toLocaleString()}</span>
                 </div>
-              )}
 
-              <div className="flex justify-between text-[#24252c]/60">
-                <span>Transport & Logistics Fee ({locationRegionName})</span>
-                <span className="font-bold text-[#1090F8]">+₱{transportFee.toLocaleString()}</span>
+                {addonsCost > 0 && (
+                  <div className="flex justify-between text-[#24252c]/60">
+                    <span>Equipment Add-ons ({selectedAddons.length})</span>
+                    <span className="font-bold text-[var(--ink)]">+₱{addonsCost.toLocaleString()}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between text-[#24252c]/60">
+                  <span>Transport & Logistics Fee ({locationRegionName})</span>
+                  <span className="font-bold text-[#1090F8]">+₱{transportFee.toLocaleString()}</span>
+                </div>
+
+                {discountAmount > 0 && (
+                  <div className="flex justify-between text-emerald-600 font-bold">
+                    <span className="flex items-center gap-1">
+                      <IconTicket className="w-3.5 h-3.5" />
+                      Promo Discount ({appliedPromo?.code})
+                    </span>
+                    <span>-₱{discountAmount.toLocaleString()}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between text-[#24252c]/80 pt-1 border-t border-[#24252c]/[0.05]">
+                  <span className="font-semibold">Total Event Booking Cost</span>
+                  <span className="font-bold text-[var(--ink)]">₱{totalCost.toLocaleString()}</span>
+                </div>
               </div>
 
-              <div className="flex justify-between text-[#24252c]/80 pt-1">
-                <span className="font-semibold">Total Event Booking Cost</span>
-                <span className="font-bold text-[var(--ink)]">₱{totalCost.toLocaleString()}</span>
+              {/* ── Clear Breakdown: Deposit Due Today (50%) vs Balance Due on Event Date (50%) ── */}
+              <div className="pt-2 border-t border-[#24252c]/[0.08] space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#24252c]/50">
+                    50 / 50 Payment Breakdown
+                  </span>
+                  <span className="text-[11px] font-bold text-[#24252c]/60">
+                    Total: ₱{totalCost.toLocaleString()}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* Deposit Due Today (50%) */}
+                  <div className="p-3.5 rounded-xl bg-white border border-[#1090F8]/25 shadow-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#1090F8] flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-[#1090F8]" />
+                        Deposit Due Today (50%)
+                      </span>
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-[#1090F8]/10 text-[#1090F8]">
+                        Immediate
+                      </span>
+                    </div>
+                    <div className="text-xl font-black text-[#1090F8]">
+                      ₱{depositRequired.toLocaleString()}
+                    </div>
+                    <p className="text-[10px] text-[#24252c]/60 leading-tight">
+                      Required reservation deposit to lock in schedule & crew.
+                    </p>
+                  </div>
+
+                  {/* Balance Due on Event Date (50%) */}
+                  <div className="p-3.5 rounded-xl bg-white border border-[#24252c]/[0.08] shadow-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#24252c]/60 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-[#24252c]/30" />
+                        Balance Due on Event Date (50%)
+                      </span>
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-[var(--mist)] text-[#24252c]/60">
+                        Event Day
+                      </span>
+                    </div>
+                    <div className={`text-xl font-black ${paymentType === 'full' ? 'text-emerald-600' : 'text-[var(--ink)]'}`}>
+                      {paymentType === 'full' ? '₱0 (Settled)' : `₱${balanceDueOnEventDate.toLocaleString()}`}
+                    </div>
+                    <p className="text-[10px] text-[#24252c]/60 leading-tight">
+                      {paymentType === 'full'
+                        ? '100% full payment selected — zero balance due on event date.'
+                        : `Payable on event day (${eventDate ? new Date(eventDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'event date'}).`}
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              <div className="pt-2.5 border-t border-[#24252c]/[0.08] flex items-center justify-between">
+              {/* Amount Payable Now banner */}
+              <div className="pt-2 border-t border-[#24252c]/[0.08] flex items-center justify-between">
                 <div>
                   <span className="text-xs font-extrabold uppercase tracking-wide text-[var(--ink)] block">
-                    Amount Payable Now
+                    Amount Payable Now via PayMongo
                   </span>
                   <span className="text-[10px] text-[#24252c]/50">
-                    {paymentType === 'full' ? 'Complete 100% settlement' : 'Required 50% reservation deposit'}
+                    {paymentType === 'full' ? 'Complete 100% full settlement' : '50% reservation downpayment'}
                   </span>
                 </div>
                 <div className="text-right">
@@ -1371,9 +1653,9 @@ export default function CheckoutPage({
               </div>
 
               <div className="pt-2 border-t border-dashed border-[#24252c]/10 flex items-center justify-between text-[11px]">
-                <span className="text-[#24252c]/60">Remaining Balance on Event Day:</span>
+                <span className="text-[#24252c]/60">Balance Due on Event Date:</span>
                 <span className={paymentType === 'full' ? 'font-bold text-emerald-600' : 'font-bold text-[var(--ink)]'}>
-                  {paymentType === 'full' ? '₱0 (No balance due)' : `₱${remainingBalanceAmount.toLocaleString()} (Due on Event Day)`}
+                  {paymentType === 'full' ? '₱0 (No balance due on event day)' : `₱${remainingBalanceAmount.toLocaleString()} (Due on Event Date)`}
                 </span>
               </div>
             </div>
