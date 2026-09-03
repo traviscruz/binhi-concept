@@ -68,6 +68,42 @@ export function AdminLayout({
     };
   }, []);
 
+  const [liveInquiryCount, setLiveInquiryCount] = useState(inquiryCount);
+
+  useEffect(() => {
+    async function fetchNewInquiryCount() {
+      try {
+        const { count, error } = await supabase
+          .from('inquiries')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'New');
+
+        if (!error && count !== null) {
+          setLiveInquiryCount(count);
+        }
+      } catch (err) {
+        console.warn('Error fetching new inquiries count:', err);
+      }
+    }
+
+    fetchNewInquiryCount();
+
+    const channel = supabase
+      .channel('admin-layout-inquiries')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'inquiries' },
+        () => {
+          fetchNewInquiryCount();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   const handleNav = (target: Page) => {
     setMobileSidebarOpen(false);
     go(target);
@@ -152,7 +188,7 @@ export function AdminLayout({
             {navItem('Staff & Accounts', 'admin-staff', <IconUser className="w-4 h-4" />)}
             {navItem('Event Calendar', 'admin-calendar', <IconCalendar className="w-4 h-4" />)}
             {navItem('Revenue Analytics', 'admin-reports', <IconTicket className="w-4 h-4" />)}
-            {navItem('Inquiry Inbox', 'admin-inquiries', <IconMail className="w-4 h-4" />, inquiryCount)}
+            {navItem('Inquiry Inbox', 'admin-inquiries', <IconMail className="w-4 h-4" />, liveInquiryCount)}
             {navItem('Voucher Codes', 'admin-vouchers', <IconTicket className="w-4 h-4" />)}
             {navItem('Loyalty Settings', 'admin-loyalty', <IconShield className="w-4 h-4" />)}
             {navItem('Review Moderation', 'admin-reviews', <IconTicket className="w-4 h-4" />)}

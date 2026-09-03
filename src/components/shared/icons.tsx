@@ -164,3 +164,10 @@ export const IconPrinter = ({ className = 'w-4 h-4' }: { className?: string }) =
     <rect x="6" y="14" width="12" height="8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+export const IconClock = ({ className = 'w-4 h-4' }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className}>
+    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8" />
+    <polyline points="12 6 12 12 16 14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
