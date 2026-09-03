@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { FEATURED_PACKAGES, type PackageData } from '../../data/packages';
 import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
 import { validateVoucherCode, recordVoucherUsage } from '../../utils/voucherService';
+import { logAuditEvent } from '../../utils/auditLogger';
 
 import type {
   TransportRuleOption,
@@ -490,6 +491,32 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
           console.warn('Note recording voucher usage:', vErr);
         }
       }
+
+      await logAuditEvent({
+        action: 'CREATE_MANUAL_BOOKING',
+        module: 'bookings',
+        targetId: bookingPayload.paymongo_reference_number,
+        targetName: `${fullCustomerName} - ${selectedPkg.name}`,
+        details: `Created manual booking ${bookingPayload.paymongo_reference_number} for ${fullCustomerName} via ${finalChannel} (${selectedPkg.name}, Total: ₱${totalCost.toLocaleString()})`,
+        currentData: {
+          customer: fullCustomerName,
+          email: email.trim(),
+          phone: `+63 ${phoneDigits.trim()}`,
+          channel: finalChannel,
+          payment_method: finalMethod,
+          package: selectedPkg.name,
+          event_date: eventDate,
+          total_cost: totalCost,
+          deposit_amount: amountDueToday,
+          remaining_balance: remainingBalanceAmount,
+          is_fully_paid: isFullPayment,
+          reference_number: bookingPayload.paymongo_reference_number,
+        },
+        metadata: {
+          venue: venueAddress,
+          addons: selectedAddonStrings,
+        },
+      });
 
       setSuccessBookingData({
         ref: bookingPayload.paymongo_reference_number,

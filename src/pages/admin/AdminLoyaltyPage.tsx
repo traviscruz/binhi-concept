@@ -3,6 +3,7 @@ import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
 import { IconShield, IconX } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
+import { logAuditEvent } from '../../utils/auditLogger';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors font-bold';
@@ -14,8 +15,21 @@ export default function AdminLoyaltyPage({ go }: { go: (p: Page) => void }) {
   const [platThreshold, setPlatThreshold] = useState('4,000');
   const [showSavedModal, setShowSavedModal] = useState(false);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    await logAuditEvent({
+      action: 'UPDATE_LOYALTY_SETTINGS',
+      module: 'loyalty',
+      targetId: 'loyalty-config',
+      targetName: 'Binhi Loyalty Engine',
+      details: `Saved loyalty configuration: ₱${ptsPerPeso}/pt. Tier Thresholds: Silver=${silverThreshold}pts, Gold=${goldThreshold}pts, VIP Platinum=${platThreshold}pts`,
+      currentData: {
+        points_per_peso: ptsPerPeso,
+        silver_threshold: silverThreshold,
+        gold_threshold: goldThreshold,
+        platinum_threshold: platThreshold,
+      },
+    });
     setShowSavedModal(true);
   };
 

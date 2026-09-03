@@ -39,6 +39,7 @@ export type Page =
   | 'admin-vouchers'
   | 'admin-loyalty'
   | 'admin-reviews'
+  | 'admin-audit-logs'
   | 'admin-profile'
   | 'crew-assigned-bookings'
   | 'crew-booking-detail'

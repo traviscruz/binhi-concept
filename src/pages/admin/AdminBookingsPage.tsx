@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
 import { IconCalendar, IconX, IconSearch } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
+import { TablePagination } from '../../components/shared/TablePagination';
 import { supabase } from '../../lib/supabase';
+import { logAuditEvent } from '../../utils/auditLogger';
+import { AssignCrewModal } from '../../components/admin/AssignCrewModal';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -15,10 +18,13 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
   const [rescheduleBooking, setRescheduleBooking] = useState<any | null>(null);
   const [newRescheduleDate, setNewRescheduleDate] = useState('');
   const [cancelBookingId, setCancelBookingId] = useState<string | null>(null);
+  const [assignCrewBooking, setAssignCrewBooking] = useState<any | null>(null);
 
   // ── Full Payment Settlement Modal State ─────────────────────────────────
   const [settleModalBooking, setSettleModalBooking] = useState<any | null>(null);
@@ -81,6 +87,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
               balanceReceiptUrl: b.balance_receipt_url || '',
               depositReceiptUrl: b.deposit_receipt_url || b.balance_receipt_url || '',
               balancePaidAt: b.balance_paid_at ? new Date(b.balance_paid_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '',
+              assignedCrew: Array.isArray(b.assigned_crew) ? b.assigned_crew : [],
             };
           })
         );
@@ -96,6 +103,11 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
     loadBookings();
   }, []);
 
+  // Reset pagination to page 1 whenever search, filter, or page size changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, statusFilter, pageSize]);
+
   const filtered = bookings.filter((b) => {
     const matchesStatus = statusFilter === 'All' || b.status.toLowerCase().includes(statusFilter.toLowerCase());
     const matchesSearch =
@@ -106,12 +118,33 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
     return matchesStatus && matchesSearch;
   });
 
+  const paginatedBookings = useMemo(() => {
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    const safePage = Math.min(Math.max(1, currentPage), totalPages);
+    const start = (safePage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
+
   const handleStatusChange = async (dbId: string, newStatus: string) => {
+    const target = bookings.find((b) => b.dbId === dbId);
+    const oldStatus = target ? target.rawStatus : 'unknown';
+
     try {
       await supabase
         .from('bookings')
         .update({ payment_status: newStatus, updated_at: new Date().toISOString() })
         .eq('id', dbId);
+
+      await logAuditEvent({
+        action: 'UPDATE_BOOKING_STATUS',
+        module: 'bookings',
+        targetId: target?.id || dbId,
+        targetName: target ? `${target.customer} (${target.package})` : dbId,
+        details: `Booking ${target?.id || dbId} status updated from "${oldStatus}" to "${newStatus}"`,
+        previousData: { payment_status: oldStatus },
+        currentData: { payment_status: newStatus },
+      });
+
       loadBookings();
     } catch (err) {
       console.error('Error updating booking status:', err);
@@ -124,6 +157,23 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         .from('bookings')
         .update({ payment_status: 'paid', updated_at: new Date().toISOString() })
         .eq('id', row.dbId);
+
+      await logAuditEvent({
+        action: 'APPROVE_BOOKING_DEPOSIT',
+        module: 'bookings',
+        targetId: row.id,
+        targetName: `${row.customer} - ${row.package}`,
+        details: `Approved 50% deposit payment (${row.deposit}) for booking ${row.id} (${row.customer})`,
+        previousData: { status: row.status, payment_status: row.rawStatus },
+        currentData: { status: 'Confirmed', payment_status: 'paid' },
+        metadata: {
+          deposit: row.deposit,
+          total: row.total,
+          paymentChannel: row.paymentChannel,
+          customer: row.customer,
+        },
+      });
+
       loadBookings();
     } catch (err) {
       console.error('Error approving booking deposit:', err);
@@ -140,6 +190,17 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           .from('bookings')
           .update({ payment_status: 'cancelled', updated_at: new Date().toISOString() })
           .eq('id', target.dbId);
+
+        await logAuditEvent({
+          action: 'CANCEL_BOOKING',
+          module: 'bookings',
+          targetId: target.id,
+          targetName: `${target.customer} - ${target.package}`,
+          details: `Booking ${target.id} (${target.customer}) was cancelled`,
+          previousData: { payment_status: target.rawStatus, status: target.status },
+          currentData: { payment_status: 'cancelled', status: 'Cancelled' },
+        });
+
         loadBookings();
       }
     } catch (err) {
@@ -153,10 +214,22 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
     if (!rescheduleBooking || !newRescheduleDate) return;
 
     try {
+      const oldDate = rescheduleBooking.rawDate || rescheduleBooking.date;
       await supabase
         .from('bookings')
         .update({ event_date: newRescheduleDate, updated_at: new Date().toISOString() })
         .eq('id', rescheduleBooking.dbId);
+
+      await logAuditEvent({
+        action: 'RESCHEDULE_BOOKING',
+        module: 'bookings',
+        targetId: rescheduleBooking.id,
+        targetName: `${rescheduleBooking.customer} - ${rescheduleBooking.package}`,
+        details: `Rescheduled booking ${rescheduleBooking.id} from "${oldDate}" to "${newRescheduleDate}"`,
+        previousData: { event_date: oldDate },
+        currentData: { event_date: newRescheduleDate },
+      });
+
       loadBookings();
     } catch (err) {
       console.error('Error rescheduling booking:', err);
@@ -218,6 +291,24 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         .update(updateData)
         .eq('id', settleModalBooking.dbId);
 
+      await logAuditEvent({
+        action: 'SETTLE_BOOKING_BALANCE',
+        module: 'bookings',
+        targetId: settleModalBooking.id,
+        targetName: `${settleModalBooking.customer} - ${settleModalBooking.package}`,
+        details: `Settled balance payment for booking ${settleModalBooking.id}: ${isFullyPaidInput ? 'Marked Fully Paid (100%)' : 'Updated Payment Info'} via ${finalPaymentMethod}`,
+        previousData: {
+          is_fully_paid: settleModalBooking.isFullyPaid,
+          balance_payment_method: settleModalBooking.balancePaymentMethod,
+          remaining: settleModalBooking.remaining,
+        },
+        currentData: {
+          is_fully_paid: isFullyPaidInput,
+          balance_payment_method: finalPaymentMethod,
+          remaining: isFullyPaidInput ? '₱0' : settleModalBooking.remaining,
+        },
+      });
+
       await loadBookings();
       setSettleModalBooking(null);
     } catch (err) {
@@ -265,14 +356,27 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => go('admin-manual-booking')}
-          className="inline-flex items-center gap-2 bg-[#1090F8] text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-all shadow-sm hover:shadow-md cursor-pointer shrink-0"
-        >
-          <span className="text-base font-bold leading-none">+</span>
-          <span>Manual Booking (Walk-in / Channels)</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={loadBookings}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 bg-white border border-[#24252c]/15 text-[var(--ink)] text-xs font-bold px-4 py-2.5 rounded-full hover:bg-[var(--mist)] transition-all shadow-2xs cursor-pointer disabled:opacity-50"
+            title="Refresh bookings data"
+          >
+            <span className={loading ? 'animate-spin inline-block' : ''}>↻</span>
+            <span>Refresh</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => go('admin-manual-booking')}
+            className="inline-flex items-center gap-2 bg-[#1090F8] text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-all shadow-sm hover:shadow-md cursor-pointer shrink-0"
+          >
+            <span className="text-base font-bold leading-none">+</span>
+            <span>Manual Booking (Walk-in / Channels)</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter & Search Bar */}
@@ -306,34 +410,39 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
 
       {/* Bookings Table */}
       <div className="bg-white rounded-2xl p-5 border border-[#24252c]/[0.08] shadow-sm">
-        {/* Desktop Table View */}
-        <div className="hidden sm:block overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-[#24252c]/[0.06] text-[#24252c]/50 uppercase tracking-wider">
-                <th className="py-3 px-3 font-semibold">Booking Ref</th>
-                <th className="py-3 px-3 font-semibold">Customer</th>
-                <th className="py-3 px-3 font-semibold">Package & Venue</th>
-                <th className="py-3 px-3 font-semibold">Event Date</th>
-                <th className="py-3 px-3 font-semibold">Payment Breakdown</th>
-                <th className="py-3 px-3 font-semibold">Status</th>
-                {statusFilter !== 'Cancelled' && (
-                  <th className="py-3 px-3 font-semibold text-right whitespace-nowrap min-w-[320px]">Actions</th>
-                )}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#24252c]/[0.04]">
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={statusFilter === 'Cancelled' ? 6 : 7} className="py-4">
-                    <EmptyState
-                      title="No Bookings Found"
-                      description="No event reservations match your current search terms or filter status."
-                    />
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((row) => (
+        {loading ? (
+          <div className="py-20 text-center">
+            <span className="w-7 h-7 border-2 border-[#1090F8] border-t-transparent rounded-full animate-spin inline-block mb-3" />
+            <p className="text-xs text-[#24252c]/70 font-semibold">Loading customer event bookings...</p>
+            <p className="text-[11px] text-[#24252c]/40 mt-1">Connecting to database and retrieving reservation records</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="py-8">
+            <EmptyState
+              title="No Bookings Found"
+              description="No event reservations match your current search terms or filter status."
+            />
+          </div>
+        ) : (
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-[#24252c]/[0.06] text-[#24252c]/50 uppercase tracking-wider">
+                    <th className="py-3 px-3 font-semibold">Booking Ref</th>
+                    <th className="py-3 px-3 font-semibold">Customer</th>
+                    <th className="py-3 px-3 font-semibold">Package & Venue</th>
+                    <th className="py-3 px-3 font-semibold">Event Date</th>
+                    <th className="py-3 px-3 font-semibold">Payment Breakdown</th>
+                    <th className="py-3 px-3 font-semibold">Status</th>
+                    {statusFilter !== 'Cancelled' && (
+                      <th className="py-3 px-3 font-semibold text-right whitespace-nowrap min-w-[320px]">Actions</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#24252c]/[0.04]">
+                  {paginatedBookings.map((row) => (
                   <tr key={row.id} className="hover:bg-[var(--mist)] transition-colors">
                     {/* Col 1: Booking Ref & Channel */}
                     <td className="py-3.5 px-3">
@@ -360,6 +469,26 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                     <td className="py-3.5 px-3">
                       <div className="font-semibold text-[var(--ink)]">{row.package}</div>
                       <div className="text-[10px] text-[#24252c]/50 truncate max-w-[180px]">{row.venue}</div>
+                      <div className="mt-1">
+                        {row.assignedCrew && row.assignedCrew.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setAssignCrewBooking(row)}
+                            className="inline-flex items-center gap-1 text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-blue-50 text-[#1090F8] border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
+                            title={row.assignedCrew.map((c: any) => `${c.name} (${c.roleTitle})`).join(', ')}
+                          >
+                            <span>👤 {row.assignedCrew.length} Crew Assigned</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setAssignCrewBooking(row)}
+                            className="inline-flex items-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors cursor-pointer"
+                          >
+                            <span>+ Assign Crew</span>
+                          </button>
+                        )}
+                      </div>
                     </td>
 
                     {/* Col 4: Event Date */}
@@ -438,6 +567,15 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                           )}
                           {row.rawStatus !== 'cancelled' && (
                             <button
+                              type="button"
+                              onClick={() => setAssignCrewBooking(row)}
+                              className="bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-semibold px-2.5 py-1 rounded-full hover:bg-indigo-100 transition-colors shadow-2xs cursor-pointer shrink-0"
+                            >
+                              Crew
+                            </button>
+                          )}
+                          {row.rawStatus !== 'cancelled' && (
+                            <button
                               onClick={() => {
                                 setRescheduleBooking(row);
                                 setNewRescheduleDate(row.rawDate || row.date);
@@ -459,15 +597,14 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                       </td>
                     )}
                   </tr>
-                ))
-              )}
+                ))}
             </tbody>
           </table>
         </div>
 
         {/* Mobile Row Cards View */}
         <div className="block sm:hidden space-y-3">
-          {filtered.map((row) => (
+          {paginatedBookings.map((row) => (
             <div key={row.id} className="p-4 rounded-xl bg-[var(--mist)] border border-[#24252c]/[0.06] space-y-2 text-xs">
               <div className="flex items-center justify-between">
                 <div>
@@ -531,6 +668,15 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                   )}
                   {row.rawStatus !== 'cancelled' && (
                     <button
+                      type="button"
+                      onClick={() => setAssignCrewBooking(row)}
+                      className="bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-indigo-100 cursor-pointer"
+                    >
+                      {row.assignedCrew && row.assignedCrew.length > 0 ? `Crew (${row.assignedCrew.length})` : '+ Crew'}
+                    </button>
+                  )}
+                  {row.rawStatus !== 'cancelled' && (
+                    <button
                       onClick={() => {
                         setRescheduleBooking(row);
                         setNewRescheduleDate(row.date);
@@ -553,7 +699,20 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
             </div>
           ))}
         </div>
-      </div>
+
+        {/* Pagination Controls */}
+        <TablePagination
+          currentPage={currentPage}
+          totalItems={filtered.length}
+          pageSize={pageSize}
+          pageSizeOptions={[10, 50, 100]}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          itemLabel="bookings"
+        />
+      </>
+    )}
+  </div>
 
       {/* Deposit Receipt Preview Modal */}
       <ModalOverlay isOpen={!!selectedReceipt} onClose={() => setSelectedReceipt(null)}>
@@ -820,6 +979,14 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           </div>
         </div>
       </ModalOverlay>
+
+      {/* Assign Crew Modal */}
+      <AssignCrewModal
+        isOpen={Boolean(assignCrewBooking)}
+        onClose={() => setAssignCrewBooking(null)}
+        booking={assignCrewBooking}
+        onAssigned={() => loadBookings()}
+      />
     </div>
   );
 }

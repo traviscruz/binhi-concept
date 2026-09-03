@@ -5,6 +5,7 @@ import { IconUser, IconX, IconSearch, IconShield } from '../../components/shared
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { supabase } from '../../utils/supabase';
+import { logAuditEvent } from '../../utils/auditLogger';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -115,6 +116,20 @@ export default function AdminStaffPage({ go }: { go: (p: Page) => void }) {
     }
 
     setStaff((prev) => prev.filter((s) => s.id !== pendingDeleteStaff.id));
+    await logAuditEvent({
+      action: 'DELETE_STAFF_ACCOUNT',
+      module: 'staff',
+      targetId: pendingDeleteStaff.email,
+      targetName: pendingDeleteStaff.name,
+      details: `Removed staff account for ${pendingDeleteStaff.name} (${pendingDeleteStaff.email}, Role: ${pendingDeleteStaff.role})`,
+      previousData: {
+        id: pendingDeleteStaff.id,
+        name: pendingDeleteStaff.name,
+        email: pendingDeleteStaff.email,
+        role: pendingDeleteStaff.role,
+      },
+    });
+
     showFeedback(
       'success',
       `Staff account for ${pendingDeleteStaff.name} (${pendingDeleteStaff.email}) removed successfully from system and authentication directory.`
@@ -243,6 +258,21 @@ export default function AdminStaffPage({ go }: { go: (p: Page) => void }) {
     }
 
     setStaff((prev) => [fullObj, ...prev]);
+    await logAuditEvent({
+      action: 'CREATE_STAFF_ACCOUNT',
+      module: 'staff',
+      targetId: fullObj.email,
+      targetName: fullObj.name,
+      details: `Added new staff account for ${fullObj.name} (${fullObj.email}) with role "${fullObj.role}"`,
+      currentData: {
+        name: fullObj.name,
+        email: fullObj.email,
+        role: fullObj.role,
+        phone: fullObj.phone,
+        status: 'Active',
+      },
+    });
+
     setLoading(false);
     setPendingAddStaff(null);
     setShowAddModal(false);
@@ -291,6 +321,17 @@ export default function AdminStaffPage({ go }: { go: (p: Page) => void }) {
     setStaff((prev) =>
       prev.map((s) => (s.id === pendingStatusToggle.id ? { ...s, status: newStatus } : s))
     );
+
+    await logAuditEvent({
+      action: 'UPDATE_STAFF_STATUS',
+      module: 'staff',
+      targetId: pendingStatusToggle.email,
+      targetName: pendingStatusToggle.name,
+      details: `Updated account status for ${pendingStatusToggle.name} from "${pendingStatusToggle.status}" to "${newStatus}"`,
+      previousData: { status: pendingStatusToggle.status },
+      currentData: { status: newStatus },
+    });
+
     setLoading(false);
 
     showFeedback('success', `Account for ${pendingStatusToggle.name} has been set to ${newStatus}.`);
@@ -323,6 +364,17 @@ export default function AdminStaffPage({ go }: { go: (p: Page) => void }) {
     setStaff((prev) =>
       prev.map((s) => (s.id === editingStaff.id ? { ...s, role: editRoleVal } : s))
     );
+
+    await logAuditEvent({
+      action: 'UPDATE_STAFF_ROLE',
+      module: 'staff',
+      targetId: editingStaff.email,
+      targetName: editingStaff.name,
+      details: `Changed role for staff member ${editingStaff.name} from "${editingStaff.role}" to "${editRoleVal}"`,
+      previousData: { role: editingStaff.role },
+      currentData: { role: editRoleVal },
+    });
+
     setLoading(false);
 
     setEditingStaff(null);

@@ -57,6 +57,7 @@ import CrewBookingDetailPage from './pages/crew/CrewBookingDetailPage';
 import CrewSetupTeardownPage from './pages/crew/CrewSetupTeardownPage';
 import CrewProfilePage from './pages/crew/CrewProfilePage';
 import AdminReviewsPage from './pages/admin/AdminReviewsPage';
+import AdminAuditLogsPage from './pages/admin/AdminAuditLogsPage';
 import AdminProfilePage from './pages/admin/AdminProfilePage';
 import { FEATURED_PACKAGES, type PackageData } from './data/packages';
 import { supabase } from './utils/supabase';
@@ -304,6 +305,7 @@ export default function App() {
     page === 'admin-vouchers' ||
     page === 'admin-loyalty' ||
     page === 'admin-reviews' ||
+    page === 'admin-audit-logs' ||
     page === 'admin-profile';
 
   const isCrewPage = page.startsWith('crew-');
@@ -347,6 +349,7 @@ export default function App() {
         {page === 'admin-vouchers' && <AdminVouchersPage go={go} />}
         {page === 'admin-loyalty' && <AdminLoyaltyPage go={go} />}
         {page === 'admin-reviews' && <AdminReviewsPage go={go} />}
+        {page === 'admin-audit-logs' && <AdminAuditLogsPage go={go} />}
         {page === 'admin-profile' && <AdminProfilePage go={go} />}
       </AdminLayout>
     );

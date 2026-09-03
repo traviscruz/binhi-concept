@@ -21,6 +21,7 @@ import {
   sortVouchersDeterministically,
   type Voucher,
 } from '../../utils/voucherService';
+import { logAuditEvent } from '../../utils/auditLogger';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors font-medium';
@@ -104,6 +105,16 @@ export default function AdminVouchersPage({ go: _go }: { go: (p: Page) => void }
 
     try {
       await toggleVoucherBanner(id, nextVal);
+      const target = vouchers.find((v) => v.id === id);
+      await logAuditEvent({
+        action: 'TOGGLE_VOUCHER_BANNER',
+        module: 'vouchers',
+        targetId: target?.code || id,
+        targetName: target?.code || id,
+        details: `Toggled voucher "${target?.code || id}" marquee banner visibility to ${nextVal ? 'Visible' : 'Hidden'}`,
+        previousData: { show_in_banner: currentValue },
+        currentData: { show_in_banner: nextVal },
+      });
     } catch (err) {
       console.error('Error toggling banner display:', err);
       // Revert if error
@@ -203,6 +214,45 @@ export default function AdminVouchersPage({ go: _go }: { go: (p: Page) => void }
         show_in_banner: showInBanner,
       });
 
+      if (editingVoucher) {
+        await logAuditEvent({
+          action: 'UPDATE_VOUCHER',
+          module: 'vouchers',
+          targetId: code.trim().toUpperCase(),
+          targetName: code.trim().toUpperCase(),
+          details: `Updated voucher "${code.trim().toUpperCase()}" (${discountType === 'percentage' ? `${val}%` : `₱${val}`} off)`,
+          previousData: {
+            code: editingVoucher.code,
+            discount_type: editingVoucher.discount_type,
+            discount_value: editingVoucher.discount_value,
+            max_uses: editingVoucher.max_uses,
+            status: editingVoucher.status,
+          },
+          currentData: {
+            code: code.trim().toUpperCase(),
+            discount_type: discountType,
+            discount_value: val,
+            max_uses: isUnlimitedUses ? 'Unlimited' : Number(maxUses),
+            status,
+          },
+        });
+      } else {
+        await logAuditEvent({
+          action: 'CREATE_VOUCHER',
+          module: 'vouchers',
+          targetId: code.trim().toUpperCase(),
+          targetName: code.trim().toUpperCase(),
+          details: `Created new promo voucher "${code.trim().toUpperCase()}" (${discountType === 'percentage' ? `${val}%` : `₱${val}`} off, Status: ${status})`,
+          currentData: {
+            code: code.trim().toUpperCase(),
+            discount_type: discountType,
+            discount_value: val,
+            max_uses: isUnlimitedUses ? 'Unlimited' : Number(maxUses),
+            status,
+          },
+        });
+      }
+
       setShowModal(false);
       loadData();
     } catch (err: any) {
@@ -216,8 +266,26 @@ export default function AdminVouchersPage({ go: _go }: { go: (p: Page) => void }
   // Delete handler
   const handleDelete = async () => {
     if (!deletingId) return;
+    const target = vouchers.find((v) => v.id === deletingId);
     try {
       await deleteVoucher(deletingId);
+
+      await logAuditEvent({
+        action: 'DELETE_VOUCHER',
+        module: 'vouchers',
+        targetId: target?.code || deletingId,
+        targetName: target?.code || deletingId,
+        details: `Deleted promo voucher "${target?.code || deletingId}"`,
+        previousData: target
+          ? {
+              code: target.code,
+              discount_type: target.discount_type,
+              discount_value: target.discount_value,
+              status: target.status,
+            }
+          : null,
+      });
+
       setDeletingId(null);
       loadData();
     } catch (err) {
@@ -240,6 +308,17 @@ export default function AdminVouchersPage({ go: _go }: { go: (p: Page) => void }
         ...v,
         status: nextStatus,
       });
+
+      await logAuditEvent({
+        action: 'UPDATE_VOUCHER',
+        module: 'vouchers',
+        targetId: v.code,
+        targetName: v.code,
+        details: `Toggled voucher "${v.code}" status to ${nextStatus}`,
+        previousData: { status: v.status },
+        currentData: { status: nextStatus },
+      });
+
       loadData();
     } catch (err) {
       console.error('Error toggling voucher status:', err);

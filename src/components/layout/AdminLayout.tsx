@@ -156,6 +156,7 @@ export function AdminLayout({
             {navItem('Voucher Codes', 'admin-vouchers', <IconTicket className="w-4 h-4" />)}
             {navItem('Loyalty Settings', 'admin-loyalty', <IconShield className="w-4 h-4" />)}
             {navItem('Review Moderation', 'admin-reviews', <IconTicket className="w-4 h-4" />)}
+            {navItem('Audit Trail & Logs', 'admin-audit-logs', <IconShield className="w-4 h-4" />)}
           </nav>
         </div>
 

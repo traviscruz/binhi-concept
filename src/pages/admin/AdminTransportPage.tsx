@@ -5,6 +5,7 @@ import { IconBox, IconPlus, IconX, IconTrash, IconSearch } from '../../component
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { supabase } from '../../lib/supabase';
+import { logAuditEvent } from '../../utils/auditLogger';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -199,6 +200,14 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
       };
 
       setRules((prev) => [created, ...prev]);
+      await logAuditEvent({
+        action: 'CREATE_TRANSPORT_RULE',
+        module: 'transport',
+        targetId: data.id,
+        targetName: data.region,
+        details: `Created transport fee rule for "${data.region}" (Base Fee: ₱${numericFee.toLocaleString()})`,
+        currentData: { region: data.region, baseFee: numericFee, status: 'Active' },
+      });
       setShowAddModal(false);
       resetAddForm();
     } catch (err) {
@@ -309,6 +318,19 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
         prev.map((r) => (r.id === editingRule.id ? { ...r, region: finalRegion, baseFee: numericFee } : r))
       );
 
+      const feeChanged = editingRule.baseFee !== numericFee;
+      await logAuditEvent({
+        action: 'UPDATE_TRANSPORT_RULE',
+        module: 'transport',
+        targetId: editingRule.id,
+        targetName: finalRegion,
+        details: feeChanged
+          ? `Updated transport base fee for "${finalRegion}" from ₱${editingRule.baseFee.toLocaleString()} to ₱${numericFee.toLocaleString()}`
+          : `Updated transport coverage details for "${finalRegion}"`,
+        previousData: { region: editingRule.region, baseFee: editingRule.baseFee },
+        currentData: { region: finalRegion, baseFee: numericFee },
+      });
+
       setEditingRule(null);
     } catch (err) {
       console.error('Failed to update transport rule:', err);
@@ -332,6 +354,16 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
       setRules((prev) =>
         prev.map((r) => (r.id === rule.id ? { ...r, status: nextStatus } : r))
       );
+
+      await logAuditEvent({
+        action: 'UPDATE_TRANSPORT_RULE',
+        module: 'transport',
+        targetId: rule.id,
+        targetName: rule.region,
+        details: `Toggled transport rule "${rule.region}" status to ${nextStatus}`,
+        previousData: { status: rule.status },
+        currentData: { status: nextStatus },
+      });
     } catch (err) {
       console.error('Failed to toggle status:', err);
     }
@@ -339,11 +371,22 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
 
   // ── Delete Rule ────────────────────────────────────────────────────────────
   const handleDeleteRule = async (id: string) => {
+    const target = rules.find((r) => r.id === id);
     try {
       const { error } = await supabase.from('transport_rules').delete().eq('id', id);
       if (error) throw error;
 
       setRules((prev) => prev.filter((r) => r.id !== id));
+
+      await logAuditEvent({
+        action: 'DELETE_TRANSPORT_RULE',
+        module: 'transport',
+        targetId: id,
+        targetName: target?.region || id,
+        details: `Deleted transport fee rule for "${target?.region || id}"`,
+        previousData: target ? { region: target.region, baseFee: target.baseFee } : null,
+      });
+
       setDeletingRuleId(null);
     } catch (err) {
       console.error('Failed to delete transport rule:', err);

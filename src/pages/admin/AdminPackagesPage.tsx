@@ -13,6 +13,7 @@ import {
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import type { PackageData } from '../../data/packages';
 import { supabase } from '../../lib/supabase';
+import { logAuditEvent } from '../../utils/auditLogger';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -182,20 +183,6 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
     } catch (err) {
       console.error('Package storage upload error:', err);
       return '';
-    }
-  };
-
-  const logAuditToSupabase = async (action: string, targetId: string, details: string) => {
-    try {
-      await supabase.from('audit_logs').insert({
-        action,
-        module: 'packages',
-        target_id: targetId,
-        details,
-        user_role: 'system_admin',
-      });
-    } catch (err) {
-      console.warn('Audit log insert note:', err);
     }
   };
 
@@ -501,11 +488,30 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
           )
         );
 
-        await logAuditToSupabase(
-          'UPDATE_PACKAGE',
-          targetPkgId,
-          `Updated package pricing and equipment specs for ${dbPayload.name}`
-        );
+        const priceChanged = editingPkg.rawPrice !== dbPayload.raw_price;
+        await logAuditEvent({
+          action: priceChanged ? 'UPDATE_PACKAGE_PRICE' : 'UPDATE_PACKAGE',
+          module: 'packages',
+          targetId: targetPkgId,
+          targetName: dbPayload.name,
+          details: priceChanged
+            ? `Updated rate for package "${dbPayload.name}" from ${editingPkg.price} to ${dbPayload.price}`
+            : `Updated equipment specifications and inclusions for "${dbPayload.name}"`,
+          previousData: {
+            name: editingPkg.name,
+            price: editingPkg.price,
+            rawPrice: editingPkg.rawPrice,
+            specs: editingPkg.specs,
+            inclusions: editingPkg.inclusions,
+          },
+          currentData: {
+            name: dbPayload.name,
+            price: dbPayload.price,
+            rawPrice: dbPayload.raw_price,
+            specs: dbPayload.specs,
+            inclusions: dbPayload.inclusions,
+          },
+        });
         setEditingPkg(null);
       } else {
         // SUPABASE CREATE
@@ -530,11 +536,20 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
         };
 
         setPackages([newPkg, ...packages]);
-        await logAuditToSupabase(
-          'CREATE_PACKAGE',
-          targetPkgId,
-          `Published new signature package ${dbPayload.name} (${dbPayload.price})`
-        );
+        await logAuditEvent({
+          action: 'CREATE_PACKAGE',
+          module: 'packages',
+          targetId: targetPkgId,
+          targetName: dbPayload.name,
+          details: `Created new package "${dbPayload.name}" (${dbPayload.price}/day) with ${dbPayload.inclusions.length} mapped items`,
+          currentData: {
+            name: dbPayload.name,
+            price: dbPayload.price,
+            rawPrice: dbPayload.raw_price,
+            inclusions: dbPayload.inclusions,
+            specs: dbPayload.specs,
+          },
+        });
         setShowCreateModal(false);
       }
     } catch (err: any) {
@@ -563,11 +578,19 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
       }
 
       setPackages((prev) => prev.filter((p) => p.id !== deleteConfirmPkg.id));
-      await logAuditToSupabase(
-        'DELETE_PACKAGE',
-        deleteConfirmPkg.id,
-        `Deleted package ${deleteConfirmPkg.name}`
-      );
+      await logAuditEvent({
+        action: 'DELETE_PACKAGE',
+        module: 'packages',
+        targetId: deleteConfirmPkg.id,
+        targetName: deleteConfirmPkg.name,
+        details: `Deleted package "${deleteConfirmPkg.name}" (${deleteConfirmPkg.price})`,
+        previousData: {
+          id: deleteConfirmPkg.id,
+          name: deleteConfirmPkg.name,
+          price: deleteConfirmPkg.price,
+          rawPrice: deleteConfirmPkg.rawPrice,
+        },
+      });
       setDeleteConfirmPkg(null);
     } catch (err) {
       console.error('Error deleting package:', err);

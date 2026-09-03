@@ -4,6 +4,7 @@ import { MonoBadge } from '../../components/shared/Badges';
 import { IconTicket } from '../../components/shared/icons';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { supabase } from '../../lib/supabase';
+import { logAuditEvent } from '../../utils/auditLogger';
 
 interface ReviewItem {
   id: string;
@@ -62,11 +63,22 @@ export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void })
   }, []);
 
   const handleUpdateStatus = async (id: string, newStatus: string) => {
+    const target = reviews.find((r) => r.id === id);
     try {
       await supabase
         .from('reviews')
         .update({ status: newStatus, updated_at: new Date().toISOString() })
         .eq('id', id);
+
+      await logAuditEvent({
+        action: 'MODERATE_REVIEW',
+        module: 'reviews',
+        targetId: id,
+        targetName: target ? `${target.author} (${target.packageName})` : id,
+        details: `Updated review status for ${target?.author || id} from "${target?.status || 'pending'}" to "${newStatus}"`,
+        previousData: { status: target?.status },
+        currentData: { status: newStatus },
+      });
 
       setReviews((prev) =>
         prev.map((r) => (r.id === id ? { ...r, status: newStatus } : r))
