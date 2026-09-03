@@ -30,6 +30,11 @@ export default function ItemDetailPage({ itemId, go }: { itemId: string; go: (p:
           const availCount = (units || []).filter((u: any) => u.status === 'Available in Warehouse').length;
           const rate = Number(model.rental_rate || 0);
 
+          const itemImg = model.image_url || model.img || staticFallback.img || '';
+          const itemPhotos = (staticFallback.photos && staticFallback.photos.length > 0)
+            ? staticFallback.photos
+            : (model.image_url ? [{ url: model.image_url, label: model.name }] : []);
+
           setItem({
             id: model.model_id || model.id,
             name: model.name,
@@ -37,8 +42,8 @@ export default function ItemDetailPage({ itemId, go }: { itemId: string; go: (p:
             price: rate > 0 ? `₱${rate.toLocaleString()} / day` : 'Included in Package',
             rawPrice: rate,
             status: availCount > 0 ? `${availCount} Available in Warehouse` : 'Available for Booking',
-            img: model.image_url || model.img || staticFallback.img,
-            photos: staticFallback.photos || [{ url: model.image_url || staticFallback.img, label: model.name }],
+            img: itemImg,
+            photos: itemPhotos,
             desc: model.description || staticFallback.desc,
             specs: [
               `Brand: ${model.brand || 'BINHI Standard'}`,
@@ -90,7 +95,12 @@ export default function ItemDetailPage({ itemId, go }: { itemId: string; go: (p:
             </div>
 
             <div className="mb-10">
-              <PhotoCarousel photos={item.photos} mainImage={item.img} />
+              <PhotoCarousel
+                photos={item.photos}
+                mainImage={item.img}
+                category={item.category}
+                name={item.name}
+              />
             </div>
 
             <div className="bg-[var(--mist)] rounded-[2rem] p-6 md:p-8 border border-[#24252c]/[0.06] mb-8">

@@ -3,6 +3,12 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { TransportRuleOption } from './types';
 import { IconCheck, IconX, IconPin, IconSearch, IconArrow } from '../../shared/icons';
+import {
+  fetchLogisticsConfig,
+  calculateDistanceKm,
+  type LogisticsConfig,
+  DEFAULT_LOGISTICS_CONFIG,
+} from '../../../utils/logistics';
 
 interface ManualBookingStep2Props {
   selectedRuleId: string;
@@ -44,11 +50,30 @@ export function ManualBookingStep2({
   const [addressSuggestions, setAddressSuggestions] = useState<Array<{ display_name: string; lat: string; lon: string }>>([]);
   const [showAddressDropdown, setShowAddressDropdown] = useState(false);
 
+  // Warehouse origin and proximity distance state
+  const [logistics, setLogistics] = useState<LogisticsConfig>(DEFAULT_LOGISTICS_CONFIG);
+  const [distanceFromWarehouse, setDistanceFromWarehouse] = useState<number | null>(null);
+
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markerInstanceRef = useRef<L.Marker | null>(null);
+  const warehouseMarkerRef = useRef<L.Marker | null>(null);
+  const warehouseCircleRef = useRef<L.Circle | null>(null);
+  const distancePolylineRef = useRef<L.Polyline | null>(null);
   const searchDebounceRef = useRef<any>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    async function loadLogistics() {
+      try {
+        const cfg = await fetchLogisticsConfig();
+        setLogistics(cfg);
+      } catch (e) {
+        console.error('Failed to load logistics config:', e);
+      }
+    }
+    loadLogistics();
+  }, []);
 
   const getRegionCoordinates = (ruleId: string): [number, number] => {
     const rule = transportRules.find((r) => r.id === ruleId);
@@ -59,8 +84,35 @@ export function ManualBookingStep2({
     return [14.5547, 121.0456]; // Metro Manila default
   };
 
+  const updateDistanceAndLine = (lat: number, lng: number) => {
+    const dist = calculateDistanceKm(lat, lng, logistics.warehouseLat, logistics.warehouseLng);
+    setDistanceFromWarehouse(dist);
+
+    if (mapInstanceRef.current) {
+      if (distancePolylineRef.current) {
+        distancePolylineRef.current.remove();
+        distancePolylineRef.current = null;
+      }
+      const isFree = logistics.isFreeRadiusEnabled && dist <= logistics.freeRadiusKm;
+      const poly = L.polyline(
+        [
+          [logistics.warehouseLat, logistics.warehouseLng],
+          [lat, lng],
+        ],
+        {
+          color: isFree ? '#10B981' : '#1090F8',
+          weight: 2.5,
+          dashArray: '6, 8',
+          opacity: 0.85,
+        }
+      ).addTo(mapInstanceRef.current);
+      distancePolylineRef.current = poly;
+    }
+  };
+
   const reverseGeocode = async (lat: number, lng: number) => {
     setIsGeocoding(true);
+    updateDistanceAndLine(lat, lng);
     try {
       const res = await fetch(
         `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
@@ -98,13 +150,16 @@ export function ManualBookingStep2({
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
         markerInstanceRef.current = null;
+        warehouseMarkerRef.current = null;
+        warehouseCircleRef.current = null;
+        distancePolylineRef.current = null;
       }
 
       const [initialLat, initialLng] = getRegionCoordinates(selectedRuleId);
 
       const map = L.map(mapContainerRef.current, {
         center: [initialLat, initialLng],
-        zoom: 14,
+        zoom: 13,
         zoomControl: false,
       });
 
@@ -115,6 +170,41 @@ export function ManualBookingStep2({
           '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>',
         maxZoom: 19,
       }).addTo(map);
+
+      // Warehouse Origin Pin
+      const warehouseIcon = L.divIcon({
+        className: 'binhi-warehouse-origin-pin',
+        html: `
+          <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; transform: translate(-50%, -100%);">
+            <div style="position: relative; width: 32px; height: 32px; border-radius: 9999px; background: #0c162c; border: 2.5px solid #1090F8; box-shadow: 0 8px 20px -2px rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; color: #ffffff;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+            </div>
+          </div>
+        `,
+        iconSize: [0, 0],
+      });
+
+      const warehouseMarker = L.marker([logistics.warehouseLat, logistics.warehouseLng], {
+        icon: warehouseIcon,
+      }).addTo(map);
+      warehouseMarker.bindTooltip(logistics.warehouseName || 'Warehouse Facility Origin', { permanent: false, direction: 'top' });
+
+      const freeCircle = L.circle([logistics.warehouseLat, logistics.warehouseLng], {
+        radius: (logistics.freeRadiusKm || 2) * 1000,
+        color: '#10B981',
+        fillColor: '#10B981',
+        fillOpacity: logistics.isFreeRadiusEnabled ? 0.14 : 0.03,
+        weight: 1.8,
+        dashArray: logistics.isFreeRadiusEnabled ? undefined : '5, 5',
+      }).addTo(map);
+
+      freeCircle.bindTooltip(`${logistics.freeRadiusKm} km Free Transport Zone`, { permanent: false, direction: 'bottom' });
+
+      warehouseMarkerRef.current = warehouseMarker;
+      warehouseCircleRef.current = freeCircle;
 
       const pinIcon = L.divIcon({
         className: 'binhi-custom-pin',
@@ -140,6 +230,8 @@ export function ManualBookingStep2({
       mapInstanceRef.current = map;
       markerInstanceRef.current = marker;
 
+      updateDistanceAndLine(initialLat, initialLng);
+
       map.on('click', (e: L.LeafletMouseEvent) => {
         marker.setLatLng(e.latlng);
         reverseGeocode(e.latlng.lat, e.latlng.lng);
@@ -159,9 +251,12 @@ export function ManualBookingStep2({
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
         markerInstanceRef.current = null;
+        warehouseMarkerRef.current = null;
+        warehouseCircleRef.current = null;
+        distancePolylineRef.current = null;
       }
     };
-  }, [selectedRuleId]);
+  }, [selectedRuleId, logistics]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -213,9 +308,10 @@ export function ManualBookingStep2({
     setVenueAddress(item.display_name);
     validateAddressAgainstRegion(item.display_name, selectedRuleId);
     setShowAddressDropdown(false);
+    updateDistanceAndLine(lat, lng);
 
     if (mapInstanceRef.current && markerInstanceRef.current) {
-      mapInstanceRef.current.flyTo([lat, lng], 16, { duration: 1.2 });
+      mapInstanceRef.current.flyTo([lat, lng], 15, { duration: 1.2 });
       markerInstanceRef.current.setLatLng([lat, lng]);
     }
   };
@@ -362,15 +458,73 @@ export function ManualBookingStep2({
           <div ref={mapContainerRef} className="w-full h-72 z-0" style={{ minHeight: '280px' }} />
         </div>
 
-        <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] text-xs text-[#24252c]/75">
-          <div className="w-5 h-5 rounded-full bg-[#1090F8]/10 text-[#1090F8] flex items-center justify-center shrink-0">
-            <IconPin className="w-3.5 h-3.5" />
+        <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] text-xs text-[#24252c]/75">
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-full bg-[#1090F8]/10 text-[#1090F8] flex items-center justify-center shrink-0">
+              <IconPin className="w-3.5 h-3.5" />
+            </div>
+            <span className="text-[11px] font-medium">
+              Click anywhere on the map or drag the pin marker to select your exact venue location.
+            </span>
           </div>
-          <span className="text-[11px] font-medium">
-            Click anywhere on the map or drag the pin marker to select your exact venue location.
-          </span>
+          {distanceFromWarehouse !== null && (
+            <span className="text-[11px] font-bold text-[var(--ink)] bg-white px-2.5 py-1 rounded-full border border-black/10 shrink-0">
+              {distanceFromWarehouse} km from warehouse
+            </span>
+          )}
         </div>
       </div>
+
+      {/* Warehouse Proximity & Free Transport Alert Banner */}
+      {distanceFromWarehouse !== null && (
+        <div
+          className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all ${
+            logistics.isFreeRadiusEnabled && distanceFromWarehouse <= logistics.freeRadiusKm
+              ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950 shadow-xs'
+              : 'bg-blue-50/60 border-blue-200 text-blue-950'
+          }`}
+        >
+          <div className="flex items-start sm:items-center gap-3">
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 ${
+                logistics.isFreeRadiusEnabled && distanceFromWarehouse <= logistics.freeRadiusKm
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'bg-[#1090F8] text-white shadow-sm'
+              }`}
+            >
+              {logistics.isFreeRadiusEnabled && distanceFromWarehouse <= logistics.freeRadiusKm ? <IconCheck className="w-4 h-4" /> : <IconPin className="w-4 h-4" />}
+            </div>
+            <div>
+              <div className="font-extrabold text-sm flex items-center gap-2">
+                {logistics.isFreeRadiusEnabled && distanceFromWarehouse <= logistics.freeRadiusKm ? (
+                  <span>Free Transport Waiver Applied</span>
+                ) : (
+                  <span>Delivery Distance: {distanceFromWarehouse} km</span>
+                )}
+              </div>
+              <p className="text-[11px] opacity-85 mt-0.5 leading-relaxed">
+                {logistics.isFreeRadiusEnabled && distanceFromWarehouse <= logistics.freeRadiusKm
+                  ? `Venue is within ${logistics.freeRadiusKm} km of our central warehouse (${distanceFromWarehouse} km away). Transport fee is waived (₱0.00).`
+                  : `Venue is ${distanceFromWarehouse} km away (outside the ${logistics.freeRadiusKm} km free local zone).`}
+              </p>
+            </div>
+          </div>
+
+          <div className="text-left sm:text-right shrink-0">
+            <span
+              className={`text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider inline-block ${
+                logistics.isFreeRadiusEnabled && distanceFromWarehouse <= logistics.freeRadiusKm
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-blue-100 text-blue-900 border border-blue-200'
+              }`}
+            >
+              {logistics.isFreeRadiusEnabled && distanceFromWarehouse <= logistics.freeRadiusKm
+                ? '₱0.00 WAIVED'
+                : 'STANDARD REGION FEE'}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Cost Summary Box */}
       <div className="p-5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] space-y-2.5 text-xs">
@@ -380,7 +534,11 @@ export function ManualBookingStep2({
         </div>
         <div className="flex justify-between text-[#24252c]/60">
           <span>Transport & Logistics Charge ({locationRegionName})</span>
-          <span className="font-bold text-[#1090F8]">+₱{transportFee.toLocaleString()}</span>
+          {transportFee === 0 ? (
+            <span className="font-extrabold text-emerald-600">₱0.00 (Waived Local Zone)</span>
+          ) : (
+            <span className="font-bold text-[#1090F8]">+₱{transportFee.toLocaleString()}</span>
+          )}
         </div>
         <div className="pt-2 border-t border-[#24252c]/[0.08] flex justify-between items-center text-sm">
           <span className="font-extrabold text-[var(--ink)]">Total Package & Transport Cost</span>

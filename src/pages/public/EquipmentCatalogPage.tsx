@@ -4,6 +4,7 @@ import { MonoBadge } from '../../components/shared/Badges';
 import { IconArrow, IconBox } from '../../components/shared/icons';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { ImageWithSkeleton } from '../../components/shared/ImageWithSkeleton';
+import { EquipmentCategoryPlaceholder } from '../../components/shared/EquipmentCategoryPlaceholder';
 import { supabase } from '../../lib/supabase';
 
 export default function EquipmentCatalogPage({ goItemDetail }: { goItemDetail: (id: string) => void }) {
@@ -54,6 +55,11 @@ export default function EquipmentCatalogPage({ goItemDetail }: { goItemDetail: (
               (si) => si.id === m.model_id || si.name.toLowerCase() === m.name.toLowerCase()
             );
 
+            const itemImg = m.image_url || m.img || staticMatch?.img || '';
+            const itemPhotos = (staticMatch?.photos && staticMatch.photos.length > 0)
+              ? staticMatch.photos
+              : (m.image_url ? [{ url: m.image_url, label: m.name }] : []);
+
             return {
               id: m.model_id || m.id,
               name: m.name,
@@ -61,8 +67,8 @@ export default function EquipmentCatalogPage({ goItemDetail }: { goItemDetail: (
               price: rate > 0 ? `₱${rate.toLocaleString()}/day` : 'Included in Package',
               rawPrice: rate,
               status: availCount > 0 ? `${availCount} Available in Warehouse` : 'Available for Booking',
-              img: m.image_url || m.img || staticMatch?.img || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&q=80&w=1200',
-              photos: staticMatch?.photos || [{ url: m.image_url || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&q=80&w=1200', label: m.name }],
+              img: itemImg,
+              photos: itemPhotos,
               desc: m.description || m.desc || staticMatch?.desc || 'Professional-grade event production equipment maintained to BINHI quality standards.',
               specs: staticMatch?.specs || [
                 `Brand: ${m.brand || 'BINHI Standard'}`,
@@ -144,16 +150,20 @@ export default function EquipmentCatalogPage({ goItemDetail }: { goItemDetail: (
                 className="group rounded-[1.75rem] border border-[#24252c]/[0.08] overflow-hidden bg-white hover:shadow-xl transition-all cursor-pointer flex flex-col justify-between"
               >
                 <div>
-                  <div className="aspect-[16/9] overflow-hidden bg-[var(--mist)] relative">
-                    <ImageWithSkeleton
-                      src={item.img}
-                      alt={item.name}
-                      className="w-full h-full group-hover:scale-[1.04] transition-transform duration-500"
-                    />
-                    <div className="absolute top-3 left-3 bg-black/65 backdrop-blur-md text-white text-[11px] font-semibold px-3 py-1 rounded-full uppercase tracking-wider">
+                  <div className="aspect-[16/9] overflow-hidden bg-[#12141d] relative">
+                    {item.img && item.img.trim() !== '' ? (
+                      <ImageWithSkeleton
+                        src={item.img}
+                        alt={item.name}
+                        className="w-full h-full group-hover:scale-[1.04] transition-transform duration-500"
+                      />
+                    ) : (
+                      <EquipmentCategoryPlaceholder category={item.category} name={item.name} />
+                    )}
+                    <div className="absolute top-3 left-3 bg-black/65 backdrop-blur-md text-white text-[11px] font-semibold px-3 py-1 rounded-full uppercase tracking-wider z-10">
                       {item.category}
                     </div>
-                    <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-md text-[var(--ink)] text-xs font-semibold px-3 py-1 rounded-full border border-black/10">
+                    <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-md text-[var(--ink)] text-xs font-semibold px-3 py-1 rounded-full border border-black/10 z-10">
                       {item.status}
                     </div>
                   </div>

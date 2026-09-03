@@ -1,11 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Page } from '../../types';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconBox, IconPlus, IconX, IconTrash, IconSearch } from '../../components/shared/icons';
+import { IconBox, IconPlus, IconX, IconTrash, IconSearch, IconCheck, IconPin } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { supabase } from '../../lib/supabase';
 import { logAuditEvent } from '../../utils/auditLogger';
+import {
+  fetchLogisticsConfig,
+  saveLogisticsConfig,
+  type LogisticsConfig,
+  DEFAULT_LOGISTICS_CONFIG,
+} from '../../utils/logistics';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -39,6 +47,95 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // ── Logistics Warehouse & Proximity Waiver State ─────────────────────────────
+  const [logistics, setLogistics] = useState<LogisticsConfig>(DEFAULT_LOGISTICS_CONFIG);
+  const [tempLogistics, setTempLogistics] = useState<LogisticsConfig>(DEFAULT_LOGISTICS_CONFIG);
+  const [showWarehouseModal, setShowWarehouseModal] = useState(false);
+  const [loadingLogistics, setLoadingLogistics] = useState(true);
+  const [savingLogistics, setSavingLogistics] = useState(false);
+  const [logisticsSavedToast, setLogisticsSavedToast] = useState(false);
+  const warehouseMapContainer = useRef<HTMLDivElement | null>(null);
+  const warehouseMapInstance = useRef<L.Map | null>(null);
+  const warehouseMarkerRef = useRef<L.Marker | null>(null);
+  const warehouseCircleRef = useRef<L.Circle | null>(null);
+
+  // Warehouse Address Search Autocomplete States
+  const [isSearchingWarehouseAddress, setIsSearchingWarehouseAddress] = useState(false);
+  const [warehouseAddressSuggestions, setWarehouseAddressSuggestions] = useState<
+    Array<{ display_name: string; lat: string; lon: string }>
+  >([]);
+  const [showWarehouseAddressDropdown, setShowWarehouseAddressDropdown] = useState(false);
+  const warehouseSearchDebounceRef = useRef<any>(null);
+  const warehouseDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  // Warehouse Address Search Autocomplete (Debounced)
+  const handleWarehouseAddressInputChange = (val: string) => {
+    setTempLogistics((prev) => ({ ...prev, warehouseAddress: val }));
+
+    if (warehouseSearchDebounceRef.current) {
+      clearTimeout(warehouseSearchDebounceRef.current);
+    }
+
+    if (!val || val.trim().length < 3) {
+      setWarehouseAddressSuggestions([]);
+      setShowWarehouseAddressDropdown(false);
+      return;
+    }
+
+    warehouseSearchDebounceRef.current = setTimeout(async () => {
+      setIsSearchingWarehouseAddress(true);
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&countrycodes=ph&limit=5&addressdetails=1`,
+          {
+            headers: {
+              'Accept-Language': 'en-PH, en',
+            },
+          }
+        );
+        if (res.ok) {
+          const items = await res.json();
+          setWarehouseAddressSuggestions(items || []);
+          setShowWarehouseAddressDropdown(Boolean(items && items.length > 0));
+        }
+      } catch (e) {
+        console.error('Warehouse address search error:', e);
+      } finally {
+        setIsSearchingWarehouseAddress(false);
+      }
+    }, 400);
+  };
+
+  // Select suggestion from dropdown
+  const handleSelectWarehouseSuggestion = (item: { display_name: string; lat: string; lon: string }) => {
+    const lat = parseFloat(item.lat);
+    const lng = parseFloat(item.lon);
+    setTempLogistics((prev) => ({
+      ...prev,
+      warehouseAddress: item.display_name,
+      warehouseLat: Number(lat.toFixed(6)),
+      warehouseLng: Number(lng.toFixed(6)),
+    }));
+    setShowWarehouseAddressDropdown(false);
+
+    if (warehouseMapInstance.current && warehouseMarkerRef.current && warehouseCircleRef.current) {
+      warehouseMapInstance.current.flyTo([lat, lng], 15, { duration: 1.2 });
+      warehouseMarkerRef.current.setLatLng([lat, lng]);
+      warehouseCircleRef.current.setLatLng([lat, lng]);
+    }
+  };
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (warehouseDropdownRef.current && !warehouseDropdownRef.current.contains(e.target as Node)) {
+        setShowWarehouseAddressDropdown(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // Modal States - Add Rule
   const [showAddModal, setShowAddModal] = useState(false);
   const [newRegion, setNewRegion] = useState('');
@@ -64,6 +161,189 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
   // Active target for PSGC picker ('add' or 'edit')
   const [psgcTarget, setPsgcTarget] = useState<'add' | 'edit'>('add');
 
+  // ── Fetch Logistics Config ─────────────────────────────────────────────────
+  useEffect(() => {
+    async function loadLogistics() {
+      setLoadingLogistics(true);
+      try {
+        const config = await fetchLogisticsConfig();
+        setLogistics(config);
+        setTempLogistics(config);
+      } catch (err) {
+        console.error('Failed to load logistics config:', err);
+      } finally {
+        setLoadingLogistics(false);
+      }
+    }
+    loadLogistics();
+  }, []);
+
+  // ── Initialize Warehouse Pinning Map (Inside Modal) ────────────────────────
+  useEffect(() => {
+    if (!showWarehouseModal) {
+      if (warehouseMapInstance.current) {
+        warehouseMapInstance.current.remove();
+        warehouseMapInstance.current = null;
+        warehouseMarkerRef.current = null;
+        warehouseCircleRef.current = null;
+      }
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (!warehouseMapContainer.current) return;
+
+      if (warehouseMapInstance.current) {
+        warehouseMapInstance.current.remove();
+        warehouseMapInstance.current = null;
+      }
+
+      const initialLat = tempLogistics.warehouseLat || DEFAULT_LOGISTICS_CONFIG.warehouseLat;
+      const initialLng = tempLogistics.warehouseLng || DEFAULT_LOGISTICS_CONFIG.warehouseLng;
+
+      const map = L.map(warehouseMapContainer.current, {
+        center: [initialLat, initialLng],
+        zoom: 13,
+        zoomControl: false,
+      });
+
+      L.control.zoom({ position: 'topright' }).addTo(map);
+
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19,
+      }).addTo(map);
+
+      const warehouseIcon = L.divIcon({
+        className: 'binhi-warehouse-pin',
+        html: `
+          <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; transform: translate(-50%, -100%);">
+            <div style="position: absolute; width: 36px; height: 36px; border-radius: 9999px; background: rgba(16, 144, 248, 0.25); animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+            <div style="position: relative; width: 34px; height: 34px; border-radius: 9999px; background: #0c162c; border: 2.5px solid #1090F8; box-shadow: 0 8px 20px -2px rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; color: #ffffff;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+            </div>
+          </div>
+        `,
+        iconSize: [0, 0],
+      });
+
+      const marker = L.marker([initialLat, initialLng], {
+        icon: warehouseIcon,
+        draggable: true,
+      }).addTo(map);
+
+      // Free delivery radius circle
+      const radiusMeters = (tempLogistics.freeRadiusKm || 2) * 1000;
+      const circle = L.circle([initialLat, initialLng], {
+        radius: radiusMeters,
+        color: '#10B981',
+        fillColor: '#10B981',
+        fillOpacity: tempLogistics.isFreeRadiusEnabled ? 0.16 : 0.04,
+        weight: 1.8,
+        dashArray: tempLogistics.isFreeRadiusEnabled ? undefined : '5, 5',
+      }).addTo(map);
+
+      warehouseMapInstance.current = map;
+      warehouseMarkerRef.current = marker;
+      warehouseCircleRef.current = circle;
+
+      // Reverse geocoding for warehouse address
+      const reverseGeocodeWarehouse = async (lat: number, lng: number) => {
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+            { headers: { 'Accept-Language': 'en-PH, en' } }
+          );
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.display_name) {
+              setTempLogistics((prev) => ({
+                ...prev,
+                warehouseAddress: data.display_name,
+                warehouseLat: Number(lat.toFixed(6)),
+                warehouseLng: Number(lng.toFixed(6)),
+              }));
+            }
+          }
+        } catch (e) {}
+      };
+
+      marker.on('dragend', () => {
+        const pos = marker.getLatLng();
+        circle.setLatLng(pos);
+        setTempLogistics((prev) => ({
+          ...prev,
+          warehouseLat: Number(pos.lat.toFixed(6)),
+          warehouseLng: Number(pos.lng.toFixed(6)),
+        }));
+        reverseGeocodeWarehouse(pos.lat, pos.lng);
+      });
+
+      map.on('click', (e: L.LeafletMouseEvent) => {
+        marker.setLatLng(e.latlng);
+        circle.setLatLng(e.latlng);
+        setTempLogistics((prev) => ({
+          ...prev,
+          warehouseLat: Number(e.latlng.lat.toFixed(6)),
+          warehouseLng: Number(e.latlng.lng.toFixed(6)),
+        }));
+        reverseGeocodeWarehouse(e.latlng.lat, e.latlng.lng);
+      });
+
+      map.invalidateSize();
+    }, 180);
+
+    return () => {
+      clearTimeout(timer);
+      if (warehouseMapInstance.current) {
+        warehouseMapInstance.current.remove();
+        warehouseMapInstance.current = null;
+        warehouseMarkerRef.current = null;
+        warehouseCircleRef.current = null;
+      }
+    };
+  }, [showWarehouseModal]);
+
+  // Update circle radius when freeRadiusKm or toggle changes in modal
+  useEffect(() => {
+    if (warehouseCircleRef.current) {
+      warehouseCircleRef.current.setRadius((tempLogistics.freeRadiusKm || 2) * 1000);
+      warehouseCircleRef.current.setStyle({
+        fillOpacity: tempLogistics.isFreeRadiusEnabled ? 0.16 : 0.04,
+        dashArray: tempLogistics.isFreeRadiusEnabled ? undefined : '5, 5',
+      });
+    }
+  }, [tempLogistics.freeRadiusKm, tempLogistics.isFreeRadiusEnabled]);
+
+  // ── Save Warehouse & Free Radius Rule ───────────────────────────────────────
+  const handleSaveLogistics = async () => {
+    setSavingLogistics(true);
+    try {
+      const saved = await saveLogisticsConfig(tempLogistics);
+      setLogistics(saved);
+      setTempLogistics(saved);
+      setShowWarehouseModal(false);
+      await logAuditEvent({
+        action: 'UPDATE_WAREHOUSE_LOGISTICS',
+        module: 'transport',
+        targetId: 'warehouse-proximity-rule',
+        targetName: saved.warehouseName,
+        details: `Updated Warehouse Location & Proximity Waiver: ${saved.freeRadiusKm} km free transport radius (${saved.isFreeRadiusEnabled ? 'Active' : 'Disabled'}) at [${saved.warehouseLat}, ${saved.warehouseLng}]`,
+        currentData: saved,
+      });
+
+      setLogisticsSavedToast(true);
+      setTimeout(() => setLogisticsSavedToast(false), 3500);
+    } catch (err) {
+      console.error('Failed to save logistics settings:', err);
+      alert('Failed to save warehouse logistics settings.');
+    } finally {
+      setSavingLogistics(false);
+    }
+  };
   // ── Fetch Rules from Supabase ──────────────────────────────────────────────
   const fetchRules = async () => {
     setLoading(true);
@@ -401,7 +681,7 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.06]">
         <div>
           <MonoBadge icon={IconBox}>Logistics & Coverage</MonoBadge>
@@ -409,7 +689,7 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
             Transportation Fee Rule Editor
           </h1>
           <p className="text-xs text-[#24252c]/60 mt-1">
-            Configure regional delivery and logistics transport rates.
+            Configure regional delivery logistics transport rates and warehouse proximity waiver rules.
           </p>
         </div>
 
@@ -422,6 +702,55 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
         >
           <IconPlus className="w-4 h-4" /> Add New Region Fee
         </button>
+      </div>
+
+      {/* ── Warehouse Origin & Proximity Waiver Quick Summary Card ── */}
+      <div className="bg-white rounded-3xl p-5 sm:p-6 border border-[#24252c]/[0.08] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-4">
+          <div className="w-11 h-11 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.06] flex items-center justify-center shrink-0 text-[#1090F8]">
+            <IconPin className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-bold text-[var(--ink)]">
+                {logistics.warehouseName || 'Warehouse Origin & Local Waiver'}
+              </h2>
+              {logistics.isFreeRadiusEnabled ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  Free Transportation: ≤ {logistics.freeRadiusKm} km Waived
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-600 border border-gray-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                  Waiver Disabled
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-[#24252c]/60 mt-0.5 max-w-xl line-clamp-1">
+              {logistics.warehouseAddress || 'No address specified'} · Coordinates: [{logistics.warehouseLat}, {logistics.warehouseLng}]
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 shrink-0">
+          {logisticsSavedToast && (
+            <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-200 animate-fade-in flex items-center gap-1.5">
+              <IconCheck className="w-3.5 h-3.5" /> Rule Saved
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setTempLogistics(logistics);
+              setShowWarehouseModal(true);
+            }}
+            className="bg-[var(--mist)] hover:bg-black/5 text-[var(--ink)] text-xs font-semibold px-4 py-2.5 rounded-full border border-[#24252c]/10 transition-colors cursor-pointer flex items-center gap-1.5"
+          >
+            <IconBox className="w-3.5 h-3.5 text-[#1090F8]" />
+            Configure Warehouse & Waiver
+          </button>
+        </div>
       </div>
 
       {/* Search Bar */}
@@ -836,6 +1165,299 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
             >
               Delete Rule
             </button>
+          </div>
+        </div>
+      </ModalOverlay>
+
+      {/* ── Configure Warehouse Origin & Proximity Waiver Modal ── */}
+      <ModalOverlay isOpen={showWarehouseModal} onClose={() => setShowWarehouseModal(false)}>
+        <div className="bg-white rounded-[2.5rem] p-6 sm:p-8 max-w-3xl w-full shadow-2xl border border-[#24252c]/10 relative max-h-[90vh] overflow-y-auto">
+          <button
+            onClick={() => setShowWarehouseModal(false)}
+            className="absolute top-6 right-6 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+          >
+            <IconX className="w-5 h-5" />
+          </button>
+
+          <div className="mb-5">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="p-1.5 rounded-lg bg-[#1090F8]/10 text-[#1090F8]">
+                <IconPin className="w-4 h-4" />
+              </span>
+              <h3 className="text-xl font-extrabold text-[var(--ink)]">
+                Warehouse Origin & Proximity Waiver Rule
+              </h3>
+            </div>
+            <p className="text-xs text-[#24252c]/60">
+              Pin the central warehouse location on the map and configure the distance radius where delivery transport fees are automatically waived to ₱0.00 during customer checkout.
+            </p>
+          </div>
+
+          <div className="space-y-5">
+            {/* ── Pill-Shaped Proximity Waiver & Radius Control Bar ── */}
+            <div className="p-4 sm:p-5 rounded-3xl bg-[var(--mist)] border border-[#24252c]/[0.08] space-y-4">
+              {/* Row 1: Proximity Waiver Status Toggle Pill */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-[#24252c]/[0.06]">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-[var(--ink)]">
+                      Free Proximity Waiver
+                    </span>
+                    {tempLogistics.isFreeRadiusEnabled ? (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                        Enabled (₱0.00 Rate)
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-200 text-gray-700 border border-gray-300 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                        Waiver Inactive
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-[#24252c]/60 mt-0.5">
+                    Automatically waive the transportation fee when the booking venue is within radius of the warehouse.
+                  </p>
+                </div>
+
+                {/* Pill Segmented Toggle */}
+                <div className="inline-flex rounded-full bg-[#E5E7EB] p-1 shrink-0 self-start sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setTempLogistics((prev) => ({ ...prev, isFreeRadiusEnabled: true }))}
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                      tempLogistics.isFreeRadiusEnabled
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-[#24252c]/60 hover:text-[var(--ink)]'
+                    }`}
+                  >
+                    Active
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTempLogistics((prev) => ({ ...prev, isFreeRadiusEnabled: false }))}
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                      !tempLogistics.isFreeRadiusEnabled
+                        ? 'bg-[var(--ink)] text-white shadow-xs'
+                        : 'text-[#24252c]/60 hover:text-[var(--ink)]'
+                    }`}
+                  >
+                    Disabled
+                  </button>
+                </div>
+              </div>
+
+              {/* Row 2: Pill-Shaped Radius Distance Presets and Stepper */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 block mb-1.5">
+                    Free Radius Distance Presets
+                  </label>
+                  {/* Preset Pills */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[1.0, 2.0, 3.0, 5.0, 10.0].map((preset) => {
+                      const isSelected = tempLogistics.freeRadiusKm === preset;
+                      return (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setTempLogistics((prev) => ({ ...prev, freeRadiusKm: preset }))}
+                          className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-[var(--ink)] text-white shadow-xs'
+                              : 'bg-white text-[#24252c]/75 border border-[#24252c]/10 hover:border-[#24252c]/30 hover:bg-gray-50'
+                          }`}
+                        >
+                          {preset} km
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Custom Distance Pill Input with Stepper */}
+                <div className="flex items-center gap-2 self-start md:self-end">
+                  <span className="text-[11px] font-semibold text-[#24252c]/50 uppercase">Radius:</span>
+                  <div className="inline-flex items-center rounded-full bg-white border border-[#24252c]/15 p-1 shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setTempLogistics((prev) => ({
+                          ...prev,
+                          freeRadiusKm: Math.max(0.5, Number((prev.freeRadiusKm - 0.5).toFixed(1))),
+                        }))
+                      }
+                      className="w-7 h-7 rounded-full bg-[var(--mist)] hover:bg-black/10 text-[var(--ink)] font-black flex items-center justify-center transition-colors cursor-pointer text-xs"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.5"
+                      max="50"
+                      value={tempLogistics.freeRadiusKm}
+                      onChange={(e) =>
+                        setTempLogistics((prev) => ({
+                          ...prev,
+                          freeRadiusKm: Math.max(0.1, parseFloat(e.target.value) || 0.1),
+                        }))
+                      }
+                      className="w-14 text-center text-xs font-extrabold text-[var(--ink)] focus:outline-none bg-transparent"
+                    />
+                    <span className="text-[11px] font-bold text-[#24252c]/40 pr-2">km</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setTempLogistics((prev) => ({
+                          ...prev,
+                          freeRadiusKm: Number((prev.freeRadiusKm + 0.5).toFixed(1)),
+                        }))
+                      }
+                      className="w-7 h-7 rounded-full bg-[var(--mist)] hover:bg-black/10 text-[var(--ink)] font-black flex items-center justify-center transition-colors cursor-pointer text-xs"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Warehouse Facility Details & Searchable Address Bar */}
+            <div className="grid sm:grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1 text-[10px]">
+                  Warehouse Facility Name
+                </label>
+                <input
+                  type="text"
+                  value={tempLogistics.warehouseName}
+                  onChange={(e) =>
+                    setTempLogistics((prev) => ({ ...prev, warehouseName: e.target.value }))
+                  }
+                  placeholder="e.g. BINHI Central Production Warehouse"
+                  className={inputClass}
+                />
+              </div>
+
+              {/* Searchable Warehouse Address with Live Autocomplete Suggestions */}
+              <div className="relative" ref={warehouseDropdownRef}>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-semibold uppercase text-[#24252c]/50 text-[10px]">
+                    Warehouse Address Search
+                  </label>
+                  {isSearchingWarehouseAddress && (
+                    <span className="text-[10px] font-medium text-[#1090F8] flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 border-2 border-[#1090F8] border-t-transparent rounded-full animate-spin" />
+                      Searching address...
+                    </span>
+                  )}
+                </div>
+
+                <div className="relative">
+                  <input
+                    value={tempLogistics.warehouseAddress}
+                    onChange={(e) => handleWarehouseAddressInputChange(e.target.value)}
+                    onFocus={() => {
+                      if (warehouseAddressSuggestions.length > 0) setShowWarehouseAddressDropdown(true);
+                    }}
+                    placeholder="Search place, city, or landmark (e.g. Taguig, BGC, Makati)"
+                    className={inputClass + ' pl-9 pr-8'}
+                  />
+                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#24252c]/40 pointer-events-none">
+                    <IconSearch className="w-3.5 h-3.5" />
+                  </div>
+                  {tempLogistics.warehouseAddress && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTempLogistics((prev) => ({ ...prev, warehouseAddress: '' }));
+                        setShowWarehouseAddressDropdown(false);
+                        setWarehouseAddressSuggestions([]);
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#24252c]/40 hover:text-[var(--ink)] p-1 cursor-pointer"
+                    >
+                      <IconX className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Suggestions Dropdown */}
+                {showWarehouseAddressDropdown && warehouseAddressSuggestions.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1.5 bg-white rounded-2xl border border-[#24252c]/10 shadow-2xl overflow-hidden z-[999] animate-blur-in max-h-56 overflow-y-auto">
+                    <div className="p-1.5 space-y-0.5">
+                      <div className="px-2.5 py-1 text-[9px] font-bold text-[#24252c]/40 uppercase tracking-wider">
+                        Suggested Locations (Philippines)
+                      </div>
+                      {warehouseAddressSuggestions.map((item, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleSelectWarehouseSuggestion(item)}
+                          className="w-full text-left px-2.5 py-2 rounded-xl hover:bg-[var(--mist)] flex items-start gap-2 transition-colors cursor-pointer group"
+                        >
+                          <div className="mt-0.5 text-[#1090F8] shrink-0">
+                            <IconPin className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold text-[var(--ink)] truncate group-hover:text-[#1090F8]">
+                              {item.display_name.split(',')[0]}
+                            </p>
+                            <p className="text-[10px] text-[#24252c]/60 truncate">
+                              {item.display_name.split(',').slice(1).join(', ').trim()}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Leaflet Map Area */}
+            <div>
+              <div className="flex items-center justify-between text-xs mb-2">
+                <span className="font-semibold text-[#24252c]/70 flex items-center gap-1.5">
+                  <IconPin className="w-3.5 h-3.5 text-[#1090F8]" />
+                  Drag marker or click map to set Warehouse Pin:
+                </span>
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                  Green Radius = {tempLogistics.freeRadiusKm} km Free Transport Zone
+                </span>
+              </div>
+
+              <div
+                ref={warehouseMapContainer}
+                className="w-full h-64 sm:h-72 rounded-2xl overflow-hidden border border-[#24252c]/15 shadow-inner relative z-0"
+              />
+            </div>
+
+            {/* Coordinates and Save Controls */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-[#24252c]/[0.06]">
+              <div className="text-[11px] text-[#24252c]/60 flex items-center gap-3">
+                <span>Lat: <strong className="font-mono text-[var(--ink)]">{tempLogistics.warehouseLat}</strong></span>
+                <span>Lng: <strong className="font-mono text-[var(--ink)]">{tempLogistics.warehouseLng}</strong></span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowWarehouseModal(false)}
+                  className="px-5 py-2.5 rounded-full border border-black/10 text-xs font-semibold text-[var(--ink)] hover:bg-[#F0F0F0] transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveLogistics}
+                  disabled={savingLogistics}
+                  className="bg-[var(--ink)] disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer text-xs shadow-md flex items-center gap-1.5"
+                >
+                  {savingLogistics ? 'Saving...' : 'Save Warehouse Rule'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </ModalOverlay>

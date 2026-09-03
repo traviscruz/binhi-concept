@@ -1,13 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconCalendar, IconX, IconSearch } from '../../components/shared/icons';
+import { IconCalendar, IconX, IconSearch, IconCheck } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { TablePagination } from '../../components/shared/TablePagination';
+import { BookingRescheduleCalendar } from '../../components/shared/BookingRescheduleCalendar';
 import { supabase } from '../../lib/supabase';
 import { logAuditEvent } from '../../utils/auditLogger';
 import { AssignCrewModal } from '../../components/admin/AssignCrewModal';
+import { formatDisplayDate } from '../../utils/bookingService';
+import { sendCustomerRescheduleApproval, sendCustomerRescheduleRejection } from '../../utils/emailService';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -21,8 +24,15 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
+
+  // ── Reschedule States ────────────────────────────────────────────────────
   const [rescheduleBooking, setRescheduleBooking] = useState<any | null>(null);
   const [newRescheduleDate, setNewRescheduleDate] = useState('');
+  const [adminRescheduleNotes, setAdminRescheduleNotes] = useState('');
+  const [reviewRescheduleBooking, setReviewRescheduleBooking] = useState<any | null>(null);
+  const [isProcessingReschedule, setIsProcessingReschedule] = useState(false);
+  const [rescheduleToast, setRescheduleToast] = useState<string | null>(null);
+
   const [cancelBookingId, setCancelBookingId] = useState<string | null>(null);
   const [assignCrewBooking, setAssignCrewBooking] = useState<any | null>(null);
 
@@ -68,7 +78,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
               email: b.customer_email || 'customer@binhiconcept.ph',
               phone: b.customer_phone || '',
               package: b.package_name || 'Event Production Setup',
-              date: b.event_date ? new Date(b.event_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Selected Date',
+              date: formatDisplayDate(b.event_date),
               rawDate: b.event_date || '',
               venue: b.venue_address || 'Selected Location',
               totalNum: total,
@@ -88,6 +98,11 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
               depositReceiptUrl: b.deposit_receipt_url || b.balance_receipt_url || '',
               balancePaidAt: b.balance_paid_at ? new Date(b.balance_paid_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '',
               assignedCrew: Array.isArray(b.assigned_crew) ? b.assigned_crew : [],
+              rescheduleStatus: b.reschedule_status || null,
+              rescheduleRequestedDate: b.reschedule_requested_date || null,
+              rescheduleReason: b.reschedule_reason || null,
+              rescheduleRequestedAt: b.reschedule_requested_at || null,
+              rescheduleAdminNotes: b.reschedule_admin_notes || null,
             };
           })
         );
@@ -101,6 +116,21 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
 
   useEffect(() => {
     loadBookings();
+
+    const channel = supabase
+      .channel('admin-bookings-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings' },
+        () => {
+          loadBookings();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Reset pagination to page 1 whenever search, filter, or page size changes
@@ -209,34 +239,190 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
     setCancelBookingId(null);
   };
 
-  const handleSaveReschedule = async (e: React.FormEvent) => {
+  const getApprovalEmailTemplate = (booking: any) => {
+    if (!booking) return '';
+    const reqDate = formatDisplayDate(booking.rescheduleRequestedDate);
+    return `Dear ${booking.customer},\n\nWe are pleased to inform you that your request to reschedule Booking #${booking.id} (${booking.package}) to ${reqDate} has been APPROVED and officially confirmed in our production calendar.\n\nAll your equipment inclusions, technical gear, and assigned crew arrangements have been secured for your new date.\n\nWarm regards,\nBINHI Concept Production Team`;
+  };
+
+  const getDeclineEmailTemplate = (booking: any) => {
+    if (!booking) return '';
+    const reqDate = formatDisplayDate(booking.rescheduleRequestedDate);
+    return `Dear ${booking.customer},\n\nThank you for reaching out. Regrettably, our production crew and staging equipment are fully booked for your requested date (${reqDate}).\n\nYour reservation remains active and secured for your original scheduled date (${booking.date}). Please feel free to reply if you would like to explore alternative open dates.\n\nBest regards,\nBINHI Concept Production Team`;
+  };
+
+  const getDirectRescheduleEmailTemplate = (booking: any, targetDate: string) => {
+    if (!booking) return '';
+    const dateStr = formatDisplayDate(targetDate);
+    return `Dear ${booking.customer},\n\nThis is an official notice that your event schedule for Booking #${booking.id} (${booking.package}) has been updated to ${dateStr} per our recent coordination.\n\nAll staging equipment, logistics, and crew assignments have been updated accordingly.\n\nWarm regards,\nBINHI Concept Production Team`;
+  };
+
+  const handleApproveCustomerReschedule = async () => {
+    if (!reviewRescheduleBooking) return;
+    setIsProcessingReschedule(true);
+    try {
+      const oldDate = reviewRescheduleBooking.date;
+      const newDateIso = reviewRescheduleBooking.rescheduleRequestedDate;
+      const formattedNewDate = formatDisplayDate(newDateIso);
+
+      const { error } = await supabase
+        .from('bookings')
+        .update({
+          event_date: newDateIso,
+          reschedule_status: 'approved',
+          reschedule_reviewed_at: new Date().toISOString(),
+          reschedule_admin_notes: adminRescheduleNotes.trim() || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', reviewRescheduleBooking.dbId);
+
+      if (error) throw error;
+
+      await logAuditEvent({
+        action: 'APPROVE_RESCHEDULE',
+        module: 'bookings',
+        targetId: reviewRescheduleBooking.id,
+        targetName: `${reviewRescheduleBooking.customer} - ${reviewRescheduleBooking.package}`,
+        details: `Approved reschedule for booking ${reviewRescheduleBooking.id} from "${oldDate}" to "${formattedNewDate}"`,
+        previousData: { event_date: oldDate },
+        currentData: { event_date: formattedNewDate },
+      });
+
+      // Email customer
+      await sendCustomerRescheduleApproval({
+        customerName: reviewRescheduleBooking.customer,
+        customerEmail: reviewRescheduleBooking.email,
+        bookingId: reviewRescheduleBooking.id,
+        packageName: reviewRescheduleBooking.package,
+        oldDate: oldDate,
+        newDate: formattedNewDate,
+        venue: reviewRescheduleBooking.venue,
+        adminNotes: adminRescheduleNotes.trim() || undefined,
+        isDirectAdminReschedule: false,
+      });
+
+      setRescheduleToast(`Reschedule approved for #${reviewRescheduleBooking.id}! Customer has been emailed confirmation.`);
+      setTimeout(() => setRescheduleToast(null), 6000);
+      setReviewRescheduleBooking(null);
+      setAdminRescheduleNotes('');
+      await loadBookings();
+    } catch (err: any) {
+      console.error('Error approving reschedule:', err);
+      alert(`Failed to approve reschedule: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsProcessingReschedule(false);
+    }
+  };
+
+  const handleDeclineCustomerReschedule = async () => {
+    if (!reviewRescheduleBooking) return;
+    setIsProcessingReschedule(true);
+    try {
+      const origDate = reviewRescheduleBooking.date;
+      const requestedDateFormatted = formatDisplayDate(reviewRescheduleBooking.rescheduleRequestedDate);
+
+      const { error } = await supabase
+        .from('bookings')
+        .update({
+          reschedule_status: 'rejected',
+          reschedule_reviewed_at: new Date().toISOString(),
+          reschedule_admin_notes: adminRescheduleNotes.trim() || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', reviewRescheduleBooking.dbId);
+
+      if (error) throw error;
+
+      await logAuditEvent({
+        action: 'DECLINE_RESCHEDULE',
+        module: 'bookings',
+        targetId: reviewRescheduleBooking.id,
+        targetName: `${reviewRescheduleBooking.customer} - ${reviewRescheduleBooking.package}`,
+        details: `Declined reschedule for booking ${reviewRescheduleBooking.id} (requested ${requestedDateFormatted})`,
+      });
+
+      // Email customer
+      await sendCustomerRescheduleRejection({
+        customerName: reviewRescheduleBooking.customer,
+        customerEmail: reviewRescheduleBooking.email,
+        bookingId: reviewRescheduleBooking.id,
+        packageName: reviewRescheduleBooking.package,
+        originalDate: origDate,
+        requestedDate: requestedDateFormatted,
+        adminNotes: adminRescheduleNotes.trim() || undefined,
+      });
+
+      setRescheduleToast(`Reschedule declined for #${reviewRescheduleBooking.id}. Customer has been notified via email.`);
+      setTimeout(() => setRescheduleToast(null), 6000);
+      setReviewRescheduleBooking(null);
+      setAdminRescheduleNotes('');
+      await loadBookings();
+    } catch (err: any) {
+      console.error('Error declining reschedule:', err);
+      alert(`Failed to decline reschedule: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsProcessingReschedule(false);
+    }
+  };
+
+  const handleDirectAdminReschedule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rescheduleBooking || !newRescheduleDate) return;
+    setIsProcessingReschedule(true);
 
     try {
-      const oldDate = rescheduleBooking.rawDate || rescheduleBooking.date;
-      await supabase
+      const oldDate = rescheduleBooking.date;
+      const formattedNewDate = formatDisplayDate(newRescheduleDate);
+
+      const { error } = await supabase
         .from('bookings')
-        .update({ event_date: newRescheduleDate, updated_at: new Date().toISOString() })
+        .update({
+          event_date: newRescheduleDate,
+          reschedule_status: 'approved',
+          reschedule_reviewed_at: new Date().toISOString(),
+          reschedule_admin_notes: adminRescheduleNotes.trim() || 'Directly rescheduled by System Administrator',
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', rescheduleBooking.dbId);
+
+      if (error) throw error;
 
       await logAuditEvent({
         action: 'RESCHEDULE_BOOKING',
         module: 'bookings',
         targetId: rescheduleBooking.id,
         targetName: `${rescheduleBooking.customer} - ${rescheduleBooking.package}`,
-        details: `Rescheduled booking ${rescheduleBooking.id} from "${oldDate}" to "${newRescheduleDate}"`,
+        details: `Directly rescheduled booking ${rescheduleBooking.id} from "${oldDate}" to "${formattedNewDate}"`,
         previousData: { event_date: oldDate },
-        currentData: { event_date: newRescheduleDate },
+        currentData: { event_date: formattedNewDate },
       });
 
-      loadBookings();
-    } catch (err) {
-      console.error('Error rescheduling booking:', err);
-    }
+      // Email customer
+      await sendCustomerRescheduleApproval({
+        customerName: rescheduleBooking.customer,
+        customerEmail: rescheduleBooking.email,
+        bookingId: rescheduleBooking.id,
+        packageName: rescheduleBooking.package,
+        oldDate: oldDate,
+        newDate: formattedNewDate,
+        venue: rescheduleBooking.venue,
+        adminNotes: adminRescheduleNotes.trim() || 'Rescheduled per production logistics update.',
+        isDirectAdminReschedule: true,
+      });
 
-    setRescheduleBooking(null);
+      setRescheduleToast(`Booking #${rescheduleBooking.id} successfully rescheduled to ${formattedNewDate}! Customer notified via email.`);
+      setTimeout(() => setRescheduleToast(null), 6000);
+      setRescheduleBooking(null);
+      setAdminRescheduleNotes('');
+      await loadBookings();
+    } catch (err: any) {
+      console.error('Error directly rescheduling booking:', err);
+      alert(`Failed to reschedule booking: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsProcessingReschedule(false);
+    }
   };
+
 
   const handleSaveBalanceSettlement = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -385,7 +571,10 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           {['All', 'Pending', 'Confirmed', 'Completed', 'Cancelled'].map((st) => (
             <button
               key={st}
-              onClick={() => setStatusFilter(st)}
+              onClick={() => {
+                setStatusFilter(st);
+                setCurrentPage(1);
+              }}
               className={`text-xs px-3.5 py-1.5 rounded-full font-medium transition-all cursor-pointer ${
                 statusFilter === st
                   ? 'bg-[var(--ink)] text-white shadow-sm font-semibold'
@@ -401,109 +590,111 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           <IconSearch className="w-4 h-4 text-[#24252c]/40 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setCurrentPage(1);
+            }}
             placeholder="Search booking ID or customer..."
             className={inputClass + ' pl-10'}
           />
         </div>
       </div>
 
-      {/* Bookings Table */}
-      <div className="bg-white rounded-2xl p-5 border border-[#24252c]/[0.08] shadow-sm">
-        {loading ? (
-          <div className="py-20 text-center">
-            <span className="w-7 h-7 border-2 border-[#1090F8] border-t-transparent rounded-full animate-spin inline-block mb-3" />
-            <p className="text-xs text-[#24252c]/70 font-semibold">Loading customer event bookings...</p>
-            <p className="text-[11px] text-[#24252c]/40 mt-1">Connecting to database and retrieving reservation records</p>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="py-8">
-            <EmptyState
-              title="No Bookings Found"
-              description="No event reservations match your current search terms or filter status."
-            />
-          </div>
-        ) : (
-          <>
-            {/* Desktop Table View */}
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-[#24252c]/[0.06] text-[#24252c]/50 uppercase tracking-wider">
-                    <th className="py-3 px-3 font-semibold">Booking Ref</th>
-                    <th className="py-3 px-3 font-semibold">Customer</th>
-                    <th className="py-3 px-3 font-semibold">Package & Venue</th>
-                    <th className="py-3 px-3 font-semibold">Event Date</th>
-                    <th className="py-3 px-3 font-semibold">Payment Breakdown</th>
-                    <th className="py-3 px-3 font-semibold">Status</th>
-                    {statusFilter !== 'Cancelled' && (
-                      <th className="py-3 px-3 font-semibold text-right whitespace-nowrap min-w-[320px]">Actions</th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#24252c]/[0.04]">
-                  {paginatedBookings.map((row) => (
-                  <tr key={row.id} className="hover:bg-[var(--mist)] transition-colors">
-                    {/* Col 1: Booking Ref & Channel */}
+        {/* Desktop Bookings Table */}
+        <div className="hidden sm:block bg-white rounded-3xl border border-[#24252c]/10 shadow-sm overflow-hidden">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="border-b border-[#24252c]/10 bg-[var(--mist)]/50 text-[#24252c]/60 font-bold uppercase text-[10px] tracking-wider">
+                <th className="py-3 px-3">Ref / Customer</th>
+                <th className="py-3 px-3">Package & Venue</th>
+                <th className="py-3 px-3">Schedule Date</th>
+                <th className="py-3 px-3">Cost Breakdown</th>
+                <th className="py-3 px-3">Assigned Crew</th>
+                <th className="py-3 px-3">Payment Status</th>
+                {statusFilter !== 'Cancelled' && (
+                  <th className="py-3 px-3 text-right">Actions</th>
+                )}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#24252c]/5">
+              {paginatedBookings.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-xs text-[#24252c]/50">
+                    No bookings found matching your search and filter criteria.
+                  </td>
+                </tr>
+              ) : (
+                paginatedBookings.map((row) => (
+                  <tr key={row.dbId} className="hover:bg-[var(--mist)]/40 transition-colors">
+                    {/* Col 1: Customer & Ref */}
                     <td className="py-3.5 px-3">
-                      <div className="font-mono font-extrabold text-[#1090F8]">{row.id}</div>
-                      {row.bookingSource && row.bookingSource !== 'Online Booking' ? (
-                        <span className="inline-block mt-1 text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 uppercase tracking-wider">
-                          {row.bookingSource}
-                        </span>
-                      ) : (
-                        <span className="inline-block mt-1 text-[9px] font-medium text-[#24252c]/40">
-                          Website
-                        </span>
+                      <div className="font-mono font-bold text-[#1090F8] text-[11px]">
+                        #{row.id}
+                      </div>
+                      <div className="font-extrabold text-[var(--ink)] text-xs mt-0.5">
+                        {row.customer}
+                      </div>
+                      <div className="text-[10px] text-[#24252c]/50 truncate max-w-[160px]">
+                        {row.email}
+                      </div>
+                    </td>
+
+                    {/* Col 2: Package & Venue */}
+                    <td className="py-3.5 px-3">
+                      <div className="font-bold text-[var(--ink)]">{row.package}</div>
+                      <div className="text-[10px] text-[#24252c]/60 truncate max-w-[180px] mt-0.5">
+                        {row.venue}
+                      </div>
+                    </td>
+
+                    {/* Col 3: Event Date & Reschedule Alert */}
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      <div className="font-semibold text-[var(--ink)] flex items-center gap-1">
+                        <IconCalendar className="w-3.5 h-3.5 text-[#1090F8] shrink-0" />
+                        <span>{row.date}</span>
+                      </div>
+                      {row.rescheduleStatus === 'pending' && (
+                        <div className="mt-1 inline-flex items-center gap-1 bg-amber-500 text-white font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-2xs">
+                          <span>Reschedule Requested</span>
+                        </div>
                       )}
                     </td>
 
-                    {/* Col 2: Customer */}
-                    <td className="py-3.5 px-3">
-                      <div className="font-bold text-[var(--ink)]">{row.customer}</div>
-                      <div className="text-[10px] text-[#24252c]/50">{row.email}</div>
-                      {row.phone && <div className="text-[10px] text-[#24252c]/50">{row.phone}</div>}
-                    </td>
-
-                    {/* Col 3: Package & Venue */}
-                    <td className="py-3.5 px-3">
-                      <div className="font-semibold text-[var(--ink)]">{row.package}</div>
-                      <div className="text-[10px] text-[#24252c]/50 truncate max-w-[180px]">{row.venue}</div>
-                      <div className="mt-1">
-                        {row.assignedCrew && row.assignedCrew.length > 0 ? (
-                          <button
-                            type="button"
-                            onClick={() => setAssignCrewBooking(row)}
-                            className="inline-flex items-center gap-1 text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-blue-50 text-[#1090F8] border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
-                            title={row.assignedCrew.map((c: any) => `${c.name} (${c.roleTitle})`).join(', ')}
-                          >
-                            <span>👤 {row.assignedCrew.length} Crew Assigned</span>
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setAssignCrewBooking(row)}
-                            className="inline-flex items-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors cursor-pointer"
-                          >
-                            <span>+ Assign Crew</span>
-                          </button>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* Col 4: Event Date */}
-                    <td className="py-3.5 px-3 font-semibold text-[var(--ink)]">{row.date}</td>
-
-                    {/* Col 5: Payment Breakdown */}
+                    {/* Col 4: Cost */}
                     <td className="py-3.5 px-3">
                       <div className="font-extrabold text-[var(--ink)]">{row.total}</div>
-                      <div className="text-[10px] text-emerald-600 font-bold">50% Dep: {row.deposit}</div>
-                      <div className="text-[10px] text-[#1090F8] font-bold">
-                        {row.isFullyPaid ? 'Bal: ₱0' : `Bal: ${row.remaining}`}
+                      <div className="text-[10px] text-emerald-600 font-semibold">
+                        Deposit: {row.deposit}
+                      </div>
+                      <div className="text-[10px] text-[#24252c]/50">
+                        Rem: {row.remaining}
                       </div>
                     </td>
 
-                    {/* Col 6: Status */}
+                    {/* Col 5: Assigned Crew */}
+                    <td className="py-3.5 px-3">
+                      {row.assignedCrew.length > 0 ? (
+                        <div className="flex flex-wrap gap-1 max-w-[140px]">
+                          {row.assignedCrew.slice(0, 2).map((c: any, i: number) => (
+                            <span
+                              key={i}
+                              className="inline-block bg-indigo-50 text-indigo-700 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-indigo-200 truncate max-w-[120px]"
+                            >
+                              {c.name || c.full_name}
+                            </span>
+                          ))}
+                          {row.assignedCrew.length > 2 && (
+                            <span className="text-[9px] font-bold text-indigo-600 self-center">
+                              +{row.assignedCrew.length - 2}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-[#24252c]/40 italic">Unassigned</span>
+                      )}
+                    </td>
+
+                    {/* Col 6: Payment Status */}
                     <td className="py-3.5 px-3">
                       <div className="flex flex-col gap-1 items-start">
                         <select
@@ -539,7 +730,22 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                     {/* Col 7: Actions (Hidden on Cancelled Tab) */}
                     {statusFilter !== 'Cancelled' && (
                       <td className="py-3.5 px-3 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center justify-end gap-1.5 whitespace-nowrap">
+                        <div className="inline-flex items-center justify-end gap-1.5 whitespace-nowrap flex-wrap">
+                          {/* Pending Reschedule Review Button */}
+                          {row.rescheduleStatus === 'pending' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReviewRescheduleBooking(row);
+                                setAdminRescheduleNotes(getApprovalEmailTemplate(row));
+                              }}
+                              className="bg-amber-500 text-white text-[11px] font-extrabold px-3 py-1 rounded-full hover:bg-amber-600 transition-colors shadow-sm cursor-pointer shrink-0 flex items-center gap-1"
+                            >
+                              <IconCalendar className="w-3.5 h-3.5" />
+                              <span>Review Reschedule</span>
+                            </button>
+                          )}
+
                           {(row.depositReceiptUrl || row.balanceReceiptUrl) && (
                             <button
                               type="button"
@@ -551,10 +757,15 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                           )}
                           {row.rawStatus !== 'cancelled' && (
                             <button
-                              onClick={() => handleOpenSettleModal(row)}
-                              className="bg-emerald-600 text-white text-[11px] font-semibold px-2.5 py-1 rounded-full hover:bg-emerald-700 transition-colors shadow-sm cursor-pointer shrink-0"
+                              onClick={() => {
+                                setRescheduleBooking(row);
+                                const targetDate = row.rawDate ? row.rawDate.slice(0, 10) : '';
+                                setNewRescheduleDate(targetDate);
+                                setAdminRescheduleNotes(getDirectRescheduleEmailTemplate(row, targetDate));
+                              }}
+                              className="bg-[var(--mist)] text-[var(--ink)] text-[11px] font-semibold px-2.5 py-1 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer shrink-0"
                             >
-                              {row.isFullyPaid ? 'Payment Info' : 'Settle Balance'}
+                              Reschedule
                             </button>
                           )}
                           {row.status.includes('Pending') && (
@@ -576,17 +787,6 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                           )}
                           {row.rawStatus !== 'cancelled' && (
                             <button
-                              onClick={() => {
-                                setRescheduleBooking(row);
-                                setNewRescheduleDate(row.rawDate || row.date);
-                              }}
-                              className="bg-[var(--mist)] text-[var(--ink)] text-[11px] font-semibold px-2.5 py-1 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer shrink-0"
-                            >
-                              Reschedule
-                            </button>
-                          )}
-                          {row.rawStatus !== 'cancelled' && (
-                            <button
                               onClick={() => setCancelBookingId(row.id)}
                               className="bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 text-[11px] font-semibold px-2.5 py-1 rounded-full transition-colors cursor-pointer shrink-0"
                             >
@@ -597,7 +797,8 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                       </td>
                     )}
                   </tr>
-                ))}
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -605,114 +806,399 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         {/* Mobile Row Cards View */}
         <div className="block sm:hidden space-y-3">
           {paginatedBookings.map((row) => (
-            <div key={row.id} className="p-4 rounded-xl bg-[var(--mist)] border border-[#24252c]/[0.06] space-y-2 text-xs">
-              <div className="flex items-center justify-between">
+            <div key={row.dbId} className="bg-white rounded-2xl p-4 border border-[#24252c]/10 shadow-sm space-y-3">
+              <div className="flex justify-between items-start">
                 <div>
-                  <span className="font-mono font-extrabold text-[#1090F8]">{row.id}</span>
-                  {row.bookingSource && row.bookingSource !== 'Online Booking' && (
-                    <span className="ml-2 text-[9px] font-extrabold px-1.5 py-0.2 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
-                      {row.bookingSource}
-                    </span>
-                  )}
+                  <span className="font-mono font-bold text-xs text-[#1090F8]">#{row.id}</span>
+                  <h4 className="font-extrabold text-sm text-[var(--ink)] mt-0.5">{row.customer}</h4>
+                  <div className="text-[11px] text-[#24252c]/60">{row.package}</div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <select
-                    value={row.rawStatus}
-                    onChange={(e) => handleStatusChange(row.dbId, e.target.value)}
-                    className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider border cursor-pointer focus:outline-none ${
-                      row.rawStatus === 'completed'
-                        ? 'bg-[#1090F8]/10 text-[#1090F8] border-[#1090F8]/30'
-                        : row.rawStatus === 'paid' || row.rawStatus === 'confirmed'
-                        ? 'bg-blue-500/10 text-blue-600 border border-blue-500/20'
-                        : row.rawStatus === 'cancelled'
-                        ? 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
-                        : 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
-                    }`}
-                  >
-                    <option value="pending" className="bg-white text-[var(--ink)]">Pending</option>
-                    <option value="paid" className="bg-white text-[var(--ink)]">Confirmed</option>
-                    <option value="completed" className="bg-white text-[var(--ink)]">Completed</option>
-                    <option value="cancelled" className="bg-white text-[var(--ink)]">Cancelled</option>
-                  </select>
-                  <span
-                    className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${
-                      row.isFullyPaid ? 'bg-emerald-500 text-white' : 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
-                    }`}
-                  >
-                    {row.isFullyPaid ? 'Fully Paid' : `Bal: ${row.remaining}`}
-                  </span>
+                <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 uppercase">
+                  {row.status}
+                </span>
+              </div>
+
+              <div className="text-xs space-y-1 py-2 border-y border-[#24252c]/[0.06] text-[#24252c]/70">
+                <div className="flex justify-between">
+                  <span>Event Schedule:</span>
+                  <span className="font-semibold text-[var(--ink)]">{row.date}</span>
+                </div>
+                {row.rescheduleStatus === 'pending' && (
+                  <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px]">
+                    <strong>Reschedule Requested:</strong> {formatDisplayDate(row.rescheduleRequestedDate)}
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span>Total / Deposit:</span>
+                  <span className="font-bold text-[var(--ink)]">{row.total} (Dep: {row.deposit})</span>
                 </div>
               </div>
-              <div className="font-bold text-[var(--ink)]">{row.customer} ({row.email})</div>
-              <div className="text-[11px] text-[#24252c]/70">{row.package} · Date: <strong className="text-[var(--ink)]">{row.date}</strong></div>
-              <div className="text-[11px] text-[#24252c]/60">Total: <strong className="text-[var(--ink)]">{row.total}</strong> · Deposit: <strong className="text-[#1090F8]">{row.deposit}</strong></div>
-              
-              {statusFilter !== 'Cancelled' && (
-                <div className="flex items-center gap-1.5 pt-2 border-t border-[#24252c]/10 flex-wrap">
-                  {(row.depositReceiptUrl || row.balanceReceiptUrl) && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedReceipt(row)}
-                      className="bg-purple-50 text-purple-700 border border-purple-200 text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-purple-100 transition-colors cursor-pointer"
-                    >
-                      Proof Slip
-                    </button>
-                  )}
-                  {row.rawStatus !== 'cancelled' && (
-                    <button
-                      onClick={() => handleOpenSettleModal(row)}
-                      className="flex-1 bg-emerald-600 text-white text-xs font-semibold py-1.5 rounded-full cursor-pointer text-center"
-                    >
-                      {row.isFullyPaid ? 'Payment Info' : 'Settle Balance'}
-                    </button>
-                  )}
-                  {row.rawStatus !== 'cancelled' && (
-                    <button
-                      type="button"
-                      onClick={() => setAssignCrewBooking(row)}
-                      className="bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-indigo-100 cursor-pointer"
-                    >
-                      {row.assignedCrew && row.assignedCrew.length > 0 ? `Crew (${row.assignedCrew.length})` : '+ Crew'}
-                    </button>
-                  )}
-                  {row.rawStatus !== 'cancelled' && (
-                    <button
-                      onClick={() => {
-                        setRescheduleBooking(row);
-                        setNewRescheduleDate(row.date);
-                      }}
-                      className="flex-1 bg-white border border-[#24252c]/10 text-xs font-semibold py-1.5 rounded-full cursor-pointer text-center"
-                    >
-                      Reschedule
-                    </button>
-                  )}
-                  {row.rawStatus !== 'cancelled' && (
-                    <button
-                      onClick={() => setCancelBookingId(row.id)}
-                      className="bg-rose-50 text-rose-600 border border-rose-200 text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-rose-100 cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              )}
+
+              {/* Mobile Actions */}
+              <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                {row.rescheduleStatus === 'pending' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReviewRescheduleBooking(row);
+                      setAdminRescheduleNotes(getApprovalEmailTemplate(row));
+                    }}
+                    className="flex-1 bg-amber-500 text-white font-extrabold text-xs py-2 rounded-full shadow-sm text-center cursor-pointer"
+                  >
+                    Review Reschedule
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRescheduleBooking(row);
+                    const targetDate = row.rawDate ? row.rawDate.slice(0, 10) : '';
+                    setNewRescheduleDate(targetDate);
+                    setAdminRescheduleNotes(getDirectRescheduleEmailTemplate(row, targetDate));
+                  }}
+                  className="bg-[var(--mist)] text-[var(--ink)] text-xs font-semibold px-3 py-1.5 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer"
+                >
+                  Reschedule
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenSettleModal(row)}
+                  className="bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-emerald-700 transition-colors shadow-sm cursor-pointer"
+                >
+                  {row.isFullyPaid ? 'Payment Info' : 'Settle'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAssignCrewBooking(row)}
+                  className="bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-indigo-100 transition-colors cursor-pointer"
+                >
+                  Crew
+                </button>
+              </div>
             </div>
           ))}
         </div>
 
-        {/* Pagination Controls */}
+        {/* Pagination Footer */}
         <TablePagination
           currentPage={currentPage}
-          totalItems={filtered.length}
           pageSize={pageSize}
-          pageSizeOptions={[10, 50, 100]}
+          totalItems={filtered.length}
           onPageChange={setCurrentPage}
-          onPageSizeChange={setPageSize}
-          itemLabel="bookings"
+          onPageSizeChange={(sz) => {
+            setPageSize(sz);
+            setCurrentPage(1);
+          }}
         />
-      </>
-    )}
-  </div>
+
+      {/* ── Modal 1: Review Customer Reschedule Request ── */}
+      <ModalOverlay isOpen={!!reviewRescheduleBooking} onClose={() => setReviewRescheduleBooking(null)}>
+        {reviewRescheduleBooking && (
+          <div className="bg-white rounded-[2.5rem] max-w-xl w-full max-h-[85vh] shadow-2xl border border-[#24252c]/10 relative p-1.5 sm:p-2.5 overflow-hidden flex flex-col">
+            <button
+              type="button"
+              onClick={() => setReviewRescheduleBooking(null)}
+              className="absolute top-6 right-6 z-20 text-[#24252c]/50 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors bg-white/90 backdrop-blur-md shadow-sm border border-[#24252c]/10 cursor-pointer"
+            >
+              <IconX className="w-5 h-5" />
+            </button>
+
+            <div className="flex-1 overflow-y-auto p-5 sm:p-7 space-y-4 modal-scroll pr-4 sm:pr-6">
+              <div className="mb-2 pb-3 border-b border-[#24252c]/[0.06]">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="p-1.5 rounded-lg bg-amber-500/10 text-amber-600">
+                    <IconCalendar className="w-4 h-4" />
+                  </span>
+                  <h3 className="text-xl font-extrabold text-[var(--ink)]">
+                    Review Reschedule Request
+                  </h3>
+                </div>
+                <p className="text-xs text-[#24252c]/60">
+                  Customer requested a new date for Booking #{reviewRescheduleBooking.id}. Review calendar availability before confirming or declining.
+                </p>
+              </div>
+
+              <div className="space-y-4 text-xs">
+                {/* Customer & Booking Header */}
+                <div className="p-3.5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.06] flex items-center justify-between">
+                  <div>
+                    <div className="font-extrabold text-sm text-[var(--ink)]">{reviewRescheduleBooking.customer}</div>
+                    <div className="text-[11px] text-[#24252c]/60">{reviewRescheduleBooking.email} · {reviewRescheduleBooking.phone || 'No phone'}</div>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-bold text-xs text-[var(--ink)] block">{reviewRescheduleBooking.package}</span>
+                    <span className="text-[10px] font-mono text-[#1090F8]">Ref #{reviewRescheduleBooking.id}</span>
+                  </div>
+                </div>
+
+                {/* Date Comparison Box */}
+                <div className="p-4 rounded-2xl bg-amber-50/90 border border-amber-300/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider block">
+                      Current Schedule
+                    </span>
+                    <span className="font-bold text-xs text-amber-900 line-through opacity-75 inline-block bg-amber-100/60 px-2.5 py-1 rounded-lg">
+                      {reviewRescheduleBooking.date}
+                    </span>
+                  </div>
+                  <div className="hidden sm:flex items-center justify-center w-8 h-8 rounded-full bg-amber-200/80 text-amber-800 font-black text-sm shrink-0">
+                    →
+                  </div>
+                  <div className="space-y-1.5 sm:text-right">
+                    <span className="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider block">
+                      Requested New Date
+                    </span>
+                    <span className="font-black text-sm text-amber-950 bg-amber-200 px-3.5 py-1.5 rounded-full border border-amber-400/70 shadow-xs inline-block">
+                      {formatDisplayDate(reviewRescheduleBooking.rescheduleRequestedDate)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Customer Reason Note */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#24252c]/50 block mb-1">
+                    Customer's Reason / Request Message:
+                  </label>
+                  <div className="p-3.5 rounded-2xl bg-white border border-[#24252c]/15 text-xs text-[var(--ink)] italic">
+                    "{reviewRescheduleBooking.rescheduleReason || 'No specific reason provided.'}"
+                  </div>
+                </div>
+
+                {/* Live Calendar Availability Preview */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#24252c]/50 block mb-1.5">
+                    Live Production Schedule on Requested Month:
+                  </label>
+                  <div className="p-4 rounded-2xl bg-white border border-[#24252c]/15 shadow-2xs">
+                    <BookingRescheduleCalendar
+                      originalDate={reviewRescheduleBooking.rawDate}
+                      selectedDate={reviewRescheduleBooking.rescheduleRequestedDate ? reviewRescheduleBooking.rescheduleRequestedDate.slice(0, 10) : ''}
+                      onSelectDate={() => {}}
+                      excludeBookingId={reviewRescheduleBooking.dbId}
+                    />
+                  </div>
+                </div>
+
+                {/* Built-in Prefilled Email Message Box */}
+                <div className="space-y-2 pt-2 border-t border-[#24252c]/[0.08]">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <label className="text-[11px] font-black uppercase text-[var(--ink)] block">
+                        Customer Email Notification
+                      </label>
+                      <span className="text-[10px] text-[#24252c]/60">
+                        Recipient: <strong className="text-[#1090F8] font-mono">{reviewRescheduleBooking.email}</strong>
+                      </span>
+                    </div>
+
+                    {/* Quick Template Chips */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setAdminRescheduleNotes(getApprovalEmailTemplate(reviewRescheduleBooking))}
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer"
+                      >
+                        Approval Note
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAdminRescheduleNotes(getDeclineEmailTemplate(reviewRescheduleBooking))}
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer"
+                      >
+                        Decline Note
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAdminRescheduleNotes(
+                            `Dear ${reviewRescheduleBooking.customer},\n\nRegarding your request to reschedule Booking #${reviewRescheduleBooking.id}, our team has adjusted our technical logistics to accommodate your event on ${formatDisplayDate(reviewRescheduleBooking.rescheduleRequestedDate)}.\n\nWarm regards,\nBINHI Concept Production Team`
+                          )
+                        }
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-blue-50 text-[#1090F8] border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
+                      >
+                        Logistics Note
+                      </button>
+                    </div>
+                  </div>
+
+                  <textarea
+                    rows={6}
+                    value={adminRescheduleNotes}
+                    onChange={(e) => setAdminRescheduleNotes(e.target.value)}
+                    placeholder="Enter or customize the message to be sent to the customer..."
+                    className="w-full rounded-2xl border border-black/10 px-4 py-3 bg-[#F8F9FA] focus:bg-white text-xs font-medium text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] transition-colors resize-none leading-relaxed"
+                    required
+                  />
+                  <div className="flex justify-between items-center text-[10px] text-[#24252c]/50 px-1">
+                    <span>This message will be dispatched via official BINHI email letterhead.</span>
+                    <span className="font-mono font-semibold">{adminRescheduleNotes.length} chars</span>
+                  </div>
+                </div>
+
+                {/* Actions: Decline / Approve */}
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#24252c]/[0.06]">
+                  <button
+                    type="button"
+                    disabled={isProcessingReschedule}
+                    onClick={handleDeclineCustomerReschedule}
+                    className="px-5 py-2.5 rounded-full border border-rose-300 text-xs font-bold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <span>{isProcessingReschedule ? 'Processing...' : 'Decline & Email Customer'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isProcessingReschedule}
+                    onClick={handleApproveCustomerReschedule}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-6 py-2.5 rounded-full shadow-md transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <IconCheck className="w-4 h-4" />
+                    <span>{isProcessingReschedule ? 'Approving & Emailing...' : 'Approve & Confirm Date'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </ModalOverlay>
+
+      {/* ── Modal 2: Direct / Manual Admin Reschedule Modal ── */}
+      <ModalOverlay isOpen={!!rescheduleBooking} onClose={() => setRescheduleBooking(null)}>
+        {rescheduleBooking && (
+          <div className="bg-white rounded-[2.5rem] max-w-xl w-full max-h-[85vh] shadow-2xl border border-[#24252c]/10 relative p-1.5 sm:p-2.5 overflow-hidden flex flex-col">
+            <button
+              type="button"
+              onClick={() => setRescheduleBooking(null)}
+              className="absolute top-6 right-6 z-20 text-[#24252c]/50 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors bg-white/90 backdrop-blur-md shadow-sm border border-[#24252c]/10 cursor-pointer"
+            >
+              <IconX className="w-5 h-5" />
+            </button>
+
+            <div className="flex-1 overflow-y-auto p-5 sm:p-7 space-y-4 modal-scroll pr-4 sm:pr-6">
+              <div className="mb-2 pb-3 border-b border-[#24252c]/[0.06]">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="p-1.5 rounded-lg bg-[#1090F8]/10 text-[#1090F8]">
+                    <IconCalendar className="w-4 h-4" />
+                  </span>
+                  <h3 className="text-xl font-extrabold text-[var(--ink)]">
+                    Direct Reschedule (Admin Override)
+                  </h3>
+                </div>
+                <p className="text-xs text-[#24252c]/60">
+                  Directly select and lock a new event date for #{rescheduleBooking.id}. The customer will automatically receive an email confirmation.
+                </p>
+              </div>
+
+              <form onSubmit={handleDirectAdminReschedule} className="space-y-4 text-xs">
+                {/* Booking Summary */}
+                <div className="p-3.5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.06] flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-[#24252c]/50 block">Current Schedule</span>
+                    <span className="font-extrabold text-sm text-[var(--ink)]">{rescheduleBooking.date}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-bold text-xs text-[var(--ink)] block">{rescheduleBooking.customer}</span>
+                    <span className="text-[10px] font-mono text-[#1090F8]">Ref #{rescheduleBooking.id}</span>
+                  </div>
+                </div>
+
+                {/* Interactive Calendar with availability */}
+                <div className="p-4 rounded-2xl bg-white border border-[#24252c]/15 shadow-2xs">
+                  <BookingRescheduleCalendar
+                    originalDate={rescheduleBooking.rawDate}
+                    selectedDate={newRescheduleDate}
+                    onSelectDate={(d) => {
+                      setNewRescheduleDate(d);
+                      setAdminRescheduleNotes(getDirectRescheduleEmailTemplate(rescheduleBooking, d));
+                    }}
+                    excludeBookingId={rescheduleBooking.dbId}
+                  />
+                </div>
+
+                {/* Selected Target Date Alert */}
+                {newRescheduleDate && (
+                  <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 flex items-center justify-between">
+                    <span className="font-semibold text-xs">Target Reschedule Date:</span>
+                    <span className="font-extrabold text-xs text-[#1090F8] bg-white px-3 py-1 rounded-full border border-blue-300 shadow-2xs">
+                      {formatDisplayDate(newRescheduleDate)}
+                    </span>
+                  </div>
+                )}
+
+                {/* Built-in Prefilled Email Message Box */}
+                <div className="space-y-2 pt-2 border-t border-[#24252c]/[0.08]">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <label className="text-[11px] font-black uppercase text-[var(--ink)] block">
+                        Customer Email Notification
+                      </label>
+                      <span className="text-[10px] text-[#24252c]/60">
+                        Recipient: <strong className="text-[#1090F8] font-mono">{rescheduleBooking.email}</strong>
+                      </span>
+                    </div>
+
+                    {/* Quick Template Chips */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAdminRescheduleNotes(
+                            getDirectRescheduleEmailTemplate(rescheduleBooking, newRescheduleDate || rescheduleBooking.rawDate)
+                          )
+                        }
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-blue-50 text-[#1090F8] border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
+                      >
+                        Standard Notice
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAdminRescheduleNotes(
+                            `Dear ${rescheduleBooking.customer},\n\nAs discussed during our phone coordination regarding Booking #${rescheduleBooking.id}, your event date has been moved to ${formatDisplayDate(newRescheduleDate || rescheduleBooking.rawDate)}. All equipment inclusions and crew assignments remain secured.\n\nWarm regards,\nBINHI Concept Production Team`
+                          )
+                        }
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors cursor-pointer"
+                      >
+                        Phone Coordination
+                      </button>
+                    </div>
+                  </div>
+
+                  <textarea
+                    rows={5}
+                    value={adminRescheduleNotes}
+                    onChange={(e) => setAdminRescheduleNotes(e.target.value)}
+                    placeholder="Enter or customize the email notice for the customer..."
+                    className="w-full rounded-2xl border border-black/10 px-4 py-3 bg-[#F8F9FA] focus:bg-white text-xs font-medium text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] transition-colors resize-none leading-relaxed"
+                    required
+                  />
+                  <div className="flex justify-between items-center text-[10px] text-[#24252c]/50 px-1">
+                    <span>This confirmation email will be automatically sent upon saving.</span>
+                    <span className="font-mono font-semibold">{adminRescheduleNotes.length} chars</span>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#24252c]/[0.06]">
+                  <button
+                    type="button"
+                    onClick={() => setRescheduleBooking(null)}
+                    className="px-5 py-2.5 rounded-full border border-black/10 text-xs font-semibold text-[var(--ink)] hover:bg-[#F0F0F0] transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isProcessingReschedule || !newRescheduleDate}
+                    className="bg-[var(--ink)] disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer text-xs shadow-md flex items-center gap-1.5"
+                  >
+                    {isProcessingReschedule ? 'Saving & Emailing...' : 'Confirm & Reschedule Date'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </ModalOverlay>
 
       {/* Deposit Receipt Preview Modal */}
       <ModalOverlay isOpen={!!selectedReceipt} onClose={() => setSelectedReceipt(null)}>
@@ -774,36 +1260,6 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         </div>
       </ModalOverlay>
 
-      {/* Reschedule Date Modal */}
-      <ModalOverlay isOpen={!!rescheduleBooking} onClose={() => setRescheduleBooking(null)}>
-        <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
-          <button onClick={() => setRescheduleBooking(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
-            <IconX className="w-5 h-5" />
-          </button>
-          <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Reschedule Event Date</h3>
-          <p className="text-xs font-mono font-bold text-[#1090F8] mb-4">{activeRescheduleBooking.id} · {activeRescheduleBooking.customer}</p>
-
-          <form onSubmit={handleSaveReschedule} className="space-y-4 text-xs">
-            <div>
-              <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">Select New Target Date</label>
-              <input
-                type="date"
-                value={newRescheduleDate}
-                onChange={(e) => setNewRescheduleDate(e.target.value)}
-                className="w-full rounded-full border border-transparent px-4 py-3 bg-[var(--mist)] text-[var(--ink)] font-bold focus:outline-none focus:border-[#1090F8]"
-                required
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
-            >
-              Save New Event Date
-            </button>
-          </form>
-        </div>
-      </ModalOverlay>
 
       {/* Balance Settlement & Full Payment Modal */}
       <ModalOverlay isOpen={!!settleModalBooking} onClose={() => setSettleModalBooking(null)}>

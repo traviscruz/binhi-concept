@@ -21,6 +21,8 @@ export function CustomerHeader({
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [customerName, setCustomerName] = useState('');
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
 
@@ -72,6 +74,9 @@ export function CustomerHeader({
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
+
+        setCurrentUserId(user.id);
+        setCurrentUserEmail(user.email || null);
 
         const meta = user.user_metadata || {};
         let name = meta.full_name || (meta.first_name ? `${meta.first_name} ${meta.last_name || ''}`.trim() : '');
@@ -258,48 +263,43 @@ export function CustomerHeader({
             <IconX className="w-5 h-5" />
           </button>
 
-          <div className="mb-5 pb-4 border-b border-[#24252c]/[0.06]">
-            <h3 className="text-xl font-extrabold text-[var(--ink)]">Production Booking Calendar</h3>
-            <p className="text-xs text-[#24252c]/60 mt-0.5">Check date availability and view your active scheduled booking.</p>
+          <div className="mb-4 pb-3 border-b border-[#24252c]/[0.06]">
+            <h3 className="text-lg font-black text-[var(--ink)] tracking-tight">Production Booking Calendar</h3>
+            <p className="text-xs text-[#24252c]/50 mt-0.5">Live schedule availability and your confirmed event dates.</p>
           </div>
 
+          {/* Month Header & Controls */}
           <div className="flex items-center justify-between mb-4">
             <div>
-              <span className="text-base font-extrabold text-[var(--ink)] block">{monthName} {calYear}</span>
-              <span className="text-[11px] text-[#24252c]/50 font-medium">Real-Time Event Availability</span>
+              <span className="text-sm font-extrabold text-[var(--ink)] tracking-tight">{monthName} {calYear}</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={handlePrevMonth}
-                className="px-3.5 py-1.5 rounded-full bg-[var(--mist)] hover:bg-[var(--ink)] hover:text-white text-xs font-bold transition-colors cursor-pointer"
+                className="w-8 h-8 rounded-full bg-[var(--mist)] hover:bg-[#24252c]/10 text-[var(--ink)] text-xs font-bold transition-colors cursor-pointer flex items-center justify-center"
               >
-                ← Prev
+                ‹
               </button>
               <button
                 type="button"
                 onClick={handleNextMonth}
-                className="px-3.5 py-1.5 rounded-full bg-[var(--mist)] hover:bg-[var(--ink)] hover:text-white text-xs font-bold transition-colors cursor-pointer"
+                className="w-8 h-8 rounded-full bg-[var(--mist)] hover:bg-[#24252c]/10 text-[var(--ink)] text-xs font-bold transition-colors cursor-pointer flex items-center justify-center"
               >
-                Next →
+                ›
               </button>
             </div>
           </div>
 
-          {/* Minimalist Subtitle */}
-          <p className="text-xs text-[#24252c]/50 text-center mb-4">
-            Select an available date to view production packages.
-          </p>
-
           {/* Calendar Grid Header */}
-          <div className="grid grid-cols-7 gap-1.5 text-center text-xs font-bold text-[#24252c]/50 mb-2">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+          <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold uppercase tracking-wider text-[#24252c]/40 mb-1.5">
+            {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
               <div key={d} className="py-1">{d}</div>
             ))}
           </div>
 
-          {/* Month Days Grid (Fixed 42 cells = 6 rows x 7 cols so height never changes) */}
-          <div className="grid grid-cols-7 gap-1.5">
+          {/* Month Days Grid (Fixed 42 cells = 6 rows x 7 cols) */}
+          <div className="grid grid-cols-7 gap-1">
             {/* Blank leading cells */}
             {Array.from({ length: firstDayIndex }).map((_, i) => (
               <div key={`empty-${i}`} className="aspect-square rounded-xl bg-transparent" />
@@ -310,27 +310,46 @@ export function CustomerHeader({
               const day = i + 1;
               const formattedIso = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
               const isPast = isPastDate(formattedIso);
-              const isBooked = dbBookings.some((b) => b.event_date === formattedIso);
+
+              const userBooking = dbBookings.find(
+                (b) =>
+                  b.event_date === formattedIso &&
+                  ((currentUserId && b.user_id === currentUserId) ||
+                   (currentUserEmail && b.customer_email?.toLowerCase() === currentUserEmail.toLowerCase()))
+              );
+              const otherBooking = dbBookings.find((b) => b.event_date === formattedIso && b !== userBooking);
+              const isMyBooking = !!userBooking;
+              const isBooked = isMyBooking || !!otherBooking;
               
               const now = new Date();
               const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
               const isToday = formattedIso === todayIso;
 
-              let cellClass = 'bg-[var(--mist)] text-[#24252c]/80 font-semibold cursor-pointer hover:bg-[#1090F8]/15 hover:text-[#1090F8]';
-              let badgeText = '';
+              let cellStyle = 'text-[var(--ink)] font-medium hover:bg-[var(--mist)] cursor-pointer';
+              let dot = null;
 
-              if (isPast) {
-                cellClass = 'bg-gray-100 text-gray-400 font-medium cursor-not-allowed opacity-40';
-                badgeText = 'Past';
+              if (isMyBooking) {
+                cellStyle = 'bg-blue-50 text-[#1090F8] font-black border border-blue-200 hover:bg-blue-100 cursor-pointer shadow-2xs';
+                dot = <span className="w-1.5 h-1.5 rounded-full bg-[#1090F8] mt-0.5" />;
+              } else if (isPast) {
+                cellStyle = 'text-black/20 font-normal cursor-not-allowed select-none';
               } else if (isBooked) {
-                cellClass = 'bg-[var(--ink)] text-white font-semibold shadow-xs cursor-not-allowed opacity-90';
-                badgeText = 'Booked';
+                cellStyle = 'text-black/35 font-normal line-through decoration-black/25 bg-black/[0.03] cursor-not-allowed select-none';
+                dot = <span className="w-1 h-1 rounded-full bg-black/30 mt-0.5" />;
               } else if (isToday) {
-                cellClass = 'border-2 border-[#1090F8] text-[#1090F8] font-extrabold bg-[#1090F8]/10 cursor-pointer hover:bg-[#1090F8]/25 shadow-xs';
-                badgeText = 'Today';
+                cellStyle = 'ring-1.5 ring-[var(--ink)] text-[var(--ink)] font-black bg-white cursor-pointer hover:bg-[var(--mist)]';
+                dot = <span className="w-1 h-1 rounded-full bg-[var(--ink)] mt-0.5" />;
               }
 
               const handleSelect = () => {
+                if (isMyBooking) {
+                  if (userBooking?.id) {
+                    localStorage.setItem('binhi_selected_active_booking_id', userBooking.id);
+                  }
+                  go('booking-tracker');
+                  setShowCalendarModal(false);
+                  return;
+                }
                 if (isPast || isBooked) return;
                 if (onSelectDateAndGoToPackages) {
                   onSelectDateAndGoToPackages(formattedIso);
@@ -341,40 +360,49 @@ export function CustomerHeader({
               };
 
               return (
-                <div
+                <button
+                  type="button"
                   key={day}
                   onClick={handleSelect}
-                  onDoubleClick={handleSelect}
-                  title={isPast ? 'Past Date - Cannot be selected' : isBooked ? 'Date Booked in Database' : isToday ? 'Today' : `Select date ${formattedIso}`}
-                  className={`aspect-square rounded-xl text-xs flex flex-col items-center justify-center relative transition-all ${cellClass}`}
+                  disabled={isPast || (isBooked && !isMyBooking)}
+                  title={
+                    isMyBooking
+                      ? `Your Booking: ${userBooking?.package_name || 'Event Production'} (Click to track)`
+                      : isPast
+                      ? 'Past Date'
+                      : isBooked
+                      ? 'Unavailable / Reserved'
+                      : isToday
+                      ? 'Today'
+                      : `Available: ${formattedIso}`
+                  }
+                  className={`aspect-square rounded-xl text-xs flex flex-col items-center justify-center transition-colors relative ${cellStyle}`}
                 >
-                  <span>{day}</span>
-                  {badgeText && (
-                    <span className="text-[7px] font-bold uppercase tracking-tight opacity-90">{badgeText}</span>
-                  )}
-                </div>
+                  <span className="leading-none">{day}</span>
+                  {dot}
+                </button>
               );
             })}
 
-            {/* Trailing blank cells to enforce fixed 42-cell (6 rows x 7 cols) layout for all months */}
+            {/* Trailing blank cells to enforce fixed 42-cell layout */}
             {Array.from({ length: Math.max(0, 42 - (firstDayIndex + daysInMonth)) }).map((_, i) => (
               <div key={`trail-${i}`} className="aspect-square rounded-xl bg-transparent opacity-0 pointer-events-none" />
             ))}
           </div>
 
-          {/* Legend Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 mt-6 pt-4 border-t border-[#24252c]/[0.06] text-[11px] text-[#24252c]/60">
-            <span className="flex items-center gap-1.5 font-semibold text-[var(--ink)]">
-              <span className="w-3 h-3 rounded-md bg-[var(--ink)]" /> Booked / Reserved
-            </span>
+          {/* Minimalist Legend Bar */}
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 mt-5 pt-3 border-t border-[#24252c]/[0.06] text-[11px] text-[#24252c]/60">
             <span className="flex items-center gap-1.5 font-bold text-[#1090F8]">
-              <span className="w-3 h-3 rounded-md border-2 border-[#1090F8] bg-[#1090F8]/10" /> Today
+              <span className="w-2 h-2 rounded-full bg-[#1090F8]" /> Your Event
             </span>
-            <span className="flex items-center gap-1.5 font-semibold text-gray-400">
-              <span className="w-3 h-3 rounded-md bg-gray-200" /> Past Date
+            <span className="flex items-center gap-1.5 text-[#24252c]/70">
+              <span className="w-2 h-2 rounded-full bg-black/30" /> Booked
             </span>
-            <span className="flex items-center gap-1.5 font-semibold">
-              <span className="w-3 h-3 rounded-md bg-[var(--mist)] border border-[#24252c]/10" /> Available Date
+            <span className="flex items-center gap-1.5 font-semibold text-[var(--ink)]">
+              <span className="w-2 h-2 rounded-full border border-[var(--ink)]" /> Today
+            </span>
+            <span className="flex items-center gap-1.5 text-[#24252c]/70">
+              <span className="w-2 h-2 rounded-full bg-[var(--mist)] border border-black/15" /> Available
             </span>
           </div>
         </div>

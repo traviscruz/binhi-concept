@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase';
 
 export interface DBBooking {
   id: string;
+  user_id?: string;
   event_date: string; // YYYY-MM-DD
   package_name?: string;
   event_type?: string;
@@ -18,6 +19,24 @@ export interface DBBooking {
   paymongo_reference_number?: string;
 }
 
+export function normalizeDateToIso(val: any): string {
+  if (!val) return '';
+  const str = String(val).trim();
+  // Check if it's already YYYY-MM-DD (e.g. 2026-09-14 or 2026-09-14T00:00:00)
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    return str.slice(0, 10);
+  }
+  // Try parsing date strings like 'September 14, 2026' or 'Sep 14, 2026'
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  return '';
+}
+
 export async function fetchDbBookedDates(): Promise<DBBooking[]> {
   try {
     const { data, error } = await supabase
@@ -28,7 +47,8 @@ export async function fetchDbBookedDates(): Promise<DBBooking[]> {
     if (!error && data) {
       return data.map((b: any) => ({
         id: b.id,
-        event_date: typeof b.event_date === 'string' ? b.event_date.split('T')[0] : b.event_date,
+        user_id: b.user_id || undefined,
+        event_date: normalizeDateToIso(b.event_date) || (typeof b.event_date === 'string' ? b.event_date.split('T')[0] : b.event_date),
         package_name: b.package_name || 'Booked Event',
         event_type: b.event_type || 'Event Production',
         venue_address: b.venue_address || 'Private Location',
@@ -52,9 +72,12 @@ export async function fetchDbBookedDates(): Promise<DBBooking[]> {
 
 export function isPastDate(dateIsoStr: string): boolean {
   if (!dateIsoStr) return false;
+  const iso = normalizeDateToIso(dateIsoStr);
+  if (!iso) return false;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const target = new Date(dateIsoStr);
+  const [year, month, day] = iso.split('-').map(Number);
+  const target = new Date(year, month - 1, day);
   target.setHours(0, 0, 0, 0);
   return target.getTime() < today.getTime();
 }

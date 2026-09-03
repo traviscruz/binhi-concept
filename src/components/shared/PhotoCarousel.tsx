@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ImageWithSkeleton } from './ImageWithSkeleton';
+import { EquipmentCategoryPlaceholder } from './EquipmentCategoryPlaceholder';
 
 export interface PhotoItem {
   url: string;
@@ -9,9 +10,13 @@ export interface PhotoItem {
 export function PhotoCarousel({
   photos = [],
   mainImage,
+  category,
+  name,
 }: {
   photos?: (PhotoItem | string)[];
   mainImage?: string;
+  category?: string;
+  name?: string;
 }) {
   const [index, setIndex] = useState(0);
 
@@ -44,11 +49,11 @@ export function PhotoCarousel({
   const prev = () => setIndex((i) => (i === 0 ? list.length - 1 : i - 1));
   const next = () => setIndex((i) => (i === list.length - 1 ? 0 : i + 1));
 
-  // If no photos or images available, render single skeleton loader
+  // If no photos or images available, render EquipmentCategoryPlaceholder with category icon
   if (list.length === 0) {
     return (
       <div className="relative rounded-[2rem] overflow-hidden bg-[#12141d] aspect-[16/9] shadow-lg">
-        <ImageWithSkeleton src="" alt="No Gallery Uploaded" className="w-full h-full" />
+        <EquipmentCategoryPlaceholder category={category} name={name} size="lg" />
       </div>
     );
   }

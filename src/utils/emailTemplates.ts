@@ -350,3 +350,299 @@ export function getAdminReplyHtml(data: InquiryReplyEmailData): string {
     bodyContent,
   });
 }
+
+// ─── Reschedule System Email Templates ────────────────────────────────────────
+
+export interface RescheduleRequestEmailData {
+  bookingId: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone?: string;
+  packageName: string;
+  originalDate: string;
+  requestedDate: string;
+  reason: string;
+  venue?: string;
+  totalCost?: string;
+}
+
+export interface RescheduleApprovalEmailData {
+  customerName: string;
+  customerEmail: string;
+  bookingId: string;
+  packageName: string;
+  oldDate: string;
+  newDate: string;
+  venue?: string;
+  adminNotes?: string;
+  isDirectAdminReschedule?: boolean;
+}
+
+export interface RescheduleRejectionEmailData {
+  customerName: string;
+  customerEmail: string;
+  bookingId: string;
+  packageName: string;
+  originalDate: string;
+  requestedDate: string;
+  adminNotes?: string;
+}
+
+/**
+ * 4. Template: Admin Alert - Customer Reschedule Request
+ * Sent to all system admins when a customer submits a reschedule request.
+ */
+export function getAdminRescheduleRequestAlertHtml(data: RescheduleRequestEmailData): string {
+  const safeName = escapeHtml(data.customerName || 'Valued Customer');
+  const safeEmail = escapeHtml(data.customerEmail);
+  const safePhone = data.customerPhone ? escapeHtml(data.customerPhone) : 'Not provided';
+  const safePkg = escapeHtml(data.packageName || 'Production Package');
+  const safeRef = escapeHtml(data.bookingId);
+  const safeOrigDate = escapeHtml(data.originalDate);
+  const safeReqDate = escapeHtml(data.requestedDate);
+  const safeReason = escapeHtml(data.reason || 'No reason provided').replace(/\n/g, '<br/>');
+  const safeVenue = data.venue ? escapeHtml(data.venue) : 'Selected Venue';
+
+  const bodyContent = `
+    <p class="text-muted" style="margin:0 0 16px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      A customer has submitted a <strong class="text-ink" style="color:#24252C;">booking reschedule request</strong> that requires your review and approval.
+    </p>
+
+    <!-- Highlighted Date Shift Card -->
+    <div style="background-color:#F0F7FF; border:1px solid #BAE0FD; border-radius:10px; padding:18px 20px; margin-bottom:20px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="48%" style="vertical-align:top;">
+            <div style="font-size:10px; font-weight:700; color:#6B7280; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">Current Schedule</div>
+            <div style="font-size:14px; font-weight:700; color:#24252C; text-decoration:line-through; opacity:0.8;">${safeOrigDate}</div>
+          </td>
+          <td width="4%" align="center" style="vertical-align:middle; font-size:16px; font-weight:bold; color:#1090F8;">→</td>
+          <td width="48%" style="vertical-align:top; padding-left:12px;">
+            <div style="font-size:10px; font-weight:700; color:#1090F8; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">Requested New Date</div>
+            <div style="font-size:15px; font-weight:800; color:#1090F8;">${safeReqDate}</div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Booking Summary Details -->
+    <div class="code-box" style="background-color:#ECEEF1; border:1px solid #E4E6EA; border-radius:8px; padding:18px 22px; margin-bottom:20px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Booking Reference</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val font-mono font-bold" style="font-family:monospace; color:#1090F8;">#${safeRef}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Customer Name</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val">${safeName}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Customer Contact</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val"><a href="mailto:${safeEmail}" style="color:#1090F8; text-decoration:none;">${safeEmail}</a> · ${safePhone}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Production Package</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val">${safePkg}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Venue Address</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val">${safeVenue}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Reason Box -->
+    <div style="margin-bottom:24px;">
+      <div class="item-label" style="color:#9AA1AC; font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Customer Reason / Message</div>
+      <div style="background-color:#FFFFFF; border:1px solid #E4E6EA; border-left:3px solid #1090F8; border-radius:4px 8px 8px 4px; padding:14px 18px; font-size:13px; color:#24252C; line-height:1.6;">
+        "${safeReason}"
+      </div>
+    </div>
+
+    <p class="text-muted" style="margin:0 0 20px 0; font-size:13px; color:#6B7280; line-height:1.6; font-family:Arial,Helvetica,sans-serif;">
+      Please log in to the BINHI Concept Admin Dashboard to review the calendar availability and approve or reject this reschedule request.
+    </p>
+
+    <!-- CTA Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:20px 0 0 0;">
+      <tr>
+        <td align="center" bgcolor="#24252C" style="border-radius:24px;">
+          <a href="https://binhiconcept.ph" style="display:inline-block; padding:12px 28px; font-size:12px; font-weight:700; color:#FFFFFF; text-decoration:none; letter-spacing:0.5px; font-family:Arial,Helvetica,sans-serif;">
+            Open Bookings Management →
+          </a>
+        </td>
+      </tr>
+    </table>
+  `;
+
+  return renderEmailShell({
+    title: `Reschedule Request: ${safeName} (#${safeRef}) - BINHI Concept`,
+    badgeText: 'RESCHEDULE REQUEST',
+    headline: 'Booking Reschedule Request Received',
+    bodyContent,
+  });
+}
+
+/**
+ * 5. Template: Customer Confirmation - Reschedule Approved / Updated
+ * Sent to the customer when the admin approves their reschedule request or directly reschedules the booking.
+ */
+export function getCustomerRescheduleApprovedHtml(data: RescheduleApprovalEmailData): string {
+  const safeName = escapeHtml(data.customerName || 'Valued Customer');
+  const safeRef = escapeHtml(data.bookingId);
+  const safePkg = escapeHtml(data.packageName || 'Production Package');
+  const safeOldDate = escapeHtml(data.oldDate);
+  const safeNewDate = escapeHtml(data.newDate);
+  const safeVenue = data.venue ? escapeHtml(data.venue) : 'Selected Venue';
+  const isDirect = data.isDirectAdminReschedule === true;
+
+  const noteSection = data.adminNotes
+    ? `
+      <div style="margin:20px 0; padding:14px 18px; background-color:#FAFAFB; border-left:3px solid #10B981; border-radius:0 8px 8px 0;">
+        <div style="font-size:10px; font-weight:700; color:#059669; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">Note from BINHI Production Team</div>
+        <div style="font-size:12px; color:#374151; line-height:1.6;">${escapeHtml(data.adminNotes).replace(/\n/g, '<br/>')}</div>
+      </div>
+    `
+    : '';
+
+  const bodyContent = `
+    <p class="text-muted" style="margin:0 0 16px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      Dear <strong class="text-ink" style="color:#24252C;">${safeName}</strong>,
+    </p>
+    <p class="text-muted" style="margin:0 0 20px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      ${
+        isDirect
+          ? `Your event production reservation with <strong class="text-ink" style="color:#24252C;">BINHI Concept</strong> has been rescheduled to a new event date.`
+          : `Great news! Your request to reschedule your event production booking with <strong class="text-ink" style="color:#24252C;">BINHI Concept</strong> has been <strong style="color:#059669;">approved and confirmed</strong>.`
+      }
+    </p>
+
+    <!-- Confirmed Date Banner -->
+    <div style="background-color:#ECFDF5; border:1.5px solid #A7F3D0; border-radius:12px; padding:20px 24px; margin-bottom:22px; text-align:center;">
+      <div style="font-size:11px; font-weight:700; color:#059669; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:4px;">
+        Confirmed New Event Date
+      </div>
+      <div style="font-size:22px; font-weight:900; color:#065F46; font-family:Arial,Helvetica,sans-serif; margin-bottom:6px;">
+        ${safeNewDate}
+      </div>
+      <div style="font-size:11px; color:#6B7280;">
+        (Previous Schedule: <span style="text-decoration:line-through;">${safeOldDate}</span>)
+      </div>
+    </div>
+
+    <!-- Booking Summary Details -->
+    <div class="code-box" style="background-color:#ECEEF1; border:1px solid #E4E6EA; border-radius:8px; padding:18px 22px; margin-bottom:20px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Booking Reference</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val" style="font-family:monospace; color:#1090F8; font-weight:bold;">#${safeRef}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Production Package</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val">${safePkg}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Venue Location</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val">${safeVenue}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Production Status</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val" style="color:#059669; font-weight:bold;">Confirmed & Date Locked</td>
+        </tr>
+      </table>
+    </div>
+
+    ${noteSection}
+
+    <p class="text-muted" style="margin:20px 0 0 0; font-size:13px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      All your package inclusions, staging equipment, logistics, and crew arrangements have been transferred to your new event date. You can view your updated timeline on your <strong>Booking Status Tracker</strong> anytime.
+    </p>
+
+    <!-- CTA Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 0 0;">
+      <tr>
+        <td align="center" bgcolor="#24252C" style="border-radius:24px;">
+          <a href="https://binhiconcept.ph" style="display:inline-block; padding:12px 28px; font-size:12px; font-weight:700; color:#FFFFFF; text-decoration:none; letter-spacing:0.5px; font-family:Arial,Helvetica,sans-serif;">
+            View Booking Tracker →
+          </a>
+        </td>
+      </tr>
+    </table>
+  `;
+
+  return renderEmailShell({
+    title: `Reschedule Confirmed: ${safeNewDate} - BINHI Concept (#${safeRef})`,
+    badgeText: 'SCHEDULE CONFIRMED',
+    headline: 'Event Date Reschedule Confirmed',
+    bodyContent,
+  });
+}
+
+/**
+ * 6. Template: Customer Notice - Reschedule Request Declined / Conflict
+ * Sent to the customer if the requested reschedule date cannot be accommodated.
+ */
+export function getCustomerRescheduleRejectedHtml(data: RescheduleRejectionEmailData): string {
+  const safeName = escapeHtml(data.customerName || 'Valued Customer');
+  const safeRef = escapeHtml(data.bookingId);
+  const safePkg = escapeHtml(data.packageName || 'Production Package');
+  const safeOrigDate = escapeHtml(data.originalDate);
+  const safeReqDate = escapeHtml(data.requestedDate);
+  const safeAdminNotes = data.adminNotes ? escapeHtml(data.adminNotes).replace(/\n/g, '<br/>') : '';
+
+  const bodyContent = `
+    <p class="text-muted" style="margin:0 0 16px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      Dear <strong class="text-ink" style="color:#24252C;">${safeName}</strong>,
+    </p>
+    <p class="text-muted" style="margin:0 0 20px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      Thank you for contacting us regarding your booking <strong class="text-ink" style="color:#24252C;">#${safeRef}</strong>. We have reviewed your requested reschedule date (<strong style="color:#24252C;">${safeReqDate}</strong>). Unfortunately, we are unable to accommodate this specific date due to prior confirmed production bookings or equipment logistics.
+    </p>
+
+    <!-- Retained Date Notice -->
+    <div style="background-color:#FFFBEB; border:1.5px solid #FDE68A; border-radius:12px; padding:18px 22px; margin-bottom:22px;">
+      <div style="font-size:10px; font-weight:700; color:#B45309; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">
+        Your Current Schedule Remains Active
+      </div>
+      <div style="font-size:16px; font-weight:800; color:#92400E; margin-bottom:4px;">
+        ${safeOrigDate}
+      </div>
+      <div style="font-size:11px; color:#78350F;">
+        Your deposit and reservation for <strong>${safePkg}</strong> remain secured on this original date.
+      </div>
+    </div>
+
+    ${
+      safeAdminNotes
+        ? `
+      <div style="margin:20px 0; padding:14px 18px; background-color:#FAFAFB; border-left:3px solid #F59E0B; border-radius:0 8px 8px 0;">
+        <div style="font-size:10px; font-weight:700; color:#B45309; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">Message from Production Lead</div>
+        <div style="font-size:12px; color:#374151; line-height:1.6;">${safeAdminNotes}</div>
+      </div>
+    `
+        : ''
+    }
+
+    <p class="text-muted" style="margin:20px 0 0 0; font-size:13px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      If you would like to explore alternative dates, please check our live production calendar or reply directly to this email so our team can help you find an open date.
+    </p>
+
+    <!-- CTA Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 0 0;">
+      <tr>
+        <td align="center" bgcolor="#24252C" style="border-radius:24px;">
+          <a href="https://binhiconcept.ph" style="display:inline-block; padding:12px 28px; font-size:12px; font-weight:700; color:#FFFFFF; text-decoration:none; letter-spacing:0.5px; font-family:Arial,Helvetica,sans-serif;">
+            View Calendar Availability →
+          </a>
+        </td>
+      </tr>
+    </table>
+  `;
+
+  return renderEmailShell({
+    title: `Reschedule Request Update: #${safeRef} - BINHI Concept`,
+    badgeText: 'SCHEDULE UPDATE',
+    headline: 'Reschedule Request Status Update',
+    bodyContent,
+  });
+}
+

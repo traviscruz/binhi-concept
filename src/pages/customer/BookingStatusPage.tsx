@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconTicket, IconCalendar, IconPin, IconUser, IconCheck } from '../../components/shared/icons';
+import { IconTicket, IconCalendar, IconPin, IconUser, IconCheck, IconX } from '../../components/shared/icons';
+import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
+import { BookingRescheduleCalendar } from '../../components/shared/BookingRescheduleCalendar';
 import { supabase } from '../../lib/supabase';
 import { formatDisplayDate } from '../../utils/bookingService';
+import { sendAdminRescheduleAlert } from '../../utils/emailService';
 
 export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
   const [bookings, setBookings] = useState<any[]>([]);
@@ -12,65 +15,200 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
     return localStorage.getItem('binhi_selected_active_booking_id') || null;
   });
   const [loading, setLoading] = useState(true);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Reschedule Request Modal State
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [newRescheduleDate, setNewRescheduleDate] = useState('');
+  const [rescheduleReason, setRescheduleReason] = useState('');
+  const [submittingReschedule, setSubmittingReschedule] = useState(false);
+  const [rescheduleSuccessToast, setRescheduleSuccessToast] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState('');
+  const [cancellingReschedule, setCancellingReschedule] = useState(false);
+
+  const fetchActiveBookings = async () => {
+    setLoading(true);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      let query = supabase
+        .from('bookings')
+        .select('*')
+        .neq('payment_status', 'cancelled')
+        .order('created_at', { ascending: false });
+
+      if (user?.id || user?.email) {
+        query = query.or(`user_id.eq.${user.id},customer_email.eq.${user.email}`);
+      }
+
+      const { data, error } = await query;
+      if (!error && data) {
+        // Filter only active / ongoing bookings (not cancelled and not completed)
+        const ongoing = data.filter(
+          (b: any) =>
+            (b.payment_status || '').toLowerCase() !== 'cancelled' &&
+            (b.payment_status || '').toLowerCase() !== 'completed' &&
+            (b.status || '').toLowerCase() !== 'cancelled' &&
+            (b.status || '').toLowerCase() !== 'completed'
+        );
+
+        setBookings(ongoing);
+
+        // If current selectedBookingId is valid in the loaded bookings, keep it.
+        // Otherwise, default to the latest ongoing booking (data[0]).
+        setSelectedBookingId((prev) => {
+          if (prev && ongoing.some((b: any) => b.id === prev)) {
+            return prev;
+          }
+          const defaultId = ongoing[0]?.id || null;
+          if (defaultId) {
+            localStorage.setItem('binhi_selected_active_booking_id', defaultId);
+          }
+          return defaultId;
+        });
+      } else {
+        setBookings([]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch active bookings:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function fetchActiveBookings() {
-      setLoading(true);
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+    fetchActiveBookings();
 
-        let query = supabase
-          .from('bookings')
-          .select('*')
-          .neq('payment_status', 'cancelled')
-          .order('created_at', { ascending: false });
-
-        if (user?.id || user?.email) {
-          query = query.or(`user_id.eq.${user.id},customer_email.eq.${user.email}`);
+    const channel = supabase
+      .channel('booking-status-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings' },
+        () => {
+          fetchActiveBookings();
         }
+      )
+      .subscribe();
 
-        const { data, error } = await query;
-        if (!error && data) {
-          // Filter only active / ongoing bookings (not cancelled and not completed)
-          const ongoing = data.filter(
-            (b: any) =>
-              (b.payment_status || '').toLowerCase() !== 'cancelled' &&
-              (b.payment_status || '').toLowerCase() !== 'completed' &&
-              (b.status || '').toLowerCase() !== 'cancelled' &&
-              (b.status || '').toLowerCase() !== 'completed'
-          );
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
-          setBookings(ongoing);
-
-          // If current selectedBookingId is valid in the loaded bookings, keep it.
-          // Otherwise, default to the latest ongoing booking (data[0]).
-          setSelectedBookingId((prev) => {
-            if (prev && ongoing.some((b: any) => b.id === prev)) {
-              return prev;
-            }
-            const defaultId = ongoing[0]?.id || null;
-            if (defaultId) {
-              localStorage.setItem('binhi_selected_active_booking_id', defaultId);
-            }
-            return defaultId;
-          });
-        } else {
-          setBookings([]);
-        }
-      } catch (err) {
-        console.error('Failed to fetch active bookings:', err);
-      } finally {
-        setLoading(false);
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsDropdownOpen(false);
       }
     }
-    fetchActiveBookings();
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const handleSelectBooking = (id: string) => {
     setSelectedBookingId(id);
     localStorage.setItem('binhi_selected_active_booking_id', id);
+  };
+
+  const handleOpenRescheduleModal = () => {
+    setNewRescheduleDate('');
+    setRescheduleReason('');
+    setRescheduleError('');
+    setShowRescheduleModal(true);
+  };
+
+  const handleSubmitReschedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeBooking || !newRescheduleDate) {
+      setRescheduleError('Please select your new target event date from the calendar.');
+      return;
+    }
+    const currentCleanDate = (activeBooking.event_date || '').slice(0, 10);
+    if (newRescheduleDate === currentCleanDate) {
+      setRescheduleError('The new date cannot be the same as your currently scheduled event date.');
+      return;
+    }
+    if (!rescheduleReason.trim()) {
+      setRescheduleError('Please provide a reason or note for your reschedule request.');
+      return;
+    }
+
+    setSubmittingReschedule(true);
+    setRescheduleError('');
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      // 1. Update booking in Supabase
+      const { error: dbError } = await supabase
+        .from('bookings')
+        .update({
+          reschedule_status: 'pending',
+          reschedule_requested_date: newRescheduleDate,
+          reschedule_reason: rescheduleReason.trim(),
+          reschedule_requested_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', activeBooking.id);
+
+      if (dbError) throw dbError;
+
+      // 2. Email ALL system admins in database
+      await sendAdminRescheduleAlert({
+        bookingId: activeBooking.paymongo_reference_number || `BNH-${activeBooking.id.slice(0, 8)}`,
+        customerName: activeBooking.customer_name || user?.user_metadata?.full_name || 'Valued Customer',
+        customerEmail: activeBooking.customer_email || user?.email || '',
+        customerPhone: activeBooking.customer_phone || '',
+        packageName: activeBooking.package_name,
+        originalDate: formatDisplayDate(activeBooking.event_date),
+        requestedDate: formatDisplayDate(newRescheduleDate),
+        reason: rescheduleReason.trim(),
+        venue: activeBooking.venue_address,
+      });
+
+      setShowRescheduleModal(false);
+      setRescheduleSuccessToast(true);
+      setTimeout(() => setRescheduleSuccessToast(false), 6000);
+
+      // Refresh data
+      fetchActiveBookings();
+    } catch (err: any) {
+      console.error('Failed to submit reschedule request:', err);
+      setRescheduleError(err.message || 'Failed to submit reschedule request. Please try again.');
+    } finally {
+      setSubmittingReschedule(false);
+    }
+  };
+
+  const handleCancelRescheduleRequest = async () => {
+    if (!activeBooking) return;
+    if (!confirm('Are you sure you want to cancel your pending reschedule request? Your original date will remain active.')) {
+      return;
+    }
+
+    setCancellingReschedule(true);
+    try {
+      await supabase
+        .from('bookings')
+        .update({
+          reschedule_status: null,
+          reschedule_requested_date: null,
+          reschedule_reason: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', activeBooking.id);
+
+      fetchActiveBookings();
+    } catch (err) {
+      console.error('Error cancelling reschedule request:', err);
+    } finally {
+      setCancellingReschedule(false);
+    }
   };
 
   if (loading) {
@@ -117,6 +255,8 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
 
   const isPending = (activeBooking.payment_status || '').toLowerCase() === 'pending';
   const assignedCrewList = Array.isArray(activeBooking.assigned_crew) ? activeBooking.assigned_crew : [];
+  const isReschedulePending = activeBooking.reschedule_status === 'pending';
+  const isRescheduleApproved = activeBooking.reschedule_status === 'approved';
 
   const steps = [
     {
@@ -162,139 +302,149 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
     <section className="pt-36 pb-24 px-4 sm:px-6 min-h-screen bg-[var(--mist)]">
       <div className="max-w-4xl mx-auto space-y-6">
 
-        {/* ── Active Bookings Switcher Bar ────────────────────────────── */}
-        <div className="bg-white rounded-[2rem] p-5 sm:p-6 border border-[#24252c]/[0.08] shadow-sm">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        {/* Success Toast */}
+        {rescheduleSuccessToast && (
+          <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 shadow-sm flex items-center justify-between gap-3 animate-fade-in text-xs">
+            <div className="flex items-center gap-2.5">
+              <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                ✓
+              </span>
+              <div>
+                <strong className="font-extrabold text-sm block">Reschedule Request Submitted!</strong>
+                <span>Our production lead and system administrators have been notified via email to review your requested date.</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRescheduleSuccessToast(false)}
+              className="text-emerald-700 hover:text-emerald-950 font-bold p-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* ── Active Bookings Selection Bar (Minimalist Dropdown) ────────────────────────── */}
+        <div className="bg-white rounded-[2rem] px-6 py-5 border border-[#24252c]/[0.08] shadow-xs relative z-30" ref={dropdownRef}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg sm:text-xl font-black text-[var(--ink)]">
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-lg sm:text-xl font-extrabold text-[var(--ink)] tracking-tight">
                   Active Event Bookings
                 </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-[#1090F8]/10 text-[#1090F8] border border-[#1090F8]/20">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#1090F8]/10 text-[#1090F8] border border-[#1090F8]/20 shrink-0">
                   {bookings.length} Ongoing
                 </span>
               </div>
-              <p className="text-xs text-[#24252c]/60 mt-0.5">
+              <p className="text-xs text-[#24252c]/50 mt-0.5">
                 {bookings.length > 1
-                  ? 'Select an event below to switch and track its live logistics, crew, and setup progress.'
+                  ? 'Switch between your ongoing event reservations to track live setup progress.'
                   : 'Live progress tracking for your confirmed event production reservation.'}
               </p>
             </div>
 
-            {/* Mobile quick dropdown */}
+            {/* Minimalist Capsule Dropdown Selector */}
             {bookings.length > 1 && (
-              <div className="sm:hidden w-full pt-2">
-                <label className="text-[11px] font-bold text-[#24252c]/60 block mb-1">
-                  Switch Active Booking:
-                </label>
-                <select
-                  value={activeBooking.id}
-                  onChange={(e) => handleSelectBooking(e.target.value)}
-                  className="w-full bg-[var(--mist)] border border-[#24252c]/15 text-xs font-semibold rounded-xl px-3 py-2.5 text-[var(--ink)] outline-none focus:border-[#1090F8]"
-                >
-                  {bookings.map((b, idx) => (
-                    <option key={b.id} value={b.id}>
-                      #{idx + 1}: {b.package_name} — {formatDisplayDate(b.event_date)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-
-          {/* Interactive Switcher Cards List */}
-          <div className="flex items-stretch gap-3 overflow-x-auto pb-2 scrollbar-thin">
-            {bookings.map((b, idx) => {
-              const isSelected = b.id === activeBooking.id;
-              const refNum = b.paymongo_reference_number || `BNH-${b.id.slice(0, 8)}`;
-              const bIsPending = (b.payment_status || '').toLowerCase() === 'pending';
-
-              return (
+              <div className="relative shrink-0">
                 <button
-                  key={b.id}
                   type="button"
-                  onClick={() => handleSelectBooking(b.id)}
-                  className={`flex-shrink-0 w-64 sm:w-72 p-4 rounded-2xl text-left transition-all duration-200 cursor-pointer border ${
-                    isSelected
-                      ? 'bg-[#161823] text-white border-[#1090F8] shadow-lg ring-4 ring-[#1090F8]/20 -translate-y-0.5'
-                      : 'bg-[var(--mist)]/70 hover:bg-white text-[var(--ink)] border-[#24252c]/10 hover:border-[#1090F8]/40 hover:shadow-sm'
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  className={`inline-flex items-center gap-2.5 bg-[var(--mist)] hover:bg-[#E4E6EA] text-[var(--ink)] border transition-all rounded-full px-4 py-2.5 text-xs font-semibold cursor-pointer shadow-2xs group ${
+                    isDropdownOpen ? 'border-[#1090F8] ring-2 ring-[#1090F8]/15 bg-white' : 'border-[#24252c]/10'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <span
-                      className={`text-[10px] font-mono font-bold tracking-tight px-2 py-0.5 rounded-full ${
-                        isSelected
-                          ? 'bg-white/10 text-white/90 border border-white/15'
-                          : 'bg-white text-[#24252c]/70 border border-[#24252c]/10'
-                      }`}
-                    >
-                      Ref #{refNum}
-                    </span>
-                    <span
-                      className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
-                        bIsPending
-                          ? isSelected
-                            ? 'bg-amber-400/20 text-amber-300 border-amber-400/40'
-                            : 'bg-amber-500/10 text-amber-600 border-amber-500/20'
-                          : isSelected
-                          ? 'bg-emerald-400/20 text-emerald-300 border-emerald-400/40'
-                          : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
-                      }`}
-                    >
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          bIsPending ? 'bg-amber-400' : 'bg-emerald-400'
-                        }`}
-                      />
-                      {bIsPending ? 'Pending' : 'Confirmed'}
-                    </span>
-                  </div>
-
-                  <div className="font-extrabold text-sm truncate mb-0.5">
-                    {b.package_name || 'Production Package'}
-                  </div>
-                  <div
-                    className={`text-[11px] truncate mb-3 ${
-                      isSelected ? 'text-white/60' : 'text-[#24252c]/60'
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      (activeBooking.payment_status || '').toLowerCase() === 'pending'
+                        ? 'bg-amber-400 animate-pulse'
+                        : 'bg-emerald-500'
                     }`}
+                  />
+                  <span className="font-extrabold text-[var(--ink)] max-w-[160px] sm:max-w-[200px] truncate">
+                    {activeBooking.package_name}
+                  </span>
+                  <span className="text-[#24252c]/50 font-medium hidden sm:inline">
+                    • {formatDisplayDate(activeBooking.event_date)}
+                  </span>
+                  <svg
+                    className={`w-3.5 h-3.5 text-[#24252c]/50 transition-transform duration-200 shrink-0 ${
+                      isDropdownOpen ? 'rotate-180 text-[#1090F8]' : ''
+                    }`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
                   >
-                    {b.event_type || 'Special Event'}
-                  </div>
-
-                  <div className="pt-2 border-t border-current/10 flex items-center justify-between text-[11px]">
-                    <span className="flex items-center gap-1.5 font-medium">
-                      <IconCalendar className="w-3.5 h-3.5 shrink-0 opacity-70" />
-                      {formatDisplayDate(b.event_date)}
-                    </span>
-                    {isSelected ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#1090F8] bg-white px-2 py-0.5 rounded-full shadow-xs">
-                        <IconCheck className="w-3 h-3 text-[#1090F8]" />
-                        Tracking
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-[#24252c]/40 font-semibold group-hover:text-[#1090F8]">
-                        Switch →
-                      </span>
-                    )}
-                  </div>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                  </svg>
                 </button>
-              );
-            })}
+
+                {/* Floating Minimalist Dropdown Menu */}
+                {isDropdownOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-72 sm:w-80 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-[#24252c]/10 p-1.5 z-50 animate-fade-in space-y-1">
+                    <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#24252c]/40 flex items-center justify-between">
+                      <span>Switch Reservation</span>
+                      <span className="font-mono text-[#1090F8]">{bookings.length} events</span>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto modal-scroll space-y-1">
+                      {bookings.map((b) => {
+                        const isSelected = b.id === activeBooking.id;
+                        const bIsPending = (b.payment_status || '').toLowerCase() === 'pending';
+                        const refNum = b.paymongo_reference_number || `BNH-${b.id.slice(0, 8)}`;
+
+                        return (
+                          <button
+                            key={b.id}
+                            type="button"
+                            onClick={() => {
+                              handleSelectBooking(b.id);
+                              setIsDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-2.5 rounded-xl text-xs transition-colors flex items-center justify-between gap-3 cursor-pointer ${
+                              isSelected
+                                ? 'bg-[#1090F8]/10 text-[#1090F8] font-bold'
+                                : 'hover:bg-[var(--mist)] text-[var(--ink)] font-medium'
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1 space-y-0.5">
+                              <div className="flex items-center gap-1.5 truncate">
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                    bIsPending ? 'bg-amber-400' : 'bg-emerald-500'
+                                  }`}
+                                />
+                                <span className="font-bold truncate text-[var(--ink)]">
+                                  {b.package_name || 'Production Package'}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-[#24252c]/50 pl-3">
+                                {formatDisplayDate(b.event_date)} • <span className="font-mono">{refNum}</span>
+                              </div>
+                            </div>
+                            {isSelected && <IconCheck className="w-4 h-4 text-[#1090F8] shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
         {/* ── Active Booking Details & Timeline ───────────────────────── */}
-        <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-[#24252c]/[0.08] shadow-sm">
-          {/* Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#24252c]/[0.06]">
-            <div>
+        <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-[#24252c]/[0.08] shadow-sm relative">
+          {/* Header with Status & Reschedule Action aligned Top-Right */}
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-6 border-b border-[#24252c]/[0.06]">
+            {/* Left: Package Info */}
+            <div className="flex-1 pr-0 sm:pr-4">
               <MonoBadge icon={IconTicket}>
                 Booking Ref #{activeBooking.paymongo_reference_number || `BNH-${activeBooking.id.slice(0, 8)}`}
               </MonoBadge>
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-[var(--ink)] mt-2">
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-[var(--ink)] mt-2 leading-tight">
                 {activeBooking.package_name}
               </h2>
-              <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-[#24252c]/60">
+              <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-[#24252c]/60">
                 <span className="font-semibold text-[var(--ink)]">
                   {activeBooking.event_type || 'Special Event Production'}
                 </span>
@@ -306,24 +456,89 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
               </div>
             </div>
 
-            <div className="sm:text-right flex flex-col sm:items-end gap-1">
-              {isPending ? (
-                <span className="inline-flex items-center gap-1.5 bg-amber-500/10 text-amber-600 font-bold text-xs px-3.5 py-1.5 rounded-full border border-amber-500/20">
-                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                  Deposit Pending Approval
+            {/* Right: Top-Right Aligned Status & Request Reschedule Button */}
+            <div className="flex flex-col sm:items-end gap-2.5 shrink-0">
+              <div className="flex items-center gap-2 flex-wrap sm:justify-end">
+                {isPending ? (
+                  <span className="inline-flex items-center gap-1.5 bg-amber-500/10 text-amber-700 font-extrabold text-xs px-3.5 py-1.5 rounded-full border border-amber-500/20 whitespace-nowrap shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                    Deposit Pending Approval
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 bg-emerald-500/10 text-emerald-700 font-extrabold text-xs px-3.5 py-1.5 rounded-full border border-emerald-500/20 whitespace-nowrap shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                    Confirmed & Date Secured
+                  </span>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleOpenRescheduleModal}
+                  className="bg-[var(--mist)] hover:bg-[var(--ink)] hover:text-white text-[var(--ink)] text-xs font-bold px-4 py-1.5 rounded-full border border-[#24252c]/10 transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs whitespace-nowrap shrink-0"
+                >
+                  <IconCalendar className="w-3.5 h-3.5 text-[#1090F8]" />
+                  <span>Request Reschedule</span>
+                </button>
+              </div>
+
+              <div className="text-xs font-semibold text-[var(--ink)] flex items-center gap-1.5 sm:justify-end">
+                <span className="text-[10px] uppercase font-bold text-[#24252c]/50">Target Date:</span>
+                <span className="bg-[var(--mist)] px-2.5 py-0.5 rounded-md border border-[#24252c]/10 font-bold text-[var(--ink)]">
+                  {formatDisplayDate(activeBooking.event_date)}
                 </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 bg-emerald-500/10 text-emerald-600 font-bold text-xs px-3.5 py-1.5 rounded-full border border-emerald-500/20">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  Confirmed & Date Secured
-                </span>
-              )}
-              <div className="text-xs font-semibold text-[var(--ink)] flex items-center gap-1.5 mt-1">
-                <IconCalendar className="w-3.5 h-3.5 text-[#1090F8]" />
-                Event Date: {formatDisplayDate(activeBooking.event_date)}
               </div>
             </div>
           </div>
+
+          {/* ── Reschedule Request Status Banner ── */}
+          {isReschedulePending && (
+            <div className="my-6 p-4 rounded-2xl bg-amber-50/90 border border-amber-300 text-amber-950 text-xs shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-500 text-white font-bold flex items-center justify-center shrink-0 text-sm shadow-xs">
+                  <IconCalendar className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-extrabold text-sm text-amber-900 flex items-center gap-2">
+                    <span>Reschedule Request Pending Admin Review</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 border border-amber-300">
+                      Pending Approval
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-800/90 mt-0.5">
+                    Requested Target Date: <strong className="text-amber-950 font-bold">{formatDisplayDate(activeBooking.reschedule_requested_date)}</strong>
+                  </p>
+                  {activeBooking.reschedule_reason && (
+                    <p className="text-[11px] text-amber-800/80 mt-1 italic">
+                      Note: "{activeBooking.reschedule_reason}"
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="shrink-0 flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={cancellingReschedule}
+                  onClick={handleCancelRescheduleRequest}
+                  className="px-4 py-2 rounded-full bg-white border border-amber-300 text-amber-900 text-xs font-semibold hover:bg-amber-100 transition-colors cursor-pointer shadow-2xs disabled:opacity-50"
+                >
+                  {cancellingReschedule ? 'Cancelling...' : 'Cancel Request'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isRescheduleApproved && (
+            <div className="my-6 p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs shadow-2xs flex items-center gap-2.5">
+              <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                ✓
+              </span>
+              <div>
+                <strong className="font-bold text-emerald-900">Event Reschedule Confirmed</strong>
+                <span className="text-[11px] text-emerald-800 ml-1">Your event date is locked for {formatDisplayDate(activeBooking.event_date)}.</span>
+              </div>
+            </div>
+          )}
 
           {/* Booking Summary Chips */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-6 p-4 rounded-2xl bg-[var(--mist)]/70 border border-[#24252c]/[0.05] text-xs">
@@ -453,25 +668,25 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
           </div>
 
           {/* Footer Card */}
-          <div className="mt-8 p-5 rounded-2xl bg-[var(--mist)] flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-3 w-full sm:w-auto">
-              <div className="w-10 h-10 rounded-full bg-[var(--ink)] text-white font-bold text-xs flex items-center justify-center shrink-0">
+          <div className="mt-8 p-4 sm:p-5 rounded-2xl bg-[var(--mist)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="w-10 h-10 rounded-full bg-[var(--ink)] text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs">
                 BC
               </div>
-              <div className="truncate">
+              <div className="min-w-0 flex-1">
                 <div className="text-xs font-bold text-[var(--ink)]">BINHI Event Lead Team</div>
-                <div className="text-[11px] text-[#24252c]/60 truncate">
+                <div className="text-[11px] text-[#24252c]/60 truncate" title={activeBooking.venue_address || 'Selected Location'}>
                   Venue: {activeBooking.venue_address || 'Selected Location'}
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
               <button
                 type="button"
                 onClick={() => go('booking-history')}
-                className="bg-white border border-[#24252c]/10 text-xs font-semibold px-4 py-2 rounded-full hover:bg-[var(--mist)] transition-colors cursor-pointer"
+                className="bg-white border border-[#24252c]/10 text-xs font-semibold px-4 py-2 rounded-full hover:bg-[var(--mist)] transition-colors cursor-pointer shadow-2xs"
               >
-                View Receipt & Records
+                View Records
               </button>
               <button
                 type="button"
@@ -484,6 +699,182 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
           </div>
         </div>
       </div>
+
+      {/* ── Customer Reschedule Request Modal ── */}
+      <ModalOverlay isOpen={showRescheduleModal} onClose={() => setShowRescheduleModal(false)}>
+        <div className="bg-white rounded-[2.5rem] max-w-xl w-full max-h-[85vh] shadow-2xl border border-[#24252c]/10 relative p-1.5 sm:p-2.5 overflow-hidden flex flex-col">
+          <button
+            type="button"
+            onClick={() => setShowRescheduleModal(false)}
+            className="absolute top-6 right-6 z-20 text-[#24252c]/50 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors bg-white/90 backdrop-blur-md shadow-sm border border-[#24252c]/10 cursor-pointer"
+          >
+            <IconX className="w-5 h-5" />
+          </button>
+
+          <div className="flex-1 overflow-y-auto p-5 sm:p-7 space-y-4 modal-scroll pr-4 sm:pr-6">
+            <div className="mb-2 pb-3 border-b border-[#24252c]/[0.06]">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="p-1.5 rounded-lg bg-[#1090F8]/10 text-[#1090F8]">
+                  <IconCalendar className="w-4 h-4" />
+                </span>
+                <h3 className="text-xl font-extrabold text-[var(--ink)]">
+                  Request Booking Reschedule
+                </h3>
+              </div>
+              <p className="text-xs text-[#24252c]/60">
+                Select your desired new event date on the calendar below. All system administrators will be notified immediately to review and confirm your request.
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmitReschedule} className="space-y-4 text-xs">
+              {/* Current Schedule Summary */}
+              <div className="p-3.5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.06] flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-[#24252c]/50 block">Current Schedule</span>
+                  <span className="font-extrabold text-sm text-[var(--ink)]">
+                    {formatDisplayDate(activeBooking.event_date)}
+                  </span>
+                </div>
+                <span className="text-[11px] font-mono font-bold text-[#1090F8] bg-white px-2.5 py-1 rounded-full border border-black/10">
+                  Ref #{activeBooking.paymongo_reference_number || `BNH-${activeBooking.id.slice(0, 8)}`}
+                </span>
+              </div>
+
+              {/* Interactive Availability Calendar */}
+              <div className="p-4 rounded-2xl bg-white border border-[#24252c]/15 shadow-2xs">
+                <BookingRescheduleCalendar
+                  originalDate={activeBooking.event_date}
+                  selectedDate={newRescheduleDate}
+                  onSelectDate={(d) => {
+                    setNewRescheduleDate(d);
+                    setRescheduleError('');
+                  }}
+                  excludeBookingId={activeBooking.id}
+                  minDateOffsetDays={1}
+                />
+              </div>
+
+              {/* Selected Date Indicator */}
+              {newRescheduleDate && (
+                <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 flex items-center justify-between">
+                  <span className="font-semibold text-xs">Selected New Target Date:</span>
+                  <span className="font-extrabold text-xs text-[#1090F8] bg-white px-3 py-1 rounded-full border border-blue-300 shadow-2xs">
+                    {formatDisplayDate(newRescheduleDate)}
+                  </span>
+                </div>
+              )}
+
+              {/* Built-in Prefilled Reason & Email Message Box */}
+              <div className="space-y-2 pt-2 border-t border-[#24252c]/[0.08]">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <label className="text-[11px] font-black uppercase text-[var(--ink)] block">
+                      Email Alert to Admin &amp; Reason <span className="text-rose-500">*</span>
+                    </label>
+                    <span className="text-[10px] text-[#24252c]/60">
+                      Dispatched instantly to BINHI Production Management
+                    </span>
+                  </div>
+
+                  {/* Quick Reason Templates */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setRescheduleReason(
+                          `Due to unexpected venue availability adjustments, we would like to request moving our event schedule${
+                            newRescheduleDate ? ` to ${formatDisplayDate(newRescheduleDate)}` : ''
+                          }.`
+                        )
+                      }
+                      className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-blue-50 text-[#1090F8] border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
+                    >
+                      Venue Shift
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setRescheduleReason(
+                          `Due to program timeline adjustments and client coordination, we kindly request rescheduling our booking${
+                            newRescheduleDate ? ` to ${formatDisplayDate(newRescheduleDate)}` : ''
+                          }.`
+                        )
+                      }
+                      className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors cursor-pointer"
+                    >
+                      Guest Coordination
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setRescheduleReason(
+                          `Due to weather forecasts and outdoor logistical considerations, we request shifting our event reservation${
+                            newRescheduleDate ? ` to ${formatDisplayDate(newRescheduleDate)}` : ''
+                          }.`
+                        )
+                      }
+                      className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors cursor-pointer"
+                    >
+                      Weather / Delay
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setRescheduleReason(
+                          `Due to an unavoidable schedule conflict, we would like to request moving our event date${
+                            newRescheduleDate ? ` to ${formatDisplayDate(newRescheduleDate)}` : ''
+                          }.`
+                        )
+                      }
+                      className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer"
+                    >
+                      Schedule Conflict
+                    </button>
+                  </div>
+                </div>
+
+                <textarea
+                  rows={4}
+                  value={rescheduleReason}
+                  onChange={(e) => setRescheduleReason(e.target.value)}
+                  placeholder="State why you need to reschedule or choose a quick template above..."
+                  className="w-full rounded-2xl border border-black/10 px-4 py-3 bg-[#F8F9FA] focus:bg-white text-xs font-medium text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] transition-colors resize-none leading-relaxed"
+                  required
+                />
+                <div className="flex justify-between items-center text-[10px] text-[#24252c]/50 px-1">
+                  <span>Admins will review calendar availability upon receiving this request.</span>
+                  <span className="font-mono font-semibold">{rescheduleReason.length} chars</span>
+                </div>
+              </div>
+
+              {/* Error banner if any */}
+              {rescheduleError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">
+                  {rescheduleError}
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#24252c]/[0.06]">
+                <button
+                  type="button"
+                  onClick={() => setShowRescheduleModal(false)}
+                  className="px-5 py-2.5 rounded-full border border-black/10 text-xs font-semibold text-[var(--ink)] hover:bg-[#F0F0F0] transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingReschedule || !newRescheduleDate || !rescheduleReason.trim()}
+                  className="bg-[var(--ink)] disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer text-xs shadow-md flex items-center gap-1.5"
+                >
+                  {submittingReschedule ? 'Sending Alert to Admins...' : 'Submit Reschedule Request'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </ModalOverlay>
     </section>
   );
 }

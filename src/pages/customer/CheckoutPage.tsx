@@ -11,6 +11,12 @@ import { supabase } from '../../lib/supabase';
 import { createPaymongoCheckoutSession } from '../../utils/paymongoPayment';
 import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
 import { validateVoucherCode, recordVoucherUsage } from '../../utils/voucherService';
+import {
+  fetchLogisticsConfig,
+  calculateDistanceKm,
+  type LogisticsConfig,
+  DEFAULT_LOGISTICS_CONFIG,
+} from '../../utils/logistics';
 
 interface TransportRuleOption {
   id: string;
@@ -74,7 +80,7 @@ export default function CheckoutPage({
     loadBookings();
   }, []);
 
-  // ── Logistics State (Fetched from DB transport_rules) ──────────────────────
+  // ── Logistics & Warehouse State ───────────────────────────────────────────
   const [transportRules, setTransportRules] = useState<TransportRuleOption[]>([]);
   const [selectedRuleId, setSelectedRuleId] = useState<string>('');
   const [transportLoading, setTransportLoading] = useState(true);
@@ -83,6 +89,26 @@ export default function CheckoutPage({
   const [selectedAddons] = useState<string[]>(initialAddons);
   const [receiptUploaded, setReceiptUploaded] = useState(false);
   const [paymentType, setPaymentType] = useState<'deposit' | 'full'>('deposit');
+
+  // Warehouse origin & proximity distance state
+  const [logistics, setLogistics] = useState<LogisticsConfig>(DEFAULT_LOGISTICS_CONFIG);
+  const [distanceFromWarehouse, setDistanceFromWarehouse] = useState<number | null>(null);
+  const warehouseMarkerRef = useRef<L.Marker | null>(null);
+  const warehouseCircleRef = useRef<L.Circle | null>(null);
+  const distancePolylineRef = useRef<L.Polyline | null>(null);
+
+  // Load logistics config
+  useEffect(() => {
+    async function loadLogistics() {
+      try {
+        const config = await fetchLogisticsConfig();
+        setLogistics(config);
+      } catch (err) {
+        console.error('Failed to load logistics config:', err);
+      }
+    }
+    loadLogistics();
+  }, []);
 
   // ── Promo Code State ───────────────────────────────────────────────────────
   const [promoOpen, setPromoOpen] = useState(false);
@@ -204,9 +230,37 @@ export default function CheckoutPage({
     return [14.5547, 121.0456]; // Metro Manila / BGC default
   };
 
+  // Helper to update distance from warehouse and draw polyline
+  const updateDistanceAndLine = (lat: number, lng: number) => {
+    const dist = calculateDistanceKm(lat, lng, logistics.warehouseLat, logistics.warehouseLng);
+    setDistanceFromWarehouse(dist);
+
+    if (mapInstanceRef.current) {
+      if (distancePolylineRef.current) {
+        distancePolylineRef.current.remove();
+        distancePolylineRef.current = null;
+      }
+      const isFree = logistics.isFreeRadiusEnabled && dist <= logistics.freeRadiusKm;
+      const poly = L.polyline(
+        [
+          [logistics.warehouseLat, logistics.warehouseLng],
+          [lat, lng],
+        ],
+        {
+          color: isFree ? '#10B981' : '#1090F8',
+          weight: 2.5,
+          dashArray: '6, 8',
+          opacity: 0.85,
+        }
+      ).addTo(mapInstanceRef.current);
+      distancePolylineRef.current = poly;
+    }
+  };
+
   // ── Reverse Geocoding with Nominatim (Lat/Lng to Address) ──────────────────
   const reverseGeocode = async (lat: number, lng: number) => {
     setIsGeocoding(true);
+    updateDistanceAndLine(lat, lng);
     try {
       const res = await fetch(
         `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
@@ -246,6 +300,9 @@ export default function CheckoutPage({
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
         markerInstanceRef.current = null;
+        warehouseMarkerRef.current = null;
+        warehouseCircleRef.current = null;
+        distancePolylineRef.current = null;
       }
       return;
     }
@@ -257,13 +314,16 @@ export default function CheckoutPage({
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
         markerInstanceRef.current = null;
+        warehouseMarkerRef.current = null;
+        warehouseCircleRef.current = null;
+        distancePolylineRef.current = null;
       }
 
       const [initialLat, initialLng] = getRegionCoordinates(selectedRuleId);
 
       const map = L.map(mapContainerRef.current, {
         center: [initialLat, initialLng],
-        zoom: 14,
+        zoom: 13,
         zoomControl: false,
       });
 
@@ -276,7 +336,49 @@ export default function CheckoutPage({
         maxZoom: 19,
       }).addTo(map);
 
-      // Minimalist sleek pin icon with pulse effect
+      // 1. Warehouse Origin Pin & Free Transport Radius Circle
+      const warehouseIcon = L.divIcon({
+        className: 'binhi-warehouse-origin-pin',
+        html: `
+          <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; transform: translate(-50%, -100%);">
+            <div style="position: relative; width: 32px; height: 32px; border-radius: 9999px; background: #0c162c; border: 2.5px solid #1090F8; box-shadow: 0 8px 20px -2px rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; color: #ffffff;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+            </div>
+          </div>
+        `,
+        iconSize: [0, 0],
+      });
+
+      const warehouseMarker = L.marker([logistics.warehouseLat, logistics.warehouseLng], {
+        icon: warehouseIcon,
+      }).addTo(map);
+
+      warehouseMarker.bindTooltip(logistics.warehouseName || 'Warehouse Facility Origin', {
+        permanent: false,
+        direction: 'top',
+      });
+
+      const freeCircle = L.circle([logistics.warehouseLat, logistics.warehouseLng], {
+        radius: (logistics.freeRadiusKm || 2) * 1000,
+        color: '#10B981',
+        fillColor: '#10B981',
+        fillOpacity: logistics.isFreeRadiusEnabled ? 0.14 : 0.03,
+        weight: 1.8,
+        dashArray: logistics.isFreeRadiusEnabled ? undefined : '5, 5',
+      }).addTo(map);
+
+      freeCircle.bindTooltip(`${logistics.freeRadiusKm} km Free Transport Zone`, {
+        permanent: false,
+        direction: 'bottom',
+      });
+
+      warehouseMarkerRef.current = warehouseMarker;
+      warehouseCircleRef.current = freeCircle;
+
+      // 2. Minimalist sleek Venue Pin Icon with pulse effect
       const pinIcon = L.divIcon({
         className: 'binhi-custom-pin',
         html: `
@@ -301,13 +403,16 @@ export default function CheckoutPage({
       mapInstanceRef.current = map;
       markerInstanceRef.current = marker;
 
-      // Click to place marker
+      // Initial distance calculation
+      updateDistanceAndLine(initialLat, initialLng);
+
+      // Click to place venue marker
       map.on('click', (e: L.LeafletMouseEvent) => {
         marker.setLatLng(e.latlng);
         reverseGeocode(e.latlng.lat, e.latlng.lng);
       });
 
-      // Drag marker
+      // Drag venue marker
       marker.on('dragend', () => {
         const pos = marker.getLatLng();
         reverseGeocode(pos.lat, pos.lng);
@@ -322,9 +427,12 @@ export default function CheckoutPage({
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
         markerInstanceRef.current = null;
+        warehouseMarkerRef.current = null;
+        warehouseCircleRef.current = null;
+        distancePolylineRef.current = null;
       }
     };
-  }, [step]);
+  }, [step, logistics]);
 
   // Click outside to close address suggestions
   useEffect(() => {
@@ -383,9 +491,10 @@ export default function CheckoutPage({
     setVenueAddress(item.display_name);
     validateAddressAgainstRegion(item.display_name, selectedRuleId);
     setShowAddressDropdown(false);
+    updateDistanceAndLine(lat, lng);
 
     if (mapInstanceRef.current && markerInstanceRef.current) {
-      mapInstanceRef.current.flyTo([lat, lng], 16, { duration: 1.2 });
+      mapInstanceRef.current.flyTo([lat, lng], 15, { duration: 1.2 });
       markerInstanceRef.current.setLatLng([lat, lng]);
     }
   };
@@ -396,6 +505,7 @@ export default function CheckoutPage({
     validateAddressAgainstRegion(venueAddress, newRuleId);
 
     const [lat, lng] = getRegionCoordinates(newRuleId);
+    updateDistanceAndLine(lat, lng);
     if (mapInstanceRef.current && markerInstanceRef.current) {
       mapInstanceRef.current.flyTo([lat, lng], 13, { duration: 1 });
       markerInstanceRef.current.setLatLng([lat, lng]);
@@ -629,7 +739,13 @@ export default function CheckoutPage({
       const baseUrl = `${window.location.origin}${window.location.pathname}`;
 
       const selectedRule = transportRules.find((r) => r.id === selectedRuleId);
-      const fee = selectedRule ? selectedRule.baseFee : 0;
+      const standardFee = selectedRule ? selectedRule.baseFee : 0;
+      const isFreeProximity = Boolean(
+        logistics.isFreeRadiusEnabled &&
+        distanceFromWarehouse !== null &&
+        distanceFromWarehouse <= logistics.freeRadiusKm
+      );
+      const fee = isFreeProximity ? 0 : standardFee;
 
       const currentAddonsCost = selectedAddons.reduce((acc, addonStr) => {
         const match = String(addonStr).match(/₱([\d,]+)/);
@@ -743,9 +859,15 @@ export default function CheckoutPage({
     setBookingSuccessModal(true);
   };
 
-  // ── Costs calculations ────────────────────────────────────────────────────
+  // ── Costs calculations & Proximity Distance Waiver ─────────────────────────
   const currentSelectedRule = transportRules.find((r) => r.id === selectedRuleId) || transportRules[0];
-  const transportFee = currentSelectedRule ? currentSelectedRule.baseFee : 1500;
+  const standardRegionalFee = currentSelectedRule ? currentSelectedRule.baseFee : 1500;
+  const isFreeTransportApplied = Boolean(
+    logistics.isFreeRadiusEnabled &&
+    distanceFromWarehouse !== null &&
+    distanceFromWarehouse <= logistics.freeRadiusKm
+  );
+  const transportFee = isFreeTransportApplied ? 0 : standardRegionalFee;
   const locationRegionName = currentSelectedRule ? currentSelectedRule.region : 'Selected Location';
 
   // Real add-on cost calculation from selected equipment items
@@ -1249,15 +1371,71 @@ export default function CheckoutPage({
               </div>
 
               {/* Helper Note Below Map */}
-              <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] text-xs text-[#24252c]/75">
-                <div className="w-5 h-5 rounded-full bg-[#1090F8]/10 text-[#1090F8] flex items-center justify-center shrink-0">
-                  <IconPin className="w-3.5 h-3.5" />
+              <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] text-xs text-[#24252c]/75">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 rounded-full bg-[#1090F8]/10 text-[#1090F8] flex items-center justify-center shrink-0">
+                    <IconPin className="w-3.5 h-3.5" />
+                  </div>
+                  <span className="text-[11px] font-medium">
+                    Click anywhere on the map or drag the pin to select your venue.
+                  </span>
                 </div>
-                <span className="text-[11px] font-medium">
-                  Click anywhere on the map or drag the pin marker to select your exact venue location.
-                </span>
+                {distanceFromWarehouse !== null && (
+                  <span className="text-[11px] font-bold text-[var(--ink)] bg-white px-2.5 py-1 rounded-full border border-black/10 shrink-0">
+                    {distanceFromWarehouse} km from warehouse
+                  </span>
+                )}
               </div>
             </div>
+
+            {/* Warehouse Proximity & Free Transport Alert Banner */}
+            {distanceFromWarehouse !== null && (
+              <div
+                className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all ${
+                  isFreeTransportApplied
+                    ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950 shadow-xs'
+                    : 'bg-blue-50/60 border-blue-200 text-blue-950'
+                }`}
+              >
+                <div className="flex items-start sm:items-center gap-3">
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 ${
+                      isFreeTransportApplied
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'bg-[#1090F8] text-white shadow-sm'
+                    }`}
+                  >
+                    {isFreeTransportApplied ? <IconCheck className="w-4 h-4" /> : <IconPin className="w-4 h-4" />}
+                  </div>
+                  <div>
+                    <div className="font-extrabold text-sm flex items-center gap-2">
+                      {isFreeTransportApplied ? (
+                        <span>Free Transport Waiver Applied</span>
+                      ) : (
+                        <span>Delivery Distance: {distanceFromWarehouse} km</span>
+                      )}
+                    </div>
+                    <p className="text-[11px] opacity-85 mt-0.5 leading-relaxed">
+                      {isFreeTransportApplied
+                        ? `Venue is within ${logistics.freeRadiusKm} km of our central warehouse (${distanceFromWarehouse} km away). Transport fee is waived (₱0 instead of ₱${standardRegionalFee.toLocaleString()}).`
+                        : `Venue is ${distanceFromWarehouse} km away (outside the ${logistics.freeRadiusKm} km free local zone). Standard regional rate applies.`}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-left sm:text-right shrink-0">
+                  <span
+                    className={`text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider inline-block ${
+                      isFreeTransportApplied
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-blue-100 text-blue-900 border border-blue-200'
+                    }`}
+                  >
+                    {isFreeTransportApplied ? '₱0.00 WAIVED' : `+₱${standardRegionalFee.toLocaleString()}`}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Cost Summary Box (Package & Add-ons + Transpo Fee = Total) */}
             <div className="p-5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] space-y-2.5 text-xs">
@@ -1266,8 +1444,17 @@ export default function CheckoutPage({
                 <span className="font-bold text-[var(--ink)]">₱{packageAndAddonPrice.toLocaleString()}</span>
               </div>
               <div className="flex justify-between text-[#24252c]/60">
-                <span>Transport & Logistics Charge ({locationRegionName})</span>
-                <span className="font-bold text-[#1090F8]">+₱{transportFee.toLocaleString()}</span>
+                <span>Transport & Logistics ({locationRegionName})</span>
+                {isFreeTransportApplied ? (
+                  <span className="font-extrabold text-emerald-600 flex items-center gap-1.5">
+                    <span className="line-through text-gray-400 font-normal text-[11px]">
+                      ₱{standardRegionalFee.toLocaleString()}
+                    </span>
+                    <span>₱0.00 (Free &lt; {logistics.freeRadiusKm}km)</span>
+                  </span>
+                ) : (
+                  <span className="font-bold text-[#1090F8]">+₱{transportFee.toLocaleString()}</span>
+                )}
               </div>
               {discountAmount > 0 && (
                 <div className="flex justify-between text-emerald-600 font-semibold">
@@ -1537,7 +1724,16 @@ export default function CheckoutPage({
 
                 <div className="flex justify-between text-[#24252c]/60">
                   <span>Transport & Logistics Fee ({locationRegionName})</span>
-                  <span className="font-bold text-[#1090F8]">+₱{transportFee.toLocaleString()}</span>
+                  {isFreeTransportApplied ? (
+                    <span className="font-extrabold text-emerald-600 flex items-center gap-1.5">
+                      <span className="line-through text-gray-400 font-normal text-[11px]">
+                        ₱{standardRegionalFee.toLocaleString()}
+                      </span>
+                      <span>₱0.00 (Waived &lt; {logistics.freeRadiusKm}km)</span>
+                    </span>
+                  ) : (
+                    <span className="font-bold text-[#1090F8]">+₱{transportFee.toLocaleString()}</span>
+                  )}
                 </div>
 
                 {discountAmount > 0 && (

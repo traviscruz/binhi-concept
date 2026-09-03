@@ -77,7 +77,7 @@ export function ModalOverlay({ children, onClose, className = '', isOpen }: Moda
 
   return createPortal(
     <div
-      className={`fixed inset-0 z-[999] bg-black/60 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto transition-opacity duration-300 ease-out ${
+      className={`fixed inset-0 z-[999] bg-black/60 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto custom-scrollbar transition-opacity duration-300 ease-out ${
         active && !animatingOut ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}
       onClick={(e) => {
@@ -87,7 +87,7 @@ export function ModalOverlay({ children, onClose, className = '', isOpen }: Moda
       }}
     >
       <div
-        className={`transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] transform ${
+        className={`transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] transform my-auto flex items-center justify-center w-full max-w-full ${
           active && !animatingOut
             ? 'scale-100 opacity-100 blur-none translate-y-0'
             : 'scale-95 opacity-0 blur-sm -translate-y-2'
