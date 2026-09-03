@@ -11,11 +11,13 @@ export function CustomerHeader({
   go,
   wishlistCount = 0,
   onSelectDateAndGoToPackages,
+  hasBanner = false,
 }: {
   page: Page;
   go: (p: Page) => void;
   wishlistCount?: number;
   onSelectDateAndGoToPackages?: (formattedDate: string) => void;
+  hasBanner?: boolean;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [customerName, setCustomerName] = useState('');
@@ -148,7 +150,7 @@ export function CustomerHeader({
   );
 
   return (
-    <header className="fixed top-4 sm:top-5 inset-x-0 z-50 px-3 sm:px-4 md:px-8">
+    <header className={`fixed ${hasBanner ? 'top-9 sm:top-10' : 'top-4 sm:top-5'} inset-x-0 z-50 px-3 sm:px-4 md:px-8 transition-all duration-300`}>
       <div className="mx-auto max-w-7xl 2xl:max-w-[1600px] bg-white/90 backdrop-blur-md border border-[#24252c]/[0.08] rounded-full shadow-[0_4px_24px_-4px_rgba(0,0,0,.08)] px-5 sm:px-8 py-2.5 sm:py-3 flex items-center justify-between">
         <button onClick={() => handleNav('packages')} className="pl-1 outline-none focus:outline-none focus-visible:outline-none cursor-pointer">
           <Logo />

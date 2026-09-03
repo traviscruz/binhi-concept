@@ -8,10 +8,12 @@ export function Header({
   page,
   go,
   wishlistCount = 0,
+  hasBanner = false,
 }: {
   page: Page;
   go: (p: Page) => void;
   wishlistCount?: number;
+  hasBanner?: boolean;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const authPage = page === 'login' || page === 'signup' || page === 'forgot' || page === 'otp';
@@ -44,7 +46,7 @@ export function Header({
   );
 
   return (
-    <header className="fixed top-4 sm:top-5 inset-x-0 z-50 px-3 sm:px-4 md:px-8">
+    <header className={`fixed ${hasBanner ? 'top-9 sm:top-10' : 'top-4 sm:top-5'} inset-x-0 z-50 px-3 sm:px-4 md:px-8 transition-all duration-300`}>
       <div className="mx-auto max-w-6xl bg-white/90 backdrop-blur-md border border-[#24252c]/[0.08] rounded-full shadow-[0_4px_24px_-4px_rgba(0,0,0,.08)] px-4 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between">
         <button onClick={() => handleNav('landing')} className="pl-1 outline-none focus:outline-none focus-visible:outline-none cursor-pointer">
           <Logo />

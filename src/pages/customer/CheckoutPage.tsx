@@ -10,6 +10,7 @@ import { IconShield, IconX, IconCheck, IconPin, IconSearch, IconArrow, IconTicke
 import { supabase } from '../../lib/supabase';
 import { createPaymongoCheckoutSession } from '../../utils/paymongoPayment';
 import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
+import { validateVoucherCode, recordVoucherUsage } from '../../utils/voucherService';
 
 interface TransportRuleOption {
   id: string;
@@ -94,33 +95,7 @@ export default function CheckoutPage({
   } | null>(null);
   const [promoError, setPromoError] = useState('');
 
-  const PROMO_CODES: Record<
-    string,
-    { description: string; discountType: 'percentage' | 'fixed'; discountValue: number }
-  > = {
-    BINHI2026: {
-      description: '10% Seasonal Event Discount',
-      discountType: 'percentage',
-      discountValue: 10,
-    },
-    BINHI3K: {
-      description: '₱3,000 Loyalty Voucher',
-      discountType: 'fixed',
-      discountValue: 3000,
-    },
-    EARLYBIRD: {
-      description: '₱2,000 Early Booking Reward',
-      discountType: 'fixed',
-      discountValue: 2000,
-    },
-    WELCOME500: {
-      description: '₱500 Celebration Discount',
-      discountType: 'fixed',
-      discountValue: 500,
-    },
-  };
-
-  const handleApplyPromo = () => {
+  const handleApplyPromo = async () => {
     setPromoError('');
     const cleaned = promoInput.trim().toUpperCase();
     if (!cleaned) {
@@ -128,12 +103,19 @@ export default function CheckoutPage({
       return;
     }
 
-    const found = PROMO_CODES[cleaned];
-    if (found) {
-      setAppliedPromo({ code: cleaned, ...found });
+    const result = await validateVoucherCode(cleaned);
+    if (result.valid && result.voucher) {
+      setAppliedPromo({
+        code: result.voucher.code,
+        description:
+          result.voucher.description ||
+          `${result.voucher.discount_value}${result.voucher.discount_type === 'percentage' ? '%' : '₱'} Discount`,
+        discountType: result.voucher.discount_type,
+        discountValue: result.voucher.discount_value,
+      });
       setPromoInput('');
     } else {
-      setPromoError(`"${cleaned}" is not a valid promo code. Try "BINHI2026" or "BINHI3K".`);
+      setPromoError(result.error || `"${cleaned}" is not a valid promo code.`);
     }
   };
 
@@ -724,6 +706,15 @@ export default function CheckoutPage({
           guest_count: 100,
           selected_addons: selectedAddons,
         });
+
+        // Record 1 usage for the applied voucher code
+        if (appliedPromo?.code) {
+          try {
+            await recordVoucherUsage(appliedPromo.code);
+          } catch (vErr) {
+            console.warn('Note recording voucher usage:', vErr);
+          }
+        }
       } catch (dbErr) {
         console.warn('Database booking insert warning:', dbErr);
       }
@@ -1515,24 +1506,6 @@ export default function CheckoutPage({
                           {promoError}
                         </p>
                       )}
-
-                      {/* Available Promo Chips */}
-                      <div className="mt-2.5 pt-2 border-t border-[#24252c]/[0.06] flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[10px] uppercase font-bold text-[#24252c]/40 mr-1">Available codes:</span>
-                        {Object.entries(PROMO_CODES).map(([code, p]) => (
-                          <button
-                            key={code}
-                            type="button"
-                            onClick={() => {
-                              setPromoInput(code);
-                              setPromoError('');
-                            }}
-                            className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-white border border-[#24252c]/10 text-[#1090F8] hover:border-[#1090F8] hover:bg-[#1090F8]/5 transition-colors cursor-pointer"
-                          >
-                            {code} ({p.discountType === 'percentage' ? `${p.discountValue}% off` : `₱${p.discountValue.toLocaleString()} off`})
-                          </button>
-                        ))}
-                      </div>
                     </div>
                   )}
                 </div>

@@ -45,7 +45,10 @@ import AdminStaffPage from './pages/admin/AdminStaffPage';
 import AdminCalendarPage from './pages/admin/AdminCalendarPage';
 import AdminReportsPage from './pages/admin/AdminReportsPage';
 import AdminInquiriesPage from './pages/admin/AdminInquiriesPage';
+import AdminVouchersPage from './pages/admin/AdminVouchersPage';
 import AdminLoyaltyPage from './pages/admin/AdminLoyaltyPage';
+import { VoucherMarqueeBanner } from './components/layout/VoucherMarqueeBanner';
+import { fetchBannerVouchers, getBannerVouchersSync } from './utils/voucherService';
 
 import { CrewLayout } from './components/layout/CrewLayout';
 import CrewAssignedBookingsPage from './pages/crew/CrewAssignedBookingsPage';
@@ -86,6 +89,7 @@ export default function App() {
   const [bookingDate, setBookingDate] = useState('September 14, 2026');
   const [bookingAddons, setBookingAddons] = useState<string[]>(['add-smoke']);
   const [isCustomerSession, setIsCustomerSession] = useState(false);
+  const [hasBannerVouchers, setHasBannerVouchers] = useState(false);
   const [wishlistIds, setWishlistIds] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('binhi_wishlist_ids');
@@ -94,6 +98,30 @@ export default function App() {
     return ['PKG-INTIMATE-01', 'a'];
   });
   const [packages, setPackages] = useState<PackageData[]>(FEATURED_PACKAGES);
+
+  // Check active banner vouchers for header spacing
+  useEffect(() => {
+    async function checkBanner() {
+      // 1. Immediate synchronous cache check
+      const syncBanners = getBannerVouchersSync();
+      setHasBannerVouchers(syncBanners.length > 0);
+
+      // 2. Refresh from Supabase in background
+      try {
+        const banners = await fetchBannerVouchers();
+        setHasBannerVouchers(banners.length > 0);
+      } catch (e) {}
+    }
+    checkBanner();
+
+    const handleBannerUpdate = () => checkBanner();
+    window.addEventListener('vouchers-updated', handleBannerUpdate);
+    window.addEventListener('storage', handleBannerUpdate);
+    return () => {
+      window.removeEventListener('vouchers-updated', handleBannerUpdate);
+      window.removeEventListener('storage', handleBannerUpdate);
+    };
+  }, []);
 
   // Fetch Packages from Supabase Database (Alphabetical order by name)
   const fetchDbPackages = async () => {
@@ -271,6 +299,7 @@ export default function App() {
     page === 'admin-calendar' ||
     page === 'admin-reports' ||
     page === 'admin-inquiries' ||
+    page === 'admin-vouchers' ||
     page === 'admin-loyalty' ||
     page === 'admin-reviews' ||
     page === 'admin-profile';
@@ -312,6 +341,7 @@ export default function App() {
         {page === 'admin-calendar' && <AdminCalendarPage go={go} />}
         {page === 'admin-reports' && <AdminReportsPage go={go} />}
         {page === 'admin-inquiries' && <AdminInquiriesPage go={go} />}
+        {page === 'admin-vouchers' && <AdminVouchersPage go={go} />}
         {page === 'admin-loyalty' && <AdminLoyaltyPage go={go} />}
         {page === 'admin-reviews' && <AdminReviewsPage go={go} />}
         {page === 'admin-profile' && <AdminProfilePage go={go} />}
@@ -344,13 +374,26 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-white text-[var(--ink)]">
-      {showPublicHeader && <Header page={page} go={go} wishlistCount={activeWishlistCount} />}
+      {/* Marquee Banner on Public & Customer Pages */}
+      {!isAdminPage && !isInventoryPage && !isCrewPage && !isAuthOrCheckout && (
+        <VoucherMarqueeBanner go={go} onVisibilityChange={setHasBannerVouchers} />
+      )}
+
+      {showPublicHeader && (
+        <Header
+          page={page}
+          go={go}
+          wishlistCount={activeWishlistCount}
+          hasBanner={hasBannerVouchers}
+        />
+      )}
       {showCustomerHeader && (
         <CustomerHeader
           page={page}
           go={(p) => (p === 'landing' ? handleLogout() : go(p))}
           wishlistCount={activeWishlistCount}
           onSelectDateAndGoToPackages={selectDateAndGoToPackages}
+          hasBanner={hasBannerVouchers}
         />
       )}
 

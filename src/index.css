@@ -87,3 +87,20 @@ body::-webkit-scrollbar {
   background: transparent !important;
   border: none !important;
 }
+
+/* ── Endless Seamless Scrolling Marquee for Header Voucher Announcement ── */
+@keyframes marquee-infinite {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+.animate-marquee-infinite {
+  display: flex;
+  flex-shrink: 0;
+  animation: marquee-infinite 32s linear infinite;
+  will-change: transform;
+}

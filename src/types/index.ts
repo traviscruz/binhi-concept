@@ -35,6 +35,7 @@ export type Page =
   | 'admin-calendar'
   | 'admin-reports'
   | 'admin-inquiries'
+  | 'admin-vouchers'
   | 'admin-loyalty'
   | 'admin-reviews'
   | 'admin-profile'

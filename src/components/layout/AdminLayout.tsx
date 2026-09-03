@@ -153,6 +153,7 @@ export function AdminLayout({
             {navItem('Event Calendar', 'admin-calendar', <IconCalendar className="w-4 h-4" />)}
             {navItem('Revenue Analytics', 'admin-reports', <IconTicket className="w-4 h-4" />)}
             {navItem('Inquiry Inbox', 'admin-inquiries', <IconMail className="w-4 h-4" />, inquiryCount)}
+            {navItem('Voucher Codes', 'admin-vouchers', <IconTicket className="w-4 h-4" />)}
             {navItem('Loyalty Settings', 'admin-loyalty', <IconShield className="w-4 h-4" />)}
             {navItem('Review Moderation', 'admin-reviews', <IconTicket className="w-4 h-4" />)}
           </nav>
