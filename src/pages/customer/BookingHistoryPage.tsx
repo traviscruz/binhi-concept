@@ -166,7 +166,19 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2.5 shrink-0">
+                <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+                  {!item.isCompleted && item.status !== 'Cancelled' && (
+                    <button
+                      onClick={() => {
+                        localStorage.setItem('binhi_selected_active_booking_id', item.dbId);
+                        go('booking-tracker');
+                      }}
+                      className="bg-[#1090F8] text-white text-xs font-semibold px-4 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <span>Track Live Setup</span>
+                      <span>→</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => setDownloadModalItem(item)}
                     className="bg-white text-[var(--ink)] border border-[#24252c]/10 text-xs font-semibold px-4 py-2.5 rounded-full hover:bg-[var(--mist)] transition-colors shadow-sm cursor-pointer"
