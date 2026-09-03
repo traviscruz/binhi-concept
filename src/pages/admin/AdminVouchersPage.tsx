@@ -301,7 +301,7 @@ export default function AdminVouchersPage({ go: _go }: { go: (p: Page) => void }
         <button
           type="button"
           onClick={openCreateModal}
-          className="bg-[var(--ink)] hover:bg-[var(--ink-soft)] text-white text-xs font-semibold px-5 py-2.5 rounded-full transition-colors shrink-0 self-start sm:self-auto cursor-pointer inline-flex items-center gap-2 shadow-sm"
+          className="bg-[#1090F8] hover:bg-[#1090F8]/90 text-white text-xs font-bold px-5 py-2.5 rounded-full transition-colors shrink-0 self-start sm:self-auto cursor-pointer inline-flex items-center gap-2 shadow-sm"
         >
           <IconPlus className="w-3.5 h-3.5" />
           <span>Create New Voucher</span>

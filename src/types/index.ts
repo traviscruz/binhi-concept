@@ -29,6 +29,7 @@ export type Page =
   | 'inventory-profile'
   | 'admin-dashboard'
   | 'admin-bookings'
+  | 'admin-manual-booking'
   | 'admin-packages'
   | 'admin-transport'
   | 'admin-staff'

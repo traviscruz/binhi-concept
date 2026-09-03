@@ -84,7 +84,7 @@ export function AdminLayout({
   };
 
   const navItem = (label: string, target: Page, icon: ReactNode, count?: number) => {
-    const isActive = page === target;
+    const isActive = page === target || (target === 'admin-bookings' && page === 'admin-manual-booking');
     return (
       <button
         onClick={() => handleNav(target)}

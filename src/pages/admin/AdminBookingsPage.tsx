@@ -46,6 +46,15 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
             const isFull = b.is_fully_paid === true;
             const remBal = isFull ? 0 : defaultRemaining;
 
+            const bookingSource = b.booking_source || 
+              (b.payment_channel?.toLowerCase().includes('walk-in') ? 'Walk-in' :
+               b.payment_channel?.toLowerCase().includes('viber') ? 'Viber' :
+               b.payment_channel?.toLowerCase().includes('facebook') ? 'Facebook' :
+               b.payment_channel?.toLowerCase().includes('call') ? 'Phone Call' :
+               b.payment_channel?.toLowerCase().includes('instagram') ? 'Instagram' :
+               b.payment_channel?.toLowerCase().includes('whatsapp') ? 'WhatsApp' :
+               'Online Booking');
+
             return {
               dbId: b.id,
               id: b.paymongo_reference_number || `BNH-${b.id.slice(0, 8)}`,
@@ -65,10 +74,12 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
               rawStatus: (b.payment_status || b.status || 'pending').toLowerCase(),
               status: (b.payment_status || b.status || 'pending').toLowerCase() === 'completed' ? 'Completed' : b.payment_status === 'paid' || b.payment_status === 'confirmed' ? 'Confirmed' : b.payment_status === 'cancelled' ? 'Cancelled' : 'Pending Deposit Approval',
               paymentChannel: b.payment_channel || 'PayMongo',
+              bookingSource: bookingSource,
               slipRef: b.paymongo_reference_number ? `Ref #${b.paymongo_reference_number}` : 'Deposit Pending',
               isFullyPaid: isFull,
               balancePaymentMethod: b.balance_payment_method || 'Cash on Site / Event Day',
               balanceReceiptUrl: b.balance_receipt_url || '',
+              depositReceiptUrl: b.deposit_receipt_url || b.balance_receipt_url || '',
               balancePaidAt: b.balance_paid_at ? new Date(b.balance_paid_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '',
             };
           })
@@ -90,7 +101,8 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
     const matchesSearch =
       b.id.toLowerCase().includes(search.toLowerCase()) ||
       b.customer.toLowerCase().includes(search.toLowerCase()) ||
-      b.package.toLowerCase().includes(search.toLowerCase());
+      b.package.toLowerCase().includes(search.toLowerCase()) ||
+      (b.bookingSource && b.bookingSource.toLowerCase().includes(search.toLowerCase()));
     return matchesStatus && matchesSearch;
   });
 
@@ -252,6 +264,15 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
             Approve GCash/Bank deposit slips, reschedule dates, or manage active reservations.
           </p>
         </div>
+
+        <button
+          type="button"
+          onClick={() => go('admin-manual-booking')}
+          className="inline-flex items-center gap-2 bg-[#1090F8] text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-all shadow-sm hover:shadow-md cursor-pointer shrink-0"
+        >
+          <span className="text-base font-bold leading-none">+</span>
+          <span>Manual Booking (Walk-in / Channels)</span>
+        </button>
       </div>
 
       {/* Filter & Search Bar */}
@@ -296,13 +317,15 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                 <th className="py-3 px-3 font-semibold">Event Date</th>
                 <th className="py-3 px-3 font-semibold">Payment Breakdown</th>
                 <th className="py-3 px-3 font-semibold">Status</th>
-                <th className="py-3 px-3 font-semibold text-right">Actions</th>
+                {statusFilter !== 'Cancelled' && (
+                  <th className="py-3 px-3 font-semibold text-right whitespace-nowrap min-w-[320px]">Actions</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-[#24252c]/[0.04]">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-4">
+                  <td colSpan={statusFilter === 'Cancelled' ? 6 : 7} className="py-4">
                     <EmptyState
                       title="No Bookings Found"
                       description="No event reservations match your current search terms or filter status."
@@ -312,8 +335,19 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
               ) : (
                 filtered.map((row) => (
                   <tr key={row.id} className="hover:bg-[var(--mist)] transition-colors">
-                    {/* Col 1: Booking Ref */}
-                    <td className="py-3.5 px-3 font-mono font-extrabold text-[#1090F8]">{row.id}</td>
+                    {/* Col 1: Booking Ref & Channel */}
+                    <td className="py-3.5 px-3">
+                      <div className="font-mono font-extrabold text-[#1090F8]">{row.id}</div>
+                      {row.bookingSource && row.bookingSource !== 'Online Booking' ? (
+                        <span className="inline-block mt-1 text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 uppercase tracking-wider">
+                          {row.bookingSource}
+                        </span>
+                      ) : (
+                        <span className="inline-block mt-1 text-[9px] font-medium text-[#24252c]/40">
+                          Website
+                        </span>
+                      )}
+                    </td>
 
                     {/* Col 2: Customer */}
                     <td className="py-3.5 px-3">
@@ -373,40 +407,57 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                       </div>
                     </td>
 
-                    {/* Col 7: Actions */}
-                    <td className="py-3.5 px-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                        <button
-                          onClick={() => handleOpenSettleModal(row)}
-                          className="bg-emerald-600 text-white text-[11px] font-semibold px-3 py-1 rounded-full hover:bg-emerald-700 transition-colors shadow-sm cursor-pointer"
-                        >
-                          {row.isFullyPaid ? 'Payment Info' : 'Settle Balance'}
-                        </button>
-                        {row.status.includes('Pending') && (
-                          <button
-                            onClick={() => setSelectedReceipt(row)}
-                            className="bg-[#1090F8] text-white text-[11px] font-semibold px-3 py-1 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm cursor-pointer"
-                          >
-                            Approve
-                          </button>
-                        )}
-                        <button
-                          onClick={() => {
-                            setRescheduleBooking(row);
-                            setNewRescheduleDate(row.rawDate || row.date);
-                          }}
-                          className="bg-[var(--mist)] text-[var(--ink)] text-[11px] font-semibold px-3 py-1 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer"
-                        >
-                          Reschedule
-                        </button>
-                        <button
-                          onClick={() => setCancelBookingId(row.id)}
-                          className="text-rose-600 hover:bg-rose-50 text-[11px] font-semibold px-2 py-1 rounded-full transition-colors cursor-pointer"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </td>
+                    {/* Col 7: Actions (Hidden on Cancelled Tab) */}
+                    {statusFilter !== 'Cancelled' && (
+                      <td className="py-3.5 px-3 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center justify-end gap-1.5 whitespace-nowrap">
+                          {(row.depositReceiptUrl || row.balanceReceiptUrl) && (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedReceipt(row)}
+                              className="bg-purple-50 text-purple-700 border border-purple-200 text-[11px] font-semibold px-2.5 py-1 rounded-full hover:bg-purple-100 transition-colors shadow-2xs cursor-pointer shrink-0"
+                            >
+                              Proof Slip
+                            </button>
+                          )}
+                          {row.rawStatus !== 'cancelled' && (
+                            <button
+                              onClick={() => handleOpenSettleModal(row)}
+                              className="bg-emerald-600 text-white text-[11px] font-semibold px-2.5 py-1 rounded-full hover:bg-emerald-700 transition-colors shadow-sm cursor-pointer shrink-0"
+                            >
+                              {row.isFullyPaid ? 'Payment Info' : 'Settle Balance'}
+                            </button>
+                          )}
+                          {row.status.includes('Pending') && (
+                            <button
+                              onClick={() => setSelectedReceipt(row)}
+                              className="bg-[#1090F8] text-white text-[11px] font-semibold px-2.5 py-1 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm cursor-pointer shrink-0"
+                            >
+                              Approve
+                            </button>
+                          )}
+                          {row.rawStatus !== 'cancelled' && (
+                            <button
+                              onClick={() => {
+                                setRescheduleBooking(row);
+                                setNewRescheduleDate(row.rawDate || row.date);
+                              }}
+                              className="bg-[var(--mist)] text-[var(--ink)] text-[11px] font-semibold px-2.5 py-1 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer shrink-0"
+                            >
+                              Reschedule
+                            </button>
+                          )}
+                          {row.rawStatus !== 'cancelled' && (
+                            <button
+                              onClick={() => setCancelBookingId(row.id)}
+                              className="bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 text-[11px] font-semibold px-2.5 py-1 rounded-full transition-colors cursor-pointer shrink-0"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))
               )}
@@ -419,7 +470,14 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           {filtered.map((row) => (
             <div key={row.id} className="p-4 rounded-xl bg-[var(--mist)] border border-[#24252c]/[0.06] space-y-2 text-xs">
               <div className="flex items-center justify-between">
-                <span className="font-mono font-extrabold text-[#1090F8]">{row.id}</span>
+                <div>
+                  <span className="font-mono font-extrabold text-[#1090F8]">{row.id}</span>
+                  {row.bookingSource && row.bookingSource !== 'Online Booking' && (
+                    <span className="ml-2 text-[9px] font-extrabold px-1.5 py-0.2 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                      {row.bookingSource}
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-1.5">
                   <select
                     value={row.rawStatus}
@@ -452,29 +510,46 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
               <div className="text-[11px] text-[#24252c]/70">{row.package} · Date: <strong className="text-[var(--ink)]">{row.date}</strong></div>
               <div className="text-[11px] text-[#24252c]/60">Total: <strong className="text-[var(--ink)]">{row.total}</strong> · Deposit: <strong className="text-[#1090F8]">{row.deposit}</strong></div>
               
-              <div className="flex items-center gap-2 pt-2 border-t border-[#24252c]/10">
-                <button
-                  onClick={() => handleOpenSettleModal(row)}
-                  className="flex-1 bg-emerald-600 text-white text-xs font-semibold py-1.5 rounded-full cursor-pointer text-center"
-                >
-                  {row.isFullyPaid ? 'Payment Info' : 'Settle Balance'}
-                </button>
-                <button
-                  onClick={() => {
-                    setRescheduleBooking(row);
-                    setNewRescheduleDate(row.date);
-                  }}
-                  className="flex-1 bg-white border border-[#24252c]/10 text-xs font-semibold py-1.5 rounded-full cursor-pointer text-center"
-                >
-                  Reschedule
-                </button>
-                <button
-                  onClick={() => setCancelBookingId(row.id)}
-                  className="text-rose-600 hover:text-rose-800 font-semibold px-2 py-1.5 cursor-pointer text-xs"
-                >
-                  Cancel
-                </button>
-              </div>
+              {statusFilter !== 'Cancelled' && (
+                <div className="flex items-center gap-1.5 pt-2 border-t border-[#24252c]/10 flex-wrap">
+                  {(row.depositReceiptUrl || row.balanceReceiptUrl) && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedReceipt(row)}
+                      className="bg-purple-50 text-purple-700 border border-purple-200 text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-purple-100 transition-colors cursor-pointer"
+                    >
+                      Proof Slip
+                    </button>
+                  )}
+                  {row.rawStatus !== 'cancelled' && (
+                    <button
+                      onClick={() => handleOpenSettleModal(row)}
+                      className="flex-1 bg-emerald-600 text-white text-xs font-semibold py-1.5 rounded-full cursor-pointer text-center"
+                    >
+                      {row.isFullyPaid ? 'Payment Info' : 'Settle Balance'}
+                    </button>
+                  )}
+                  {row.rawStatus !== 'cancelled' && (
+                    <button
+                      onClick={() => {
+                        setRescheduleBooking(row);
+                        setNewRescheduleDate(row.date);
+                      }}
+                      className="flex-1 bg-white border border-[#24252c]/10 text-xs font-semibold py-1.5 rounded-full cursor-pointer text-center"
+                    >
+                      Reschedule
+                    </button>
+                  )}
+                  {row.rawStatus !== 'cancelled' && (
+                    <button
+                      onClick={() => setCancelBookingId(row.id)}
+                      className="bg-rose-50 text-rose-600 border border-rose-200 text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-rose-100 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -486,16 +561,20 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           <button onClick={() => setSelectedReceipt(null)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
             <IconX className="w-5 h-5" />
           </button>
-          <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Verify GCash Deposit Slip</h3>
+          <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Verify Payment / Deposit Slip</h3>
           <p className="text-xs font-mono font-bold text-[#1090F8] mb-4">{activeSelectedReceipt.id} · {activeSelectedReceipt.customer}</p>
 
           <div className="bg-[var(--mist)] p-4 rounded-2xl border border-[#24252c]/10 space-y-3 mb-5 text-xs">
             <div className="flex justify-between">
-              <span className="text-[#24252c]/50">Deposit Slip Ref:</span>
+              <span className="text-[#24252c]/50">Payment Channel / Source:</span>
+              <span className="font-bold text-[var(--ink)]">{activeSelectedReceipt.paymentChannel || activeSelectedReceipt.bookingSource || 'Direct'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-[#24252c]/50">Transaction / Slip Ref:</span>
               <span className="font-mono font-bold text-[var(--ink)]">{activeSelectedReceipt.slipRef}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-[#24252c]/50">Required 50% Deposit:</span>
+              <span className="text-[#24252c]/50">Deposit / Paid Amount:</span>
               <span className="font-extrabold text-[#1090F8]">{activeSelectedReceipt.deposit}</span>
             </div>
             <div className="flex justify-between">
@@ -503,21 +582,36 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
               <span className="font-semibold text-[var(--ink)]">{activeSelectedReceipt.date}</span>
             </div>
 
-            <div className="aspect-[4/3] rounded-xl bg-white border border-[#24252c]/10 flex flex-col items-center justify-center p-4 text-center">
-              <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-600 font-bold text-lg flex items-center justify-center mb-2">
-                ✓
+            {activeSelectedReceipt.depositReceiptUrl || activeSelectedReceipt.balanceReceiptUrl ? (
+              <div className="rounded-xl bg-white border border-[#24252c]/10 overflow-hidden p-2">
+                <div className="text-[10px] font-bold text-[#24252c]/50 uppercase mb-1.5 ml-1">Attached Receipt Image:</div>
+                <div className="aspect-[4/3] rounded-lg overflow-hidden bg-[var(--mist)] flex items-center justify-center">
+                  <img
+                    src={activeSelectedReceipt.depositReceiptUrl || activeSelectedReceipt.balanceReceiptUrl}
+                    alt="Proof of Payment"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
               </div>
-              <div className="font-bold text-xs text-[var(--ink)]">GCash Official Receipt Attached</div>
-              <div className="text-[10px] text-[#24252c]/50 mt-1">Amount Verified: {activeSelectedReceipt.deposit}</div>
-            </div>
+            ) : (
+              <div className="aspect-[4/3] rounded-xl bg-white border border-[#24252c]/10 flex flex-col items-center justify-center p-4 text-center">
+                <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-600 font-bold text-lg flex items-center justify-center mb-2">
+                  ✓
+                </div>
+                <div className="font-bold text-xs text-[var(--ink)]">Official Payment Receipt Verified</div>
+                <div className="text-[10px] text-[#24252c]/50 mt-1">Amount Verified: {activeSelectedReceipt.deposit}</div>
+              </div>
+            )}
           </div>
 
-          <button
-            onClick={() => handleApproveDeposit(activeSelectedReceipt)}
-            className="w-full bg-emerald-600 text-white font-semibold py-3.5 rounded-full hover:bg-emerald-700 transition-colors shadow-md cursor-pointer text-xs"
-          >
-            Approve Deposit & Confirm Reservation
-          </button>
+          {activeSelectedReceipt.status?.includes('Pending') && (
+            <button
+              onClick={() => handleApproveDeposit(activeSelectedReceipt)}
+              className="w-full bg-emerald-600 text-white font-semibold py-3.5 rounded-full hover:bg-emerald-700 transition-colors shadow-md cursor-pointer text-xs"
+            >
+              Approve Deposit & Confirm Reservation
+            </button>
+          )}
         </div>
       </ModalOverlay>
 

@@ -39,6 +39,7 @@ import InventoryProfilePage from './pages/inventory-manager/InventoryProfilePage
 
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminBookingsPage from './pages/admin/AdminBookingsPage';
+import AdminManualBookingPage from './pages/admin/AdminManualBookingPage';
 import AdminPackagesPage from './pages/admin/AdminPackagesPage';
 import AdminTransportPage from './pages/admin/AdminTransportPage';
 import AdminStaffPage from './pages/admin/AdminStaffPage';
@@ -293,6 +294,7 @@ export default function App() {
   const isAdminPage =
     page === 'admin-dashboard' ||
     page === 'admin-bookings' ||
+    page === 'admin-manual-booking' ||
     page === 'admin-packages' ||
     page === 'admin-transport' ||
     page === 'admin-staff' ||
@@ -335,6 +337,7 @@ export default function App() {
       <AdminLayout page={page} go={go}>
         {page === 'admin-dashboard' && <AdminDashboard go={go} />}
         {page === 'admin-bookings' && <AdminBookingsPage go={go} />}
+        {page === 'admin-manual-booking' && <AdminManualBookingPage go={go} />}
         {page === 'admin-packages' && <AdminPackagesPage go={go} />}
         {page === 'admin-transport' && <AdminTransportPage go={go} />}
         {page === 'admin-staff' && <AdminStaffPage go={go} />}
