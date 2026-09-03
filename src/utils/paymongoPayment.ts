@@ -44,6 +44,7 @@ export async function createPaymongoCheckoutSession(params: PaymongoCheckoutPara
         billing: {
           name: `${params.buyer.firstName || 'Valued'} ${params.buyer.lastName || 'Customer'}`.trim(),
           email: params.buyer.email || 'customer@binhiconcept.ph',
+          phone: params.buyer.phone ? params.buyer.phone.replace(/^\+?63\s*/, '').replace(/\D/g, '') : undefined,
         },
         send_email_receipt: true,
         show_description: true,

@@ -81,6 +81,7 @@ export default function CheckoutPage({
   const [isLocationValid, setIsLocationValid] = useState(true);
   const [selectedAddons] = useState<string[]>(initialAddons);
   const [receiptUploaded, setReceiptUploaded] = useState(false);
+  const [paymentType, setPaymentType] = useState<'deposit' | 'full'>('deposit');
 
   // ── Error & Modal States ──────────────────────────────────────────────────
   const [showPhoneModal, setShowPhoneModal] = useState(false);
@@ -600,16 +601,21 @@ export default function CheckoutPage({
 
       const calculatedTotalCost = currentPkgPrice + currentAddonsCost + fee;
       const calculatedDepositRequired = Math.round(calculatedTotalCost * 0.5);
+      const isFull = paymentType === 'full';
+      const calculatedPayAmount = isFull ? calculatedTotalCost : calculatedDepositRequired;
+      const calculatedRemainingBalance = isFull ? 0 : calculatedTotalCost - calculatedDepositRequired;
 
       const params = {
-        amount: calculatedDepositRequired,
-        itemDesc: `50% Deposit - ${pkg.name}`,
+        amount: calculatedPayAmount,
+        itemDesc: isFull
+          ? `Full Payment (100%) - ${pkg.name}`
+          : `50% Downpayment - ${pkg.name}`,
         referenceNumber: refNum,
         buyer: {
           firstName: firstName || 'Valued',
           lastName: lastName || 'Customer',
           email: email || 'customer@binhiconcept.ph',
-          phone: `${countryCode} ${phoneDigits}`,
+          phone: phoneDigits.trim(),
         },
         redirectUrl: {
           success: `${baseUrl}?page=payment-success&ref=${refNum}`,
@@ -621,6 +627,7 @@ export default function CheckoutPage({
       // Save pending booking record into Supabase database bookings table
       try {
         await supabase.from('bookings').insert({
+          user_id: userId || null,
           package_id: pkg.id,
           package_name: pkg.name,
           package_price: currentPkgPrice,
@@ -632,7 +639,9 @@ export default function CheckoutPage({
           region_rule_id: selectedRuleId,
           transport_fee: fee,
           total_cost: calculatedTotalCost,
-          deposit_amount: calculatedDepositRequired,
+          deposit_amount: calculatedPayAmount,
+          is_fully_paid: isFull,
+          remaining_balance: calculatedRemainingBalance,
           payment_status: 'pending',
           paymongo_reference_number: refNum,
           customer_name: `${firstName} ${lastName}`.trim() || 'Valued Customer',
@@ -689,6 +698,9 @@ export default function CheckoutPage({
   const packageAndAddonPrice = parsedPackagePrice + addonsCost;
   const totalCost = packageAndAddonPrice + transportFee;
   const depositRequired = Math.round(totalCost * 0.5);
+  const isFullPayment = paymentType === 'full';
+  const amountDueToday = isFullPayment ? totalCost : depositRequired;
+  const remainingBalanceAmount = isFullPayment ? 0 : totalCost - depositRequired;
 
   return (
     <section className="pt-36 pb-24 px-6 min-h-screen bg-[var(--mist)]">
@@ -714,7 +726,7 @@ export default function CheckoutPage({
             {[
               { num: '01', title: 'Contact & Event', desc: 'Who & When', s: 1 },
               { num: '02', title: 'Venue & Logistics', desc: 'Location Fee', s: 2 },
-              { num: '03', title: '50% Deposit', desc: 'Slip Upload', s: 3 },
+              { num: '03', title: 'Payment Plan', desc: paymentType === 'full' ? '100% Full Payment' : '50% Downpayment', s: 3 },
             ].map((st) => {
               const isActive = step === st.s;
               const isDone = step > st.s;
@@ -1201,19 +1213,21 @@ export default function CheckoutPage({
                 disabled={!isLocationValid || !venueAddress.trim()}
                 className="w-2/3 bg-[var(--ink)] disabled:opacity-50 text-white text-sm font-semibold py-4 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-md"
               >
-                <span>Next: Payment & Deposit</span>
+                <span>Next: Payment Option</span>
                 <IconArrow className="w-4 h-4" />
               </button>
             </div>
           </div>
         )}
 
-        {/* ── STEP 3: Deposit ── */}
+        {/* ── STEP 3: Payment Choice & Checkout ── */}
         {step === 3 && (
           <div className="bg-white rounded-[2rem] p-6 md:p-8 border border-[#24252c]/[0.08] shadow-sm animate-blur-in space-y-6">
             <div>
-              <h2 className="text-2xl font-extrabold text-[var(--ink)]">Step 3: 50% Deposit Payment</h2>
-              <p className="text-xs text-[#24252c]/60 mt-1">Complete your 50% reservation deposit via PayMongo (QR Ph, GCash, Maya, Cards).</p>
+              <h2 className="text-2xl font-extrabold text-[var(--ink)]">Step 3: Select Payment Option</h2>
+              <p className="text-xs text-[#24252c]/60 mt-1">
+                Choose to pay a 50% reservation downpayment to secure your date, or pay 100% in full today for a completely hassle-free event.
+              </p>
             </div>
 
             {step3Error && (
@@ -1222,15 +1236,163 @@ export default function CheckoutPage({
               </div>
             )}
 
-            <div className="p-6 rounded-2xl bg-[#1090F8]/10 border border-[#1090F8]/20 text-center">
-              <div className="text-xs font-bold text-[#1090F8] uppercase tracking-wider">Required 50% Reservation Deposit</div>
-              <div className="text-3xl font-extrabold text-[#1090F8] mt-1">₱{depositRequired.toLocaleString()}</div>
+            {/* Payment Plan Option Cards */}
+            <div className="grid sm:grid-cols-2 gap-4">
+              {/* Option 1: 50% Downpayment */}
+              <div
+                onClick={() => setPaymentType('deposit')}
+                className={`relative p-5 rounded-3xl border-2 transition-all duration-200 cursor-pointer text-left flex flex-col justify-between ${
+                  paymentType === 'deposit'
+                    ? 'border-[#1090F8] bg-[#1090F8]/[0.03] shadow-md ring-1 ring-[#1090F8]/20'
+                    : 'border-[#24252c]/[0.08] bg-white hover:border-[#24252c]/20 hover:bg-[var(--mist)]/40'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2.5">
+                    <span className="text-[10px] font-extrabold tracking-wider uppercase px-2.5 py-0.5 rounded-full bg-[#1090F8]/10 text-[#1090F8] border border-[#1090F8]/20">
+                      Standard Reservation
+                    </span>
+                    <div
+                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+                        paymentType === 'deposit'
+                          ? 'border-[#1090F8] bg-[#1090F8] text-white'
+                          : 'border-[#24252c]/20 bg-white'
+                      }`}
+                    >
+                      {paymentType === 'deposit' && <IconCheck className="w-3 h-3 stroke-[3]" />}
+                    </div>
+                  </div>
+
+                  <h3 className="text-base font-extrabold text-[var(--ink)]">50% Downpayment</h3>
+                  <p className="text-[11px] text-[#24252c]/60 mt-0.5 leading-relaxed">
+                    Lock in your event date now. Settle the remaining 50% balance on the day of your event.
+                  </p>
+                </div>
+
+                <div className="mt-4 pt-3.5 border-t border-[#24252c]/[0.06] space-y-1">
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-[10px] uppercase font-bold text-[#24252c]/40">Due Today</span>
+                    <span className="text-lg font-black text-[#1090F8]">₱{depositRequired.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-[11px] text-[#24252c]/60">
+                    <span>Balance on Event Day</span>
+                    <span className="font-semibold text-[var(--ink)]">₱{remainingBalanceAmount.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Option 2: Full Payment (100%) */}
+              <div
+                onClick={() => setPaymentType('full')}
+                className={`relative p-5 rounded-3xl border-2 transition-all duration-200 cursor-pointer text-left flex flex-col justify-between ${
+                  paymentType === 'full'
+                    ? 'border-[#1090F8] bg-[#1090F8]/[0.03] shadow-md ring-1 ring-[#1090F8]/20'
+                    : 'border-[#24252c]/[0.08] bg-white hover:border-[#24252c]/20 hover:bg-[var(--mist)]/40'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2.5">
+                    <span className="text-[10px] font-extrabold tracking-wider uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                      Recommended · Hassle-Free
+                    </span>
+                    <div
+                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+                        paymentType === 'full'
+                          ? 'border-[#1090F8] bg-[#1090F8] text-white'
+                          : 'border-[#24252c]/20 bg-white'
+                      }`}
+                    >
+                      {paymentType === 'full' && <IconCheck className="w-3 h-3 stroke-[3]" />}
+                    </div>
+                  </div>
+
+                  <h3 className="text-base font-extrabold text-[var(--ink)]">Full Payment (100%)</h3>
+                  <p className="text-[11px] text-[#24252c]/60 mt-0.5 leading-relaxed">
+                    Settle everything today. Zero balance, no cash handling or payments required on event day.
+                  </p>
+                </div>
+
+                <div className="mt-4 pt-3.5 border-t border-[#24252c]/[0.06] space-y-1">
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-[10px] uppercase font-bold text-[#24252c]/40">Due Today</span>
+                    <span className="text-lg font-black text-[#1090F8]">₱{totalCost.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-[11px] text-[#24252c]/60">
+                    <span>Balance on Event Day</span>
+                    <span className="font-bold text-emerald-600">₱0 (Fully Settled)</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
+            {/* Comprehensive Payment Schedule Breakdown */}
+            <div className="p-5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] space-y-2.5 text-xs">
+              <div className="flex items-center justify-between pb-2 border-b border-[#24252c]/[0.06]">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50">Selected Payment Plan</span>
+                <span className="font-bold text-[#1090F8]">
+                  {paymentType === 'full' ? 'Full Payment (100%)' : '50% Downpayment (Reservation)'}
+                </span>
+              </div>
 
+              <div className="flex justify-between text-[#24252c]/60">
+                <span>Package Base Rate ({pkg.name})</span>
+                <span className="font-bold text-[var(--ink)]">₱{(Number(pkg.rawPrice) || 33500).toLocaleString()}</span>
+              </div>
+
+              {addonsCost > 0 && (
+                <div className="flex justify-between text-[#24252c]/60">
+                  <span>Equipment Add-ons ({selectedAddons.length})</span>
+                  <span className="font-bold text-[var(--ink)]">+₱{addonsCost.toLocaleString()}</span>
+                </div>
+              )}
+
+              <div className="flex justify-between text-[#24252c]/60">
+                <span>Transport & Logistics Fee ({locationRegionName})</span>
+                <span className="font-bold text-[#1090F8]">+₱{transportFee.toLocaleString()}</span>
+              </div>
+
+              <div className="flex justify-between text-[#24252c]/80 pt-1">
+                <span className="font-semibold">Total Event Booking Cost</span>
+                <span className="font-bold text-[var(--ink)]">₱{totalCost.toLocaleString()}</span>
+              </div>
+
+              <div className="pt-2.5 border-t border-[#24252c]/[0.08] flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-extrabold uppercase tracking-wide text-[var(--ink)] block">
+                    Amount Payable Now
+                  </span>
+                  <span className="text-[10px] text-[#24252c]/50">
+                    {paymentType === 'full' ? 'Complete 100% settlement' : 'Required 50% reservation deposit'}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-2xl font-black text-[#1090F8]">₱{amountDueToday.toLocaleString()}</span>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-dashed border-[#24252c]/10 flex items-center justify-between text-[11px]">
+                <span className="text-[#24252c]/60">Remaining Balance on Event Day:</span>
+                <span className={paymentType === 'full' ? 'font-bold text-emerald-600' : 'font-bold text-[var(--ink)]'}>
+                  {paymentType === 'full' ? '₱0 (No balance due)' : `₱${remainingBalanceAmount.toLocaleString()} (Due on Event Day)`}
+                </span>
+              </div>
+            </div>
+
+            {/* Security Guarantee & Channel Notice */}
+            <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-white border border-[#24252c]/[0.08] text-xs text-[#24252c]/60">
+              <div className="flex items-center gap-2">
+                <IconShield className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="text-[11px] font-medium">
+                  Secured by <strong>PayMongo</strong> — QR Ph, GCash, Maya, Cards
+                </span>
+              </div>
+              <span className="text-[10px] font-mono text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                256-Bit SSL
+              </span>
+            </div>
 
             {/* Direct PayMongo Pay Button */}
-            <div className="space-y-3 pt-2">
+            <div className="space-y-3 pt-1">
               <button
                 type="button"
                 onClick={handlePaymongoPayment}
@@ -1244,7 +1406,9 @@ export default function CheckoutPage({
                   </>
                 ) : (
                   <span className="flex items-center justify-center gap-2">
-                    <span>Pay ₱{depositRequired.toLocaleString()} 50% Deposit via PayMongo</span>
+                    <span>
+                      Pay ₱{amountDueToday.toLocaleString()} ({paymentType === 'full' ? 'Full Payment' : '50% Downpayment'}) via PayMongo
+                    </span>
                     <IconArrow className="w-4 h-4" />
                   </span>
                 )}

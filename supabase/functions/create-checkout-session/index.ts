@@ -85,7 +85,7 @@ Deno.serve(async (req: Request) => {
           billing: {
             name: `${buyer?.firstName || 'Valued'} ${buyer?.lastName || 'Customer'}`.trim(),
             email: buyer?.email || 'customer@binhiconcept.ph',
-            phone: buyer?.phone ? buyer.phone.replace(/[^\d+]/g, '') : undefined,
+            phone: buyer?.phone ? buyer.phone.replace(/^\+?63\s*/, '').replace(/\D/g, '') : undefined,
           },
           send_email_receipt: true,
           show_description: true,

@@ -13,6 +13,9 @@ export default function PaymentResultPage({
 }) {
   const [refNumber, setRefNumber] = useState('BNH-2026-889123');
   const [paymentChannelName, setPaymentChannelName] = useState('GCash E-Wallet');
+  const [isFullyPaid, setIsFullyPaid] = useState(false);
+  const [totalAmount, setTotalAmount] = useState<number | null>(null);
+  const [paidAmount, setPaidAmount] = useState<number | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -62,14 +65,42 @@ export default function PaymentResultPage({
       // Complete or cancel booking record status in Supabase database
       if (ref) {
         try {
+          // Fetch booking record to check payment option & amounts
+          const { data: bookingData } = await supabase
+            .from('bookings')
+            .select('*')
+            .eq('paymongo_reference_number', ref)
+            .single();
+
+          const isFull =
+            bookingData?.is_fully_paid === true ||
+            (bookingData?.deposit_amount &&
+              bookingData?.total_cost &&
+              Number(bookingData.deposit_amount) >= Number(bookingData.total_cost));
+
+          if (bookingData) {
+            setIsFullyPaid(Boolean(isFull));
+            if (bookingData.total_cost) setTotalAmount(Number(bookingData.total_cost));
+            if (bookingData.deposit_amount) setPaidAmount(Number(bookingData.deposit_amount));
+          }
+
           if (type === 'success') {
+            const updatePayload: any = {
+              payment_status: 'paid',
+              payment_channel: resolvedChannel,
+              updated_at: new Date().toISOString(),
+            };
+
+            if (isFull) {
+              updatePayload.is_fully_paid = true;
+              updatePayload.remaining_balance = 0;
+              updatePayload.balance_paid_at = new Date().toISOString();
+              updatePayload.balance_payment_method = resolvedChannel;
+            }
+
             await supabase
               .from('bookings')
-              .update({
-                payment_status: 'paid',
-                payment_channel: resolvedChannel,
-                updated_at: new Date().toISOString(),
-              })
+              .update(updatePayload)
               .eq('paymongo_reference_number', ref);
           } else {
             await supabase
@@ -108,10 +139,12 @@ export default function PaymentResultPage({
             <div>
               <MonoBadge icon={IconShield}>PayMongo Payment Confirmed</MonoBadge>
               <h1 className="text-2xl font-extrabold text-[var(--ink)] mt-2">
-                50% Deposit Paid!
+                {isFullyPaid ? 'Full Payment Completed!' : '50% Deposit Paid!'}
               </h1>
               <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
-                Your 50% reservation deposit has been successfully processed via PayMongo Checkout. Your event production schedule is now locked in our system!
+                {isFullyPaid
+                  ? 'Your 100% full payment has been successfully processed via PayMongo Checkout. Your event production schedule is secured and fully settled with zero remaining balance!'
+                  : 'Your 50% reservation deposit has been successfully processed via PayMongo Checkout. Your event production schedule is now locked in our system!'}
               </p>
             </div>
 
@@ -119,6 +152,28 @@ export default function PaymentResultPage({
               <div className="flex justify-between text-[#24252c]/60">
                 <span>Reference Number</span>
                 <span className="font-mono font-bold text-[var(--ink)]">{refNumber}</span>
+              </div>
+              <div className="flex justify-between text-[#24252c]/60">
+                <span>Payment Plan</span>
+                <span className="font-bold text-[var(--ink)]">
+                  {isFullyPaid ? 'Full Payment (100%)' : '50% Downpayment (Reservation)'}
+                </span>
+              </div>
+              {paidAmount !== null && (
+                <div className="flex justify-between text-[#24252c]/60">
+                  <span>Amount Paid Today</span>
+                  <span className="font-bold text-[#1090F8]">₱{paidAmount.toLocaleString()}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-[#24252c]/60">
+                <span>Remaining Balance</span>
+                <span className={isFullyPaid ? 'font-bold text-emerald-600' : 'font-bold text-[var(--ink)]'}>
+                  {isFullyPaid
+                    ? '₱0 (Fully Settled)'
+                    : totalAmount && paidAmount
+                    ? `₱${Math.max(0, totalAmount - paidAmount).toLocaleString()} (Due on Event Day)`
+                    : 'Payable on Event Day'}
+                </span>
               </div>
               <div className="flex justify-between text-[#24252c]/60">
                 <span>Payment Method Used</span>
@@ -153,14 +208,14 @@ export default function PaymentResultPage({
                 Payment Unsuccessful
               </h1>
               <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
-                We couldn't process your 50% deposit payment via PayMongo. Please check your account balance or try another payment method.
+                We couldn't process your payment via PayMongo. Please check your account balance or try another payment method.
               </p>
             </div>
 
             <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium text-left">
               Reference: <strong className="font-mono">{refNumber}</strong>
               <br />
-              Notice: Deposit payment was declined or timed out.
+              Notice: Payment transaction was declined or timed out.
             </div>
 
             <button
@@ -184,14 +239,14 @@ export default function PaymentResultPage({
                 Payment Cancelled
               </h1>
               <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
-                You cancelled the PayMongo Checkout session. Your booking draft is still saved. You can complete the 50% deposit payment anytime to confirm your date.
+                You cancelled the PayMongo Checkout session. Your booking draft is still saved. You can complete your payment anytime to confirm your date.
               </p>
             </div>
 
             <div className="p-4 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] text-xs text-[#24252c]/60 text-left">
               Reference: <strong className="font-mono text-[var(--ink)]">{refNumber}</strong>
               <br />
-              Status: Draft reservation pending deposit.
+              Status: Draft reservation pending payment.
             </div>
 
             <button
