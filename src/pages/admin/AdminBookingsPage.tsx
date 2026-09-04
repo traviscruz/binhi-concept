@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconCalendar, IconX, IconSearch, IconCheck } from '../../components/shared/icons';
+import { IconCalendar, IconX, IconSearch, IconCheck, IconDownload, IconFileSpreadsheet } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { TablePagination } from '../../components/shared/TablePagination';
@@ -11,6 +11,11 @@ import { logAuditEvent } from '../../utils/auditLogger';
 import { AssignCrewModal } from '../../components/admin/AssignCrewModal';
 import { formatDisplayDate } from '../../utils/bookingService';
 import { sendCustomerRescheduleApproval, sendCustomerRescheduleRejection } from '../../utils/emailService';
+import {
+  exportFinancialLedgerToExcel,
+  exportFinancialLedgerToCSV,
+  type FinancialBookingRecord,
+} from '../../utils/financialExport';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -84,6 +89,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
               totalNum: total,
               depositNum: deposit,
               remainingNum: remBal,
+              transportFee: Number(b.transport_fee) || 0,
               total: `₱${total.toLocaleString()}`,
               deposit: `₱${deposit.toLocaleString()}`,
               remaining: `₱${remBal.toLocaleString()}`,
@@ -526,8 +532,57 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
     setBalanceReceiptFile(null);
   };
 
+  const handleExportBookingsExcel = () => {
+    const exportRecords: FinancialBookingRecord[] = filtered.map((b) => ({
+      id: b.dbId,
+      refNumber: b.id,
+      customerName: b.customer,
+      customerEmail: b.email,
+      customerPhone: b.phone,
+      packageName: b.package,
+      eventDate: b.rawDate || b.date,
+      venueAddress: b.venue,
+      paymentStatus: b.rawStatus,
+      isFullyPaid: b.isFullyPaid,
+      transportFee: b.transportFee || 0,
+      depositAmount: b.depositNum || 0,
+      remainingBalance: b.remainingNum || 0,
+      totalCost: b.totalNum || 0,
+      paymentChannel: b.paymentChannel || 'PayMongo',
+      bookingSource: b.bookingSource || 'Online Booking',
+      balanceMethod: b.balancePaymentMethod,
+      createdAt: b.rawDate || '',
+    }));
+
+    exportFinancialLedgerToExcel(exportRecords, 'BINHI_Bookings_Report');
+  };
+
+  const handleExportBookingsCSV = () => {
+    const exportRecords: FinancialBookingRecord[] = filtered.map((b) => ({
+      id: b.dbId,
+      refNumber: b.id,
+      customerName: b.customer,
+      customerEmail: b.email,
+      customerPhone: b.phone,
+      packageName: b.package,
+      eventDate: b.rawDate || b.date,
+      venueAddress: b.venue,
+      paymentStatus: b.rawStatus,
+      isFullyPaid: b.isFullyPaid,
+      transportFee: b.transportFee || 0,
+      depositAmount: b.depositNum || 0,
+      remainingBalance: b.remainingNum || 0,
+      totalCost: b.totalNum || 0,
+      paymentChannel: b.paymentChannel || 'PayMongo',
+      bookingSource: b.bookingSource || 'Online Booking',
+      balanceMethod: b.balancePaymentMethod,
+      createdAt: b.rawDate || '',
+    }));
+
+    exportFinancialLedgerToCSV(exportRecords, 'BINHI_Bookings_Report');
+  };
+
   const activeSelectedReceipt = selectedReceipt || { id: '', customer: '', slipRef: '', deposit: '', date: '' };
-  const activeRescheduleBooking = rescheduleBooking || { id: '', customer: '' };
 
   return (
     <div className="space-y-6">
@@ -542,25 +597,53 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => go('admin-reports')}
+            className="inline-flex items-center gap-1.5 bg-[var(--mist)] border border-[#24252c]/10 text-[var(--ink)] text-xs font-semibold px-4 py-2.5 rounded-full hover:bg-gray-200 transition-colors shadow-2xs cursor-pointer"
+            title="Open Financial Ledger & Reports"
+          >
+            <span>Ledger & Reports →</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportBookingsExcel}
+            className="inline-flex items-center gap-1.5 bg-emerald-600 text-white text-xs font-bold px-4 py-2.5 rounded-full hover:bg-emerald-700 transition-all shadow-sm cursor-pointer"
+            title="Export filtered bookings to Excel"
+          >
+            <IconFileSpreadsheet className="w-4 h-4 text-white" />
+            <span>Export Excel</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportBookingsCSV}
+            className="inline-flex items-center gap-1.5 bg-white border border-[#24252c]/15 text-[var(--ink)] text-xs font-semibold px-3.5 py-2.5 rounded-full hover:bg-gray-50 transition-colors shadow-2xs cursor-pointer"
+            title="Export to CSV"
+          >
+            <IconDownload className="w-4 h-4 text-[#24252c]/70" />
+            <span>CSV</span>
+          </button>
+
           <button
             type="button"
             onClick={loadBookings}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 bg-white border border-[#24252c]/15 text-[var(--ink)] text-xs font-bold px-4 py-2.5 rounded-full hover:bg-[var(--mist)] transition-all shadow-2xs cursor-pointer disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 bg-white border border-[#24252c]/15 text-[var(--ink)] text-xs font-bold px-3 py-2.5 rounded-full hover:bg-[var(--mist)] transition-all shadow-2xs cursor-pointer disabled:opacity-50"
             title="Refresh bookings data"
           >
             <span className={loading ? 'animate-spin inline-block' : ''}>↻</span>
-            <span>Refresh</span>
           </button>
 
           <button
             type="button"
             onClick={() => go('admin-manual-booking')}
-            className="inline-flex items-center gap-2 bg-[#1090F8] text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-all shadow-sm hover:shadow-md cursor-pointer shrink-0"
+            className="inline-flex items-center gap-2 bg-[#1090F8] text-white text-xs font-bold px-4.5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-all shadow-sm hover:shadow-md cursor-pointer shrink-0"
           >
             <span className="text-base font-bold leading-none">+</span>
-            <span>Manual Booking (Walk-in / Channels)</span>
+            <span>Manual Booking</span>
           </button>
         </div>
       </div>

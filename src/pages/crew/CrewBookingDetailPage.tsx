@@ -3,6 +3,7 @@ import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
 import { IconBox, IconPin, IconCalendar, IconCheck, IconX } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
+import { INITIAL_ASSIGNED_BOOKINGS, type AssignedBooking } from '../../data/crewBookings';
 
 export interface ChecklistItem {
   id: string;
@@ -15,6 +16,18 @@ export interface ChecklistItem {
 export default function CrewBookingDetailPage({ go }: { go: (p: Page) => void }) {
   const [note, setNote] = useState('');
   const [noteSavedModal, setNoteSavedModal] = useState(false);
+
+  // Retrieve active selected booking ID
+  const [selectedBookingId, setSelectedBookingId] = useState<string>(() => {
+    return sessionStorage.getItem('crew_selected_booking_id') || INITIAL_ASSIGNED_BOOKINGS[0].id;
+  });
+
+  const booking = INITIAL_ASSIGNED_BOOKINGS.find((b) => b.id === selectedBookingId) || INITIAL_ASSIGNED_BOOKINGS[0];
+
+  const handleSwitchBooking = (newId: string) => {
+    setSelectedBookingId(newId);
+    sessionStorage.setItem('crew_selected_booking_id', newId);
+  };
 
   const [items, setItems] = useState<ChecklistItem[]>([
     { id: 'c1', name: 'Yamaha DBR12 Powered Speaker', serial: 'SPK-YAM-001', category: 'Audio PA System', checked: true },
@@ -41,7 +54,10 @@ export default function CrewBookingDetailPage({ go }: { go: (p: Page) => void })
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.06]">
         <div>
-          <button onClick={() => go('crew-assigned-bookings')} className="text-xs text-[#1090F8] font-bold hover:underline mb-1 inline-block">
+          <button
+            onClick={() => go('crew-assigned-bookings')}
+            className="text-xs text-[#1090F8] font-bold hover:underline mb-1 inline-block cursor-pointer"
+          >
             ← Back to Assigned Bookings
           </button>
           <MonoBadge icon={IconBox}>Inspection & Equipment Checklist</MonoBadge>
@@ -53,58 +69,83 @@ export default function CrewBookingDetailPage({ go }: { go: (p: Page) => void })
           </p>
         </div>
 
-        <button
-          onClick={() => go('crew-setup-teardown')}
-          className="bg-[#1090F8] text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm self-start sm:self-auto"
-        >
-          Proceed to Setup Stage →
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-full border border-[#24252c]/15 text-xs shadow-2xs">
+            <span className="text-[11px] font-bold text-[#24252c]/60">Assignment:</span>
+            <select
+              value={booking.id}
+              onChange={(e) => handleSwitchBooking(e.target.value)}
+              className="bg-transparent text-[var(--ink)] font-extrabold text-xs focus:outline-none cursor-pointer"
+            >
+              {INITIAL_ASSIGNED_BOOKINGS.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.id} — {b.customer}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={() => go('crew-setup-teardown')}
+            className="bg-[#1090F8] text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm cursor-pointer"
+          >
+            Proceed to Setup Stage →
+          </button>
+        </div>
       </div>
 
       {/* Booking Summary Card */}
       <div className="bg-white rounded-2xl p-6 border border-[#24252c]/[0.08] shadow-sm space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#24252c]/[0.06]">
           <div>
-            <span className="font-mono font-extrabold text-sm text-[#1090F8]">BNH-2026-889</span>
-            <h2 className="text-xl font-extrabold text-[var(--ink)] mt-0.5">Grand Wedding Production (P3 LED + Line Array)</h2>
+            <span className="font-mono font-extrabold text-sm text-[#1090F8] bg-[#1090F8]/10 px-2.5 py-0.5 rounded-md">
+              {booking.id}
+            </span>
+            <h2 className="text-xl font-extrabold text-[var(--ink)] mt-1">{booking.package}</h2>
           </div>
           <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20 uppercase">
-            Setup In Progress
+            {booking.status}
           </span>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
           <div>
             <span className="text-[#24252c]/50 font-semibold block">Client / Host:</span>
-            <span className="font-bold text-[var(--ink)]">Patricia Reyes</span>
+            <span className="font-bold text-[var(--ink)]">{booking.customer}</span>
           </div>
           <div>
             <span className="text-[#24252c]/50 font-semibold block">Event Date:</span>
-            <span className="font-bold text-[var(--ink)]">Sept 14, 2026</span>
+            <span className="font-bold text-[var(--ink)]">{booking.date}</span>
           </div>
           <div>
             <span className="text-[#24252c]/50 font-semibold block">Venue Location:</span>
-            <span className="font-bold text-[var(--ink)]">Shangri-La Fort, BGC</span>
+            <span className="font-bold text-[var(--ink)]">{booking.venue}</span>
           </div>
           <div>
             <span className="text-[#24252c]/50 font-semibold block">Lead Technician:</span>
-            <span className="font-bold text-[#1090F8]">Marco Valenzuela</span>
+            <span className="font-bold text-[#1090F8]">{booking.leadTechnician}</span>
           </div>
         </div>
 
         {/* Technical Specs Callout */}
         <div className="bg-[var(--mist)] p-4 rounded-xl border border-[#24252c]/[0.06] grid sm:grid-cols-3 gap-3 text-xs">
           <div>
-            <span className="text-[#24252c]/50 font-semibold block uppercase tracking-wider text-[10px]">Power Requirements:</span>
-            <span className="font-bold text-[var(--ink)]">Single 220V 30A Circuit</span>
+            <span className="text-[#24252c]/50 font-semibold block uppercase tracking-wider text-[10px]">
+              Power Requirements:
+            </span>
+            <span className="font-bold text-[var(--ink)]">{booking.powerSpecs}</span>
           </div>
           <div>
-            <span className="text-[#24252c]/50 font-semibold block uppercase tracking-wider text-[10px]">Rigging Setup Window:</span>
-            <span className="font-bold text-[var(--ink)]">2.5 Hours Prior to Call</span>
+            <span className="text-[#24252c]/50 font-semibold block uppercase tracking-wider text-[10px]">
+              Rigging Setup Window:
+            </span>
+            <span className="font-bold text-[var(--ink)]">{booking.riggingWindow}</span>
           </div>
           <div>
-            <span className="text-[#24252c]/50 font-semibold block uppercase tracking-wider text-[10px]">Required Crew Size:</span>
-            <span className="font-bold text-[var(--ink)]">3 Audio/Lighting Techs</span>
+            <span className="text-[#24252c]/50 font-semibold block uppercase tracking-wider text-[10px]">
+              Required Crew Size:
+            </span>
+            <span className="font-bold text-[var(--ink)]">{booking.crewSize}</span>
           </div>
         </div>
       </div>
@@ -182,7 +223,7 @@ export default function CrewBookingDetailPage({ go }: { go: (p: Page) => void })
         />
         <button
           onClick={() => setNoteSavedModal(true)}
-          className="bg-[var(--ink)] text-white text-xs font-semibold px-5 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors"
+          className="bg-[var(--ink)] text-white text-xs font-semibold px-5 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
         >
           Save Crew Note
         </button>
@@ -191,7 +232,10 @@ export default function CrewBookingDetailPage({ go }: { go: (p: Page) => void })
       {/* Note Saved Modal Overlay */}
       <ModalOverlay isOpen={noteSavedModal} onClose={() => setNoteSavedModal(false)}>
         <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl border border-[#24252c]/10 relative text-center">
-          <button onClick={() => setNoteSavedModal(false)} className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer">
+          <button
+            onClick={() => setNoteSavedModal(false)}
+            className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+          >
             <IconX className="w-5 h-5" />
           </button>
           <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 font-extrabold text-xl flex items-center justify-center mx-auto mb-3 border border-emerald-200">
@@ -199,7 +243,7 @@ export default function CrewBookingDetailPage({ go }: { go: (p: Page) => void })
           </div>
           <h3 className="text-lg font-extrabold text-[var(--ink)] mb-1">Crew Note Logged</h3>
           <p className="text-xs text-[#24252c]/60 mb-5">
-            On-site rigging note attached to booking <strong className="text-[var(--ink)] font-mono">BNH-2026-889</strong> successfully.
+            On-site rigging note attached to booking <strong className="text-[var(--ink)] font-mono">{booking.id}</strong> successfully.
           </p>
           <button
             onClick={() => setNoteSavedModal(false)}
