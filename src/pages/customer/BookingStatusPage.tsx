@@ -260,9 +260,9 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
 
   const steps = [
     {
-      title: isPending ? 'Reservation Deposit Pending Verification' : 'Reservation Deposit Secured',
+      title: isPending ? 'Reservation Pending Verification' : 'Reservation Secured',
       status: isPending ? 'Pending Approval' : 'Completed',
-      date: isPending ? 'Verification in Progress' : 'Deposit Secured',
+      date: isPending ? 'Verification in Progress' : 'Reservation Secured',
       done: !isPending,
       current: isPending,
     },
@@ -474,16 +474,17 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
                 <button
                   type="button"
                   onClick={handleOpenRescheduleModal}
-                  className="bg-[var(--mist)] hover:bg-[var(--ink)] hover:text-white text-[var(--ink)] text-xs font-bold px-4 py-1.5 rounded-full border border-[#24252c]/10 transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs whitespace-nowrap shrink-0"
+                  className="bg-amber-500/10 hover:bg-amber-500 hover:text-white text-amber-800 text-xs font-bold px-4 py-1.5 rounded-full border border-amber-500/25 transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs whitespace-nowrap shrink-0 group"
                 >
-                  <IconCalendar className="w-3.5 h-3.5 text-[#1090F8]" />
+                  <IconCalendar className="w-3.5 h-3.5 text-amber-600 group-hover:text-white transition-colors" />
                   <span>Request Reschedule</span>
                 </button>
               </div>
 
-              <div className="text-xs font-semibold text-[var(--ink)] flex items-center gap-1.5 sm:justify-end">
-                <span className="text-[10px] uppercase font-bold text-[#24252c]/50">Target Date:</span>
-                <span className="bg-[var(--mist)] px-2.5 py-0.5 rounded-md border border-[#24252c]/10 font-bold text-[var(--ink)]">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--mist)] border border-[#24252c]/10 text-xs shadow-2xs sm:self-end">
+                <IconCalendar className="w-3.5 h-3.5 text-[#1090F8] shrink-0" />
+                <span className="text-[10px] uppercase font-bold text-[#24252c]/50 tracking-wider">Event Date:</span>
+                <span className="font-extrabold text-[var(--ink)]">
                   {formatDisplayDate(activeBooking.event_date)}
                 </span>
               </div>
@@ -505,7 +506,7 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
                     </span>
                   </div>
                   <p className="text-[11px] text-amber-800/90 mt-0.5">
-                    Requested Target Date: <strong className="text-amber-950 font-bold">{formatDisplayDate(activeBooking.reschedule_requested_date)}</strong>
+                    Requested Event Date: <strong className="text-amber-950 font-bold">{formatDisplayDate(activeBooking.reschedule_requested_date)}</strong>
                   </p>
                   {activeBooking.reschedule_reason && (
                     <p className="text-[11px] text-amber-800/80 mt-1 italic">
@@ -740,8 +741,8 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
                 </span>
               </div>
 
-              {/* Interactive Availability Calendar */}
-              <div className="p-4 rounded-2xl bg-white border border-[#24252c]/15 shadow-2xs">
+              {/* Interactive Availability Calendar without stroke */}
+              <div className="p-4 rounded-2xl bg-[var(--mist)]">
                 <BookingRescheduleCalendar
                   originalDate={activeBooking.event_date}
                   selectedDate={newRescheduleDate}

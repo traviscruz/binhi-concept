@@ -51,7 +51,11 @@ Deno.serve(async (req: Request) => {
       let paymentMethodUsed = attr?.payment_method_used || '';
 
       if (!paymentMethodUsed && payments.length > 0) {
-        paymentMethodUsed = payments[0]?.attributes?.source?.type || payments[0]?.attributes?.payment_method_type || '';
+        paymentMethodUsed =
+          payments[0]?.attributes?.source?.type ||
+          payments[0]?.attributes?.payment_method_type ||
+          payments[0]?.attributes?.source?.channel ||
+          '';
       }
 
       return new Response(
@@ -78,14 +82,18 @@ Deno.serve(async (req: Request) => {
     // Convert amount in PHP to centavos (1 PHP = 100 centavos)
     const amountInCentavos = Math.round(Number(amount) * 100);
     const origin = req.headers.get('origin') || 'http://localhost:5173';
+    const basicAuthToken = btoa(`${PAYMONGO_SECRET_KEY}:`);
 
-    const paymongoPayload = {
+    const rawPhone = buyer?.phone ? buyer.phone.replace(/\D/g, '') : '';
+    const cleanPhone = rawPhone.length >= 10 ? rawPhone.slice(-10) : undefined;
+
+    const buildPayload = (methods: string[]) => ({
       data: {
         attributes: {
           billing: {
             name: `${buyer?.firstName || 'Valued'} ${buyer?.lastName || 'Customer'}`.trim(),
             email: buyer?.email || 'customer@binhiconcept.ph',
-            phone: buyer?.phone ? buyer.phone.replace(/^\+?63\s*/, '').replace(/\D/g, '') : undefined,
+            phone: cleanPhone ? `0${cleanPhone}` : undefined,
           },
           send_email_receipt: true,
           show_description: true,
@@ -100,43 +108,62 @@ Deno.serve(async (req: Request) => {
               quantity: 1,
             },
           ],
-          payment_method_types: ['card', 'gcash', 'paymaya', 'qrph'],
+          payment_method_types: methods,
+          payment_method_allowed: methods,
           reference_number: referenceNumber || `BNH-${crypto.randomUUID()}`,
         },
       },
-    };
-
-    const basicAuthToken = btoa(`${PAYMONGO_SECRET_KEY}:`);
-
-    const response = await fetch('https://api.paymongo.com/v1/checkout_sessions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Basic ${basicAuthToken}`,
-      },
-      body: JSON.stringify(paymongoPayload),
     });
 
-    const responseData = await response.json();
+    const methodTiers = [
+      ['card', 'gcash', 'paymaya', 'qrph', 'grab_pay', 'dob'],
+      ['card', 'gcash', 'paymaya', 'qrph'],
+      ['card', 'gcash', 'paymaya'],
+      ['card', 'gcash'],
+    ];
 
-    if (!response.ok || !responseData?.data?.attributes?.checkout_url) {
-      console.error('PayMongo API Error:', responseData);
-      const errorMsg =
-        responseData?.errors?.[0]?.detail ||
-        responseData?.message ||
-        'Failed to create PayMongo Checkout session';
-      return new Response(
-        JSON.stringify({ error: errorMsg }),
-        { status: response.status || 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    let lastError = 'Failed to create PayMongo Checkout session';
+
+    for (const methods of methodTiers) {
+      const response = await fetch('https://api.paymongo.com/v1/checkout_sessions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${basicAuthToken}`,
+        },
+        body: JSON.stringify(buildPayload(methods)),
+      });
+
+      const responseData = await response.json();
+
+      if (response.ok && responseData?.data?.attributes?.checkout_url) {
+        return new Response(
+          JSON.stringify({
+            checkout_url: responseData.data.attributes.checkout_url,
+            checkout_id: responseData.data.id,
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const errorDetail = responseData?.errors?.[0]?.detail || responseData?.message || '';
+      lastError = errorDetail;
+
+      const isPaymentMethodIssue =
+        errorDetail.toLowerCase().includes('not allowed') ||
+        errorDetail.toLowerCase().includes('payment_method') ||
+        errorDetail.toLowerCase().includes('disabled') ||
+        errorDetail.toLowerCase().includes('qrph') ||
+        errorDetail.toLowerCase().includes('method');
+
+      if (!isPaymentMethodIssue) {
+        break;
+      }
     }
 
     return new Response(
-      JSON.stringify({
-        checkout_url: responseData.data.attributes.checkout_url,
-        checkout_id: responseData.data.id,
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({ error: lastError }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (err: any) {
     console.error('Edge Function Internal Error:', err);

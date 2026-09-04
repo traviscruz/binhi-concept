@@ -203,9 +203,6 @@ export function CustomerHeader({
             ) : (
               <span className="text-sm font-medium">{customerName}</span>
             )}
-            <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-400/20 text-amber-600 px-2 py-0.5 rounded-full">
-              VIP Gold
-            </span>
           </button>
 
           <button
@@ -252,158 +249,186 @@ export function CustomerHeader({
         </div>
       )}
 
-      {/* ── Customer Privacy-Focused System Availability Calendar Modal ── */}
+      {/* ── Customer Master Availability & Booking Calendar Modal ── */}
       <ModalOverlay isOpen={showCalendarModal} onClose={() => setShowCalendarModal(false)}>
-        <div className="bg-white rounded-[2.5rem] p-6 md:p-8 max-w-xl w-full shadow-2xl border border-[#24252c]/10 relative animate-blur-in">
+        <div className="bg-white rounded-[2.5rem] max-w-xl w-full max-h-[88vh] shadow-2xl border border-[#24252c]/10 relative p-1.5 sm:p-2.5 overflow-hidden flex flex-col animate-blur-in">
           <button
             type="button"
             onClick={() => setShowCalendarModal(false)}
-            className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+            className="absolute top-6 right-6 z-20 text-[#24252c]/50 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors bg-white/90 backdrop-blur-md shadow-sm border border-[#24252c]/10 cursor-pointer"
+            title="Close"
           >
             <IconX className="w-5 h-5" />
           </button>
 
-          <div className="mb-4 pb-3 border-b border-[#24252c]/[0.06]">
-            <h3 className="text-lg font-black text-[var(--ink)] tracking-tight">Production Booking Calendar</h3>
-            <p className="text-xs text-[#24252c]/50 mt-0.5">Live schedule availability and your confirmed event dates.</p>
-          </div>
-
-          {/* Month Header & Controls */}
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <span className="text-sm font-extrabold text-[var(--ink)] tracking-tight">{monthName} {calYear}</span>
+          <div className="flex-1 overflow-y-auto p-5 sm:p-7 space-y-4 modal-scroll pr-4 sm:pr-6">
+            <div className="mb-2 pb-3 border-b border-[#24252c]/[0.06]">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="p-1.5 rounded-lg bg-[#1090F8]/10 text-[#1090F8]">
+                  <IconCalendar className="w-4 h-4" />
+                </span>
+                <h3 className="text-xl font-extrabold text-[var(--ink)]">
+                  Production Booking Calendar
+                </h3>
+              </div>
+              <p className="text-xs text-[#24252c]/60">
+                Live schedule availability and your confirmed event dates. Click an open date to reserve your package.
+              </p>
             </div>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={handlePrevMonth}
-                className="w-8 h-8 rounded-full bg-[var(--mist)] hover:bg-[#24252c]/10 text-[var(--ink)] text-xs font-bold transition-colors cursor-pointer flex items-center justify-center"
-              >
-                ‹
-              </button>
-              <button
-                type="button"
-                onClick={handleNextMonth}
-                className="w-8 h-8 rounded-full bg-[var(--mist)] hover:bg-[#24252c]/10 text-[var(--ink)] text-xs font-bold transition-colors cursor-pointer flex items-center justify-center"
-              >
-                ›
-              </button>
+
+            {/* Interactive Availability Calendar matching Reschedule Calendar design without strokes */}
+            <div className="p-4 rounded-2xl bg-[var(--mist)] space-y-3.5">
+              {/* Month Navigation Header */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-base font-extrabold text-[var(--ink)] block">
+                    {monthName} {calYear}
+                  </span>
+                  <span className="text-[11px] text-[#24252c]/50 font-medium">
+                    Click an open slot to select your desired event date
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handlePrevMonth}
+                    className="px-3 py-1.5 rounded-full bg-white hover:bg-[var(--ink)] hover:text-white text-xs font-bold transition-colors cursor-pointer shadow-2xs"
+                  >
+                    ← Prev
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleNextMonth}
+                    className="px-3 py-1.5 rounded-full bg-white hover:bg-[var(--ink)] hover:text-white text-xs font-bold transition-colors cursor-pointer shadow-2xs"
+                  >
+                    Next →
+                  </button>
+                </div>
+              </div>
+
+              {/* Weekday Header */}
+              <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-[#24252c]/50">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+                  <div key={d} className="py-1">
+                    {d}
+                  </div>
+                ))}
+              </div>
+
+              {/* 42-cell Fixed Grid */}
+              <div className="grid grid-cols-7 gap-1">
+                {/* Leading empty cells */}
+                {Array.from({ length: firstDayIndex }).map((_, i) => (
+                  <div key={`empty-${i}`} className="aspect-square rounded-xl bg-transparent" />
+                ))}
+
+                {/* Days of the month */}
+                {Array.from({ length: daysInMonth }).map((_, i) => {
+                  const day = i + 1;
+                  const formattedIso = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                  const isPast = isPastDate(formattedIso);
+
+                  const userBooking = dbBookings.find(
+                    (b) =>
+                      b.event_date === formattedIso &&
+                      ((currentUserId && b.user_id === currentUserId) ||
+                       (currentUserEmail && b.customer_email?.toLowerCase() === currentUserEmail.toLowerCase()))
+                  );
+                  const otherBooking = dbBookings.find((b) => b.event_date === formattedIso && b !== userBooking);
+                  const isMyBooking = !!userBooking;
+                  const isBooked = isMyBooking || !!otherBooking;
+                  
+                  const now = new Date();
+                  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                  const isToday = formattedIso === todayIso;
+
+                  let cellClass =
+                    'bg-white text-[#24252c]/80 font-semibold cursor-pointer hover:bg-[#1090F8]/15 hover:text-[#1090F8] shadow-2xs';
+                  let badgeText = '';
+
+                  if (isMyBooking) {
+                    cellClass =
+                      'bg-[#1090F8] text-white font-black shadow-md scale-[1.03] z-10 cursor-pointer';
+                    badgeText = 'Your Event';
+                  } else if (isPast) {
+                    cellClass = 'bg-black/[0.03] text-gray-300 font-medium cursor-not-allowed opacity-40 select-none';
+                    badgeText = 'Past';
+                  } else if (isBooked) {
+                    cellClass = 'bg-[var(--ink)] text-white font-semibold shadow-2xs cursor-not-allowed opacity-85 select-none';
+                    badgeText = 'Booked';
+                  } else if (isToday) {
+                    cellClass =
+                      'text-[#1090F8] font-bold bg-[#1090F8]/15 cursor-pointer hover:bg-[#1090F8]/25 shadow-2xs';
+                    badgeText = 'Today';
+                  }
+
+                  const handleSelect = () => {
+                    if (isMyBooking) {
+                      if (userBooking?.id) {
+                        localStorage.setItem('binhi_selected_active_booking_id', userBooking.id);
+                      }
+                      go('booking-tracker');
+                      setShowCalendarModal(false);
+                      return;
+                    }
+                    if (isPast || isBooked) return;
+                    if (onSelectDateAndGoToPackages) {
+                      onSelectDateAndGoToPackages(formattedIso);
+                    } else {
+                      go('packages');
+                    }
+                    setShowCalendarModal(false);
+                  };
+
+                  return (
+                    <div
+                      key={day}
+                      onClick={handleSelect}
+                      title={
+                        isMyBooking
+                          ? `Your Confirmed Booking: ${userBooking?.package_name || 'Event Production'} (Click to track)`
+                          : isPast
+                          ? 'Past Date'
+                          : isBooked
+                          ? 'Date Already Booked / Unavailable'
+                          : isToday
+                          ? 'Today (Available)'
+                          : `Available: ${formattedIso} (Click to reserve)`
+                      }
+                      className={`aspect-square rounded-xl text-xs flex flex-col items-center justify-center relative transition-all ${cellClass}`}
+                    >
+                      <span className="leading-none">{day}</span>
+                      {badgeText && (
+                        <span className="text-[7px] font-extrabold uppercase tracking-tight opacity-90 mt-0.5">
+                          {badgeText}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Trailing blank cells to enforce fixed 42-cell layout */}
+                {Array.from({ length: Math.max(0, 42 - (firstDayIndex + daysInMonth)) }).map((_, i) => (
+                  <div key={`trail-${i}`} className="aspect-square rounded-xl bg-transparent opacity-0 pointer-events-none" />
+                ))}
+              </div>
+
+              {/* Legend Bar without stroke */}
+              <div className="flex flex-wrap items-center justify-between gap-2.5 pt-3 text-[10px] text-[#24252c]/70">
+                <span className="flex items-center gap-1.5 font-bold text-[#1090F8]">
+                  <span className="w-2.5 h-2.5 rounded-md bg-[#1090F8]" /> Your Event
+                </span>
+                <span className="flex items-center gap-1.5 font-semibold text-[var(--ink)]">
+                  <span className="w-2.5 h-2.5 rounded-md bg-[var(--ink)]" /> Booked / Unavailable
+                </span>
+                <span className="flex items-center gap-1.5 font-semibold text-[#1090F8]">
+                  <span className="w-2.5 h-2.5 rounded-md bg-[#1090F8]/30" /> Today
+                </span>
+                <span className="flex items-center gap-1.5 text-[#24252c]/60">
+                  <span className="w-2.5 h-2.5 rounded-md bg-white shadow-2xs" /> Open Date
+                </span>
+              </div>
             </div>
-          </div>
-
-          {/* Calendar Grid Header */}
-          <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold uppercase tracking-wider text-[#24252c]/40 mb-1.5">
-            {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
-              <div key={d} className="py-1">{d}</div>
-            ))}
-          </div>
-
-          {/* Month Days Grid (Fixed 42 cells = 6 rows x 7 cols) */}
-          <div className="grid grid-cols-7 gap-1">
-            {/* Blank leading cells */}
-            {Array.from({ length: firstDayIndex }).map((_, i) => (
-              <div key={`empty-${i}`} className="aspect-square rounded-xl bg-transparent" />
-            ))}
-
-            {/* Days of the month */}
-            {Array.from({ length: daysInMonth }).map((_, i) => {
-              const day = i + 1;
-              const formattedIso = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              const isPast = isPastDate(formattedIso);
-
-              const userBooking = dbBookings.find(
-                (b) =>
-                  b.event_date === formattedIso &&
-                  ((currentUserId && b.user_id === currentUserId) ||
-                   (currentUserEmail && b.customer_email?.toLowerCase() === currentUserEmail.toLowerCase()))
-              );
-              const otherBooking = dbBookings.find((b) => b.event_date === formattedIso && b !== userBooking);
-              const isMyBooking = !!userBooking;
-              const isBooked = isMyBooking || !!otherBooking;
-              
-              const now = new Date();
-              const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-              const isToday = formattedIso === todayIso;
-
-              let cellStyle = 'text-[var(--ink)] font-medium hover:bg-[var(--mist)] cursor-pointer';
-              let dot = null;
-
-              if (isMyBooking) {
-                cellStyle = 'bg-blue-50 text-[#1090F8] font-black border border-blue-200 hover:bg-blue-100 cursor-pointer shadow-2xs';
-                dot = <span className="w-1.5 h-1.5 rounded-full bg-[#1090F8] mt-0.5" />;
-              } else if (isPast) {
-                cellStyle = 'text-black/20 font-normal cursor-not-allowed select-none';
-              } else if (isBooked) {
-                cellStyle = 'text-black/35 font-normal line-through decoration-black/25 bg-black/[0.03] cursor-not-allowed select-none';
-                dot = <span className="w-1 h-1 rounded-full bg-black/30 mt-0.5" />;
-              } else if (isToday) {
-                cellStyle = 'ring-1.5 ring-[var(--ink)] text-[var(--ink)] font-black bg-white cursor-pointer hover:bg-[var(--mist)]';
-                dot = <span className="w-1 h-1 rounded-full bg-[var(--ink)] mt-0.5" />;
-              }
-
-              const handleSelect = () => {
-                if (isMyBooking) {
-                  if (userBooking?.id) {
-                    localStorage.setItem('binhi_selected_active_booking_id', userBooking.id);
-                  }
-                  go('booking-tracker');
-                  setShowCalendarModal(false);
-                  return;
-                }
-                if (isPast || isBooked) return;
-                if (onSelectDateAndGoToPackages) {
-                  onSelectDateAndGoToPackages(formattedIso);
-                } else {
-                  go('packages');
-                }
-                setShowCalendarModal(false);
-              };
-
-              return (
-                <button
-                  type="button"
-                  key={day}
-                  onClick={handleSelect}
-                  disabled={isPast || (isBooked && !isMyBooking)}
-                  title={
-                    isMyBooking
-                      ? `Your Booking: ${userBooking?.package_name || 'Event Production'} (Click to track)`
-                      : isPast
-                      ? 'Past Date'
-                      : isBooked
-                      ? 'Unavailable / Reserved'
-                      : isToday
-                      ? 'Today'
-                      : `Available: ${formattedIso}`
-                  }
-                  className={`aspect-square rounded-xl text-xs flex flex-col items-center justify-center transition-colors relative ${cellStyle}`}
-                >
-                  <span className="leading-none">{day}</span>
-                  {dot}
-                </button>
-              );
-            })}
-
-            {/* Trailing blank cells to enforce fixed 42-cell layout */}
-            {Array.from({ length: Math.max(0, 42 - (firstDayIndex + daysInMonth)) }).map((_, i) => (
-              <div key={`trail-${i}`} className="aspect-square rounded-xl bg-transparent opacity-0 pointer-events-none" />
-            ))}
-          </div>
-
-          {/* Minimalist Legend Bar */}
-          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 mt-5 pt-3 border-t border-[#24252c]/[0.06] text-[11px] text-[#24252c]/60">
-            <span className="flex items-center gap-1.5 font-bold text-[#1090F8]">
-              <span className="w-2 h-2 rounded-full bg-[#1090F8]" /> Your Event
-            </span>
-            <span className="flex items-center gap-1.5 text-[#24252c]/70">
-              <span className="w-2 h-2 rounded-full bg-black/30" /> Booked
-            </span>
-            <span className="flex items-center gap-1.5 font-semibold text-[var(--ink)]">
-              <span className="w-2 h-2 rounded-full border border-[var(--ink)]" /> Today
-            </span>
-            <span className="flex items-center gap-1.5 text-[#24252c]/70">
-              <span className="w-2 h-2 rounded-full bg-[var(--mist)] border border-black/15" /> Available
-            </span>
           </div>
         </div>
       </ModalOverlay>

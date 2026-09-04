@@ -21,6 +21,7 @@ export function ModalOverlay({ children, onClose, className = '', isOpen }: Moda
     if (isOpen) {
       setShouldRender(true);
       setAnimatingOut(false);
+      document.body.classList.add('print-modal-active');
 
       // Prevent scrollbar layout shifting when locking body overflow
       const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
@@ -31,6 +32,7 @@ export function ModalOverlay({ children, onClose, className = '', isOpen }: Moda
     } else {
       setAnimatingOut(true);
       setActive(false);
+      document.body.classList.remove('print-modal-active');
       const timer = setTimeout(() => {
         setShouldRender(false);
         setAnimatingOut(false);
@@ -53,6 +55,13 @@ export function ModalOverlay({ children, onClose, className = '', isOpen }: Moda
     }, 10);
     return () => clearTimeout(timer);
   }, [shouldRender]);
+
+  // Cleanup print-modal-active class on unmount
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove('print-modal-active');
+    };
+  }, []);
 
   // Handle body overflow in uncontrolled mode
   useEffect(() => {
@@ -77,7 +86,7 @@ export function ModalOverlay({ children, onClose, className = '', isOpen }: Moda
 
   return createPortal(
     <div
-      className={`fixed inset-0 z-[999] bg-black/60 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto custom-scrollbar transition-opacity duration-300 ease-out ${
+      className={`fixed inset-0 z-[999] bg-black/60 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto custom-scrollbar transition-opacity duration-300 ease-out print:static print:inset-auto print:bg-transparent print:p-0 print:overflow-visible print:backdrop-blur-none print:z-auto print:block ${
         active && !animatingOut ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}
       onClick={(e) => {
@@ -87,7 +96,7 @@ export function ModalOverlay({ children, onClose, className = '', isOpen }: Moda
       }}
     >
       <div
-        className={`transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] transform my-auto flex items-center justify-center w-full max-w-full ${
+        className={`transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] transform my-auto flex items-center justify-center w-full max-w-full print:transform-none print:m-0 print:p-0 print:w-full print:max-w-none print:block ${
           active && !animatingOut
             ? 'scale-100 opacity-100 blur-none translate-y-0'
             : 'scale-95 opacity-0 blur-sm -translate-y-2'

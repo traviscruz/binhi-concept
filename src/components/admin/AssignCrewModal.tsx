@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ModalOverlay } from '../shared/ModalOverlay';
-import { IconUser, IconCheck, IconX, IconShield } from '../shared/icons';
+import { IconCheck, IconX, IconShield } from '../shared/icons';
 import { supabase } from '../../utils/supabase';
 import { logAuditEvent } from '../../utils/auditLogger';
 
@@ -11,15 +11,6 @@ export interface AssignedCrewMember {
   roleTitle: string;
   phone?: string;
 }
-
-const CREW_ROLES = [
-  'Lead Audio & Rigging Technician',
-  'Lighting & Hazer Operator',
-  'LED Wall & Video Switcher',
-  'Sound & FOH Engineer',
-  'Power & Stage Distribution Tech',
-  'Stage Hand & Cable Runner',
-];
 
 interface AssignCrewModalProps {
   isOpen: boolean;
@@ -56,7 +47,7 @@ export function AssignCrewModal({ isOpen, onClose, booking, onAssigned }: Assign
         const { data: profiles, error } = await supabase
           .from('profiles')
           .select('id, full_name, first_name, last_name, email, role, phone')
-          .or('role.ilike.%crew%,role.ilike.%technician%,role.ilike.%staff%,role.ilike.%inventory%');
+          .eq('role', 'crew');
 
         if (!error && profiles && profiles.length > 0) {
           const mapped = profiles.map((p: any) => ({
@@ -103,17 +94,11 @@ export function AssignCrewModal({ isOpen, onClose, booking, onAssigned }: Assign
           id: staff.id,
           name: staff.name,
           email: staff.email,
-          roleTitle: CREW_ROLES[0],
+          roleTitle: staff.role ? (staff.role.charAt(0).toUpperCase() + staff.role.slice(1).toLowerCase()) : 'Crew',
           phone: staff.phone,
         },
       ]);
     }
-  };
-
-  const updateMemberRole = (staffId: string, roleTitle: string) => {
-    setSelectedCrew((prev) =>
-      prev.map((c) => (c.id === staffId ? { ...c, roleTitle } : c))
-    );
   };
 
   const handleSaveAssignment = async () => {
@@ -184,7 +169,7 @@ export function AssignCrewModal({ isOpen, onClose, booking, onAssigned }: Assign
 
         {/* Header */}
         <div className="pb-4 border-b border-[#24252c]/[0.08]">
-          <div className="flex items-center gap-2 text-xs font-mono font-extrabold text-[#1090F8] mb-1">
+          <div className="flex items-center gap-2 text-xs font-bold text-[#1090F8] mb-1">
             <IconShield className="w-4 h-4" />
             <span>Accountability & Crew Roster</span>
           </div>
@@ -244,8 +229,8 @@ export function AssignCrewModal({ isOpen, onClose, booking, onAssigned }: Assign
                         <div className="min-w-0">
                           <div className="font-bold text-xs text-[var(--ink)] truncate flex items-center gap-2">
                             <span>{staff.name}</span>
-                            <span className="text-[10px] font-mono px-2 py-0.2 rounded-full bg-black/5 text-[#24252c]/70">
-                              {staff.role}
+                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-[#1090F8]/10 text-[#1090F8] border border-[#1090F8]/20">
+                              {staff.role ? staff.role.charAt(0).toUpperCase() + staff.role.slice(1).toLowerCase() : 'Crew'}
                             </span>
                           </div>
                           <div className="text-[11px] text-[#24252c]/50 truncate">
@@ -254,26 +239,6 @@ export function AssignCrewModal({ isOpen, onClose, booking, onAssigned }: Assign
                         </div>
                       </label>
                     </div>
-
-                    {/* Role Title Designation Dropdown (Shown when selected) */}
-                    {isSelected && assignedMember && (
-                      <div className="mt-2.5 pt-2.5 border-t border-[#24252c]/[0.06] flex flex-col sm:flex-row sm:items-center gap-2">
-                        <label className="text-[10px] font-extrabold uppercase tracking-wider text-[#24252c]/60 shrink-0">
-                          Designated Assignment:
-                        </label>
-                        <select
-                          value={assignedMember.roleTitle}
-                          onChange={(e) => updateMemberRole(staff.id, e.target.value)}
-                          className="flex-1 bg-white border border-[#1090F8]/30 rounded-xl px-3 py-1.5 text-xs text-[var(--ink)] font-semibold focus:outline-none focus:border-[#1090F8] transition-colors"
-                        >
-                          {CREW_ROLES.map((roleOpt) => (
-                            <option key={roleOpt} value={roleOpt}>
-                              {roleOpt}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
                   </div>
                 );
               })}

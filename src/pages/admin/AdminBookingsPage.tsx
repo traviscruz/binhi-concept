@@ -41,6 +41,9 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
   const [cancelBookingId, setCancelBookingId] = useState<string | null>(null);
   const [assignCrewBooking, setAssignCrewBooking] = useState<any | null>(null);
 
+  // ── Refund Processing Modal State (Informational Preview) ──────────────
+  const [refundModalBooking, setRefundModalBooking] = useState<any | null>(null);
+
   // ── Full Payment Settlement Modal State ─────────────────────────────────
   const [settleModalBooking, setSettleModalBooking] = useState<any | null>(null);
   const [isFullyPaidInput, setIsFullyPaidInput] = useState(true);
@@ -241,8 +244,9 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
       }
     } catch (err) {
       console.error('Error cancelling booking:', err);
+    } finally {
+      setCancelBookingId(null);
     }
-    setCancelBookingId(null);
   };
 
   const getApprovalEmailTemplate = (booking: any) => {
@@ -619,16 +623,6 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
 
           <button
             type="button"
-            onClick={handleExportBookingsCSV}
-            className="inline-flex items-center gap-1.5 bg-white border border-[#24252c]/15 text-[var(--ink)] text-xs font-semibold px-3.5 py-2.5 rounded-full hover:bg-gray-50 transition-colors shadow-2xs cursor-pointer"
-            title="Export to CSV"
-          >
-            <IconDownload className="w-4 h-4 text-[#24252c]/70" />
-            <span>CSV</span>
-          </button>
-
-          <button
-            type="button"
             onClick={loadBookings}
             disabled={loading}
             className="inline-flex items-center gap-1.5 bg-white border border-[#24252c]/15 text-[var(--ink)] text-xs font-bold px-3 py-2.5 rounded-full hover:bg-[var(--mist)] transition-all shadow-2xs cursor-pointer disabled:opacity-50"
@@ -685,135 +679,133 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
 
         {/* Desktop Bookings Table */}
         <div className="hidden sm:block bg-white rounded-3xl border border-[#24252c]/10 shadow-sm overflow-hidden">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-[#24252c]/10 bg-[var(--mist)]/50 text-[#24252c]/60 font-bold uppercase text-[10px] tracking-wider">
-                <th className="py-3 px-3">Ref / Customer</th>
-                <th className="py-3 px-3">Package & Venue</th>
-                <th className="py-3 px-3">Schedule Date</th>
-                <th className="py-3 px-3">Cost Breakdown</th>
-                <th className="py-3 px-3">Assigned Crew</th>
-                <th className="py-3 px-3">Payment Status</th>
-                {statusFilter !== 'Cancelled' && (
-                  <th className="py-3 px-3 text-right">Actions</th>
-                )}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#24252c]/5">
-              {paginatedBookings.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-xs text-[#24252c]/50">
-                    No bookings found matching your search and filter criteria.
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-[#24252c]/10 bg-[var(--mist)]/50 text-[#24252c]/60 font-bold uppercase text-[10px] tracking-wider">
+                  <th className="py-4 px-4">Ref / Customer</th>
+                  <th className="py-4 px-4">Package & Venue</th>
+                  <th className="py-4 px-4">Schedule Date</th>
+                  <th className="py-4 px-4">Cost Breakdown</th>
+                  <th className="py-4 px-4">Assigned Crew</th>
+                  <th className="py-4 px-4">Booking Status</th>
+                  <th className="py-4 px-4">Payment Status</th>
+                  <th className="py-4 px-4 text-right">Actions</th>
                 </tr>
-              ) : (
-                paginatedBookings.map((row) => (
-                  <tr key={row.dbId} className="hover:bg-[var(--mist)]/40 transition-colors">
-                    {/* Col 1: Customer & Ref */}
-                    <td className="py-3.5 px-3">
-                      <div className="font-mono font-bold text-[#1090F8] text-[11px]">
-                        #{row.id}
-                      </div>
-                      <div className="font-extrabold text-[var(--ink)] text-xs mt-0.5">
-                        {row.customer}
-                      </div>
-                      <div className="text-[10px] text-[#24252c]/50 truncate max-w-[160px]">
-                        {row.email}
-                      </div>
+              </thead>
+              <tbody className="divide-y divide-[#24252c]/5">
+                {paginatedBookings.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-12 text-center text-xs text-[#24252c]/50">
+                      No bookings found matching your search and filter criteria.
                     </td>
-
-                    {/* Col 2: Package & Venue */}
-                    <td className="py-3.5 px-3">
-                      <div className="font-bold text-[var(--ink)]">{row.package}</div>
-                      <div className="text-[10px] text-[#24252c]/60 truncate max-w-[180px] mt-0.5">
-                        {row.venue}
-                      </div>
-                    </td>
-
-                    {/* Col 3: Event Date & Reschedule Alert */}
-                    <td className="py-3.5 px-3 whitespace-nowrap">
-                      <div className="font-semibold text-[var(--ink)] flex items-center gap-1">
-                        <IconCalendar className="w-3.5 h-3.5 text-[#1090F8] shrink-0" />
-                        <span>{row.date}</span>
-                      </div>
-                      {row.rescheduleStatus === 'pending' && (
-                        <div className="mt-1 inline-flex items-center gap-1 bg-amber-500 text-white font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-2xs">
-                          <span>Reschedule Requested</span>
+                  </tr>
+                ) : (
+                  paginatedBookings.map((row) => (
+                    <tr key={row.dbId} className="hover:bg-[var(--mist)]/40 transition-colors">
+                      {/* Col 1: Customer & Ref */}
+                      <td className="py-4 px-4">
+                        <div className="font-bold text-[#1090F8] text-[11px] tracking-wide">
+                          #{row.id}
                         </div>
-                      )}
-                    </td>
-
-                    {/* Col 4: Cost */}
-                    <td className="py-3.5 px-3">
-                      <div className="font-extrabold text-[var(--ink)]">{row.total}</div>
-                      <div className="text-[10px] text-emerald-600 font-semibold">
-                        Deposit: {row.deposit}
-                      </div>
-                      <div className="text-[10px] text-[#24252c]/50">
-                        Rem: {row.remaining}
-                      </div>
-                    </td>
-
-                    {/* Col 5: Assigned Crew */}
-                    <td className="py-3.5 px-3">
-                      {row.assignedCrew.length > 0 ? (
-                        <div className="flex flex-wrap gap-1 max-w-[140px]">
-                          {row.assignedCrew.slice(0, 2).map((c: any, i: number) => (
-                            <span
-                              key={i}
-                              className="inline-block bg-indigo-50 text-indigo-700 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-indigo-200 truncate max-w-[120px]"
-                            >
-                              {c.name || c.full_name}
-                            </span>
-                          ))}
-                          {row.assignedCrew.length > 2 && (
-                            <span className="text-[9px] font-bold text-indigo-600 self-center">
-                              +{row.assignedCrew.length - 2}
-                            </span>
-                          )}
+                        <div className="font-extrabold text-[var(--ink)] text-xs mt-0.5">
+                          {row.customer}
                         </div>
-                      ) : (
-                        <span className="text-[10px] text-[#24252c]/40 italic">Unassigned</span>
-                      )}
-                    </td>
+                        <div className="text-[10px] text-[#24252c]/50 truncate max-w-[150px]">
+                          {row.email}
+                        </div>
+                      </td>
 
-                    {/* Col 6: Payment Status */}
-                    <td className="py-3.5 px-3">
-                      <div className="flex flex-col gap-1 items-start">
-                        <select
-                          value={row.rawStatus}
-                          onChange={(e) => handleStatusChange(row.dbId, e.target.value)}
-                          className={`text-[10px] font-extrabold px-2.5 py-1 rounded-full uppercase tracking-wider border cursor-pointer focus:outline-none transition-all ${
-                            row.rawStatus === 'completed'
-                              ? 'bg-[#1090F8]/10 text-[#1090F8] border-[#1090F8]/30'
-                              : row.rawStatus === 'paid' || row.rawStatus === 'confirmed'
-                              ? 'bg-blue-500/10 text-blue-600 border border-blue-500/20'
-                              : row.rawStatus === 'cancelled'
-                              ? 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
-                              : 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
-                          }`}
-                        >
-                          <option value="pending" className="bg-white text-[var(--ink)]">Pending</option>
-                          <option value="paid" className="bg-white text-[var(--ink)]">Confirmed</option>
-                          <option value="completed" className="bg-white text-[var(--ink)]">Completed</option>
-                          <option value="cancelled" className="bg-white text-[var(--ink)]">Cancelled</option>
-                        </select>
-                        {row.isFullyPaid ? (
-                          <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500 text-white uppercase tracking-wider">
-                            ✓ Fully Paid (100%)
+                      {/* Col 2: Package & Venue */}
+                      <td className="py-4 px-4">
+                        <div className="font-bold text-[var(--ink)]">{row.package}</div>
+                        <div className="text-[10px] text-[#24252c]/60 truncate max-w-[170px] mt-0.5">
+                          {row.venue}
+                        </div>
+                      </td>
+
+                      {/* Col 3: Event Date & Reschedule Alert */}
+                      <td className="py-4 px-4 whitespace-nowrap">
+                        <div className="font-semibold text-[var(--ink)] flex items-center gap-1.5">
+                          <IconCalendar className="w-3.5 h-3.5 text-[#1090F8] shrink-0" />
+                          <span>{row.date}</span>
+                        </div>
+                        {row.rescheduleStatus === 'pending' && (
+                          <div className="mt-1.5 inline-flex items-center gap-1 bg-amber-500 text-white font-extrabold text-[9px] px-2.5 py-0.5 rounded-full shadow-2xs">
+                            <span>Reschedule Requested</span>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Col 4: Cost Breakdown */}
+                      <td className="py-4 px-4 whitespace-nowrap">
+                        <div className="font-extrabold text-[var(--ink)] text-xs">{row.total}</div>
+                        <div className="text-[11px] text-[#24252c]/60 mt-0.5 space-y-0.5">
+                          <div className="text-emerald-700 font-medium">50% Dep: {row.deposit}</div>
+                          <div>Bal: {row.isFullyPaid ? '₱0' : row.remaining}</div>
+                        </div>
+                      </td>
+
+                      {/* Col 5: Assigned Crew */}
+                      <td className="py-4 px-4">
+                        {row.assignedCrew.length > 0 ? (
+                          <span className="text-xs text-[var(--ink)] font-medium">
+                            {row.assignedCrew.map((c: any) => c.name || c.full_name).join(', ')}
                           </span>
                         ) : (
-                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20 uppercase tracking-wider">
-                            50% Deposit Secured
+                          <span className="text-xs text-[#24252c]/40 italic">Unassigned</span>
+                        )}
+                      </td>
+
+                      {/* Col 6: Booking Status */}
+                      <td className="py-4 px-4 whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border shadow-2xs ${
+                            row.status === 'Completed'
+                              ? 'bg-[#1090F8]/10 text-[#1090F8] border-[#1090F8]/25'
+                              : row.status === 'Confirmed'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : row.status === 'Cancelled'
+                              ? 'bg-rose-50 text-rose-700 border-rose-200'
+                              : 'bg-amber-50 text-amber-700 border-amber-200'
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                          {row.status}
+                        </span>
+                      </td>
+
+                      {/* Col 7: Payment Status (Only 50% deposit or fully paid) */}
+                      <td className="py-4 px-4 whitespace-nowrap">
+                        {row.isFullyPaid ? (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold shadow-2xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            Fully Paid
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold shadow-2xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            50% Deposit
                           </span>
                         )}
-                      </div>
-                    </td>
+                      </td>
 
-                    {/* Col 7: Actions (Hidden on Cancelled Tab) */}
-                    {statusFilter !== 'Cancelled' && (
-                      <td className="py-3.5 px-3 text-right whitespace-nowrap">
+                      {/* Col 8: Actions */}
+                      <td className="py-4 px-4 text-right whitespace-nowrap">
                         <div className="inline-flex items-center justify-end gap-1.5 whitespace-nowrap flex-wrap">
+                          {/* Refund Button for Cancelled Bookings */}
+                          {row.rawStatus === 'cancelled' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRefundModalBooking(row);
+                              }}
+                              className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 text-[11px] font-bold px-3 py-1 rounded-full transition-colors shadow-2xs cursor-pointer shrink-0"
+                            >
+                              Refund
+                            </button>
+                          )}
+
                           {/* Pending Reschedule Review Button */}
                           {row.rescheduleStatus === 'pending' && (
                             <button
@@ -878,47 +870,98 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                           )}
                         </div>
                       </td>
-                    )}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {/* Mobile Row Cards View */}
         <div className="block sm:hidden space-y-3">
           {paginatedBookings.map((row) => (
             <div key={row.dbId} className="bg-white rounded-2xl p-4 border border-[#24252c]/10 shadow-sm space-y-3">
-              <div className="flex justify-between items-start">
+              {/* Header: Ref, Customer, Booking Status & Payment Status */}
+              <div className="flex justify-between items-start gap-2">
                 <div>
-                  <span className="font-mono font-bold text-xs text-[#1090F8]">#{row.id}</span>
+                  <span className="font-bold text-xs text-[#1090F8]">#{row.id}</span>
                   <h4 className="font-extrabold text-sm text-[var(--ink)] mt-0.5">{row.customer}</h4>
                   <div className="text-[11px] text-[#24252c]/60">{row.package}</div>
                 </div>
-                <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 uppercase">
-                  {row.status}
-                </span>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span
+                    className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                      row.status === 'Completed'
+                        ? 'bg-[#1090F8]/10 text-[#1090F8] border-[#1090F8]/25'
+                        : row.status === 'Confirmed'
+                        ? 'bg-blue-50 text-blue-700 border-blue-200'
+                        : row.status === 'Cancelled'
+                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                    }`}
+                  >
+                    {row.status}
+                  </span>
+                  {row.isFullyPaid ? (
+                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      Fully Paid
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                      50% Deposit
+                    </span>
+                  )}
+                </div>
               </div>
 
-              <div className="text-xs space-y-1 py-2 border-y border-[#24252c]/[0.06] text-[#24252c]/70">
+              {/* Schedule, Venue, Crew & Cost */}
+              <div className="text-xs space-y-1.5 py-2 border-y border-[#24252c]/[0.06] text-[#24252c]/70">
                 <div className="flex justify-between">
-                  <span>Event Schedule:</span>
+                  <span className="text-[#24252c]/50">Event Date:</span>
                   <span className="font-semibold text-[var(--ink)]">{row.date}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#24252c]/50">Venue:</span>
+                  <span className="font-medium text-[var(--ink)] truncate max-w-[200px]">{row.venue}</span>
                 </div>
                 {row.rescheduleStatus === 'pending' && (
                   <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px]">
                     <strong>Reschedule Requested:</strong> {formatDisplayDate(row.rescheduleRequestedDate)}
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <span>Total / Deposit:</span>
-                  <span className="font-bold text-[var(--ink)]">{row.total} (Dep: {row.deposit})</span>
+                <div className="flex justify-between items-start">
+                  <span className="text-[#24252c]/50">Crew:</span>
+                  <span className="text-[var(--ink)] font-medium text-right max-w-[200px]">
+                    {row.assignedCrew.length > 0
+                      ? row.assignedCrew.map((c: any) => c.name || c.full_name).join(', ')
+                      : <span className="italic text-[#24252c]/40">Unassigned</span>}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center pt-1 border-t border-[#24252c]/[0.05]">
+                  <span className="text-[#24252c]/50">Cost:</span>
+                  <div className="text-right">
+                    <span className="font-bold text-[var(--ink)]">{row.total}</span>
+                    <span className="text-[11px] text-[#24252c]/60 ml-2">
+                      (50% Dep: {row.deposit}, Bal: {row.isFullyPaid ? '₱0' : row.remaining})
+                    </span>
+                  </div>
                 </div>
               </div>
 
               {/* Mobile Actions */}
               <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                {row.rawStatus === 'cancelled' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRefundModalBooking(row);
+                    }}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 text-xs font-bold px-3.5 py-1.5 rounded-full transition-colors cursor-pointer shadow-2xs"
+                  >
+                    Refund
+                  </button>
+                )}
                 {row.rescheduleStatus === 'pending' && (
                   <button
                     type="button"
@@ -931,32 +974,47 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                     Review Reschedule
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRescheduleBooking(row);
-                    const targetDate = row.rawDate ? row.rawDate.slice(0, 10) : '';
-                    setNewRescheduleDate(targetDate);
-                    setAdminRescheduleNotes(getDirectRescheduleEmailTemplate(row, targetDate));
-                  }}
-                  className="bg-[var(--mist)] text-[var(--ink)] text-xs font-semibold px-3 py-1.5 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer"
-                >
-                  Reschedule
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleOpenSettleModal(row)}
-                  className="bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-emerald-700 transition-colors shadow-sm cursor-pointer"
-                >
-                  {row.isFullyPaid ? 'Payment Info' : 'Settle'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAssignCrewBooking(row)}
-                  className="bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-indigo-100 transition-colors cursor-pointer"
-                >
-                  Crew
-                </button>
+                {row.rawStatus !== 'cancelled' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRescheduleBooking(row);
+                      const targetDate = row.rawDate ? row.rawDate.slice(0, 10) : '';
+                      setNewRescheduleDate(targetDate);
+                      setAdminRescheduleNotes(getDirectRescheduleEmailTemplate(row, targetDate));
+                    }}
+                    className="bg-[var(--mist)] text-[var(--ink)] text-xs font-semibold px-3 py-1.5 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer"
+                  >
+                    Reschedule
+                  </button>
+                )}
+                {row.rawStatus !== 'cancelled' && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenSettleModal(row)}
+                    className="bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-emerald-700 transition-colors shadow-sm cursor-pointer"
+                  >
+                    {row.isFullyPaid ? 'Payment Info' : 'Settle'}
+                  </button>
+                )}
+                {row.rawStatus !== 'cancelled' && (
+                  <button
+                    type="button"
+                    onClick={() => setAssignCrewBooking(row)}
+                    className="bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-indigo-100 transition-colors cursor-pointer"
+                  >
+                    Crew
+                  </button>
+                )}
+                {row.status.includes('Pending') && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedReceipt(row)}
+                    className="bg-[#1090F8] text-white text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm cursor-pointer"
+                  >
+                    Approve
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -1526,6 +1584,83 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         booking={assignCrewBooking}
         onAssigned={() => loadBookings()}
       />
+
+      {/* ── Modal: Processing Refund (Informational Preview Only) ── */}
+      <ModalOverlay isOpen={Boolean(refundModalBooking)} onClose={() => setRefundModalBooking(null)}>
+        {refundModalBooking && (
+          <div className="bg-white rounded-[2.5rem] p-6 sm:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative animate-blur-in text-xs">
+            <button
+              type="button"
+              onClick={() => setRefundModalBooking(null)}
+              className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors cursor-pointer"
+            >
+              <IconX className="w-5 h-5" />
+            </button>
+
+            {/* Header */}
+            <div className="flex items-center gap-2.5 mb-3">
+              <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center font-bold border border-slate-200 shrink-0 text-base">
+                ₱
+              </div>
+              <div>
+                <span className="text-[10px] font-bold text-[#1090F8] uppercase tracking-wider block">
+                  Disbursement Preview
+                </span>
+                <h3 className="text-lg font-extrabold text-[var(--ink)] -mt-0.5">
+                  Process Customer Refund
+                </h3>
+              </div>
+            </div>
+
+            <p className="text-xs text-[#24252c]/60 mb-4 leading-relaxed">
+              Disbursement details for cancelled booking <strong className="text-[var(--ink)]">#{refundModalBooking.id}</strong>.
+            </p>
+
+            {/* Summary Details Card */}
+            <div className="bg-[var(--mist)]/70 rounded-2xl p-4 border border-[#24252c]/[0.06] space-y-2 mb-4">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-[#24252c]/50">Booking Reference:</span>
+                <span className="font-bold text-[#1090F8]">#{refundModalBooking.id}</span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-[#24252c]/50">Customer:</span>
+                <span className="font-bold text-[var(--ink)]">{refundModalBooking.customer}</span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-[#24252c]/50">Package:</span>
+                <span className="font-medium text-[var(--ink)]">{refundModalBooking.package}</span>
+              </div>
+              <div className="flex justify-between items-center text-xs pt-1.5 border-t border-[#24252c]/[0.06]">
+                <span className="text-[#24252c]/50">Payment Channel:</span>
+                <span className="font-semibold text-[var(--ink)]">{refundModalBooking.paymentChannel}</span>
+              </div>
+              <div className="flex justify-between items-center text-xs pt-1.5 border-t border-[#24252c]/[0.06]">
+                <span className="font-bold text-[var(--ink)]">Refundable Amount:</span>
+                <span className="font-black text-[var(--ink)] text-sm">
+                  {refundModalBooking.isFullyPaid ? refundModalBooking.total : refundModalBooking.deposit}
+                </span>
+              </div>
+            </div>
+
+            {/* Info Notice */}
+            <div className="p-3.5 rounded-2xl bg-blue-50/80 border border-blue-200/80 text-blue-900 text-[11px] flex items-start gap-2.5 mb-4">
+              <span className="w-2 h-2 rounded-full bg-[#1090F8] shrink-0 mt-1" />
+              <span>Refund gateway integration is in preview mode. No disbursement transactions or status changes are executed.</span>
+            </div>
+
+            {/* Dismiss Button */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => setRefundModalBooking(null)}
+                className="w-full py-3 rounded-full bg-[var(--ink)] hover:bg-[var(--ink-soft)] text-white font-semibold text-xs transition-colors cursor-pointer shadow-sm"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
+        )}
+      </ModalOverlay>
     </div>
   );
 }

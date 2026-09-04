@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconTicket, IconCalendar, IconPin, IconX } from '../../components/shared/icons';
+import { IconTicket, IconCalendar, IconPin, IconX, IconPrinter } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { BookingRescheduleCalendar } from '../../components/shared/BookingRescheduleCalendar';
@@ -55,8 +55,8 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
             const packageInclusions = Array.isArray(pkgMatch?.inclusions) && pkgMatch.inclusions.length > 0
               ? pkgMatch.inclusions
               : Array.isArray(pkgMatch?.items)
-              ? pkgMatch.items
-              : [];
+                ? pkgMatch.items
+                : [];
 
             return {
               dbId: b.id,
@@ -190,7 +190,7 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
   };
 
   return (
-    <section className="pt-36 pb-24 px-6 min-h-screen bg-[var(--mist)]">
+    <section className={`pt-36 pb-24 px-6 min-h-screen bg-[var(--mist)] ${downloadModalItem ? 'print:hidden' : ''}`}>
       <div className="max-w-5xl mx-auto space-y-6">
         <div>
           <MonoBadge icon={IconTicket}>Booking Records</MonoBadge>
@@ -248,9 +248,9 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
             {historyItems.map((item) => (
               <div
                 key={item.id}
-                className="bg-white rounded-2xl p-5 border border-[#24252c]/[0.08] shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                className="bg-white rounded-2xl p-5 border border-[#24252c]/[0.08] shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4"
               >
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono font-bold text-xs text-[#1090F8]">{item.id}</span>
                     <span
@@ -269,7 +269,7 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                       </span>
                     ) : (
                       <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20 uppercase tracking-wider">
-                        50% Deposit Secured (Remaining Bal: {item.remaining})
+                        50% Reservation Secured (Remaining Bal: {item.remaining})
                       </span>
                     )}
                     <span className="text-[10px] font-semibold text-[#24252c]/50">
@@ -296,39 +296,40 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                   )}
                 </div>
 
-                <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+                <div className="flex flex-col gap-2 w-full sm:w-56 shrink-0 pt-3 sm:pt-0 sm:pl-4 sm:border-l border-[#24252c]/[0.08]">
                   {!item.isCompleted && item.status !== 'Cancelled' && (
                     <button
                       onClick={() => {
                         localStorage.setItem('binhi_selected_active_booking_id', item.dbId);
                         go('booking-tracker');
                       }}
-                      className="bg-[#1090F8] text-white text-xs font-semibold px-4 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm cursor-pointer inline-flex items-center gap-1.5"
+                      className="w-full bg-[#1090F8] text-white text-xs font-bold px-4 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm cursor-pointer inline-flex items-center justify-center gap-1.5"
                     >
                       <span>Track Live Setup</span>
-                      <span>→</span>
+                      <span className="font-bold">→</span>
                     </button>
                   )}
                   {!item.isCompleted && item.status !== 'Cancelled' && (
                     <button
                       type="button"
                       onClick={() => handleOpenRescheduleModal(item)}
-                      className="bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/15 text-xs font-semibold px-4 py-2.5 rounded-full hover:bg-[var(--ink)] hover:text-white transition-colors shadow-2xs cursor-pointer flex items-center gap-1.5"
+                      className="w-full bg-amber-500/10 hover:bg-amber-500 hover:text-white text-amber-800 border border-amber-500/25 text-xs font-bold px-4 py-2 rounded-full transition-all shadow-2xs cursor-pointer inline-flex items-center justify-center gap-1.5 group"
                     >
-                      <IconCalendar className="w-3.5 h-3.5 text-[#1090F8]" />
+                      <IconCalendar className="w-3.5 h-3.5 text-amber-600 group-hover:text-white transition-colors" />
                       <span>{item.rescheduleStatus === 'pending' ? 'Update Reschedule' : 'Reschedule'}</span>
                     </button>
                   )}
                   <button
                     onClick={() => setDownloadModalItem(item)}
-                    className="bg-white text-[var(--ink)] border border-[#24252c]/10 text-xs font-semibold px-4 py-2.5 rounded-full hover:bg-[var(--mist)] transition-colors shadow-sm cursor-pointer"
+                    className="w-full bg-white text-[var(--ink)] border border-[#24252c]/15 text-xs font-semibold px-4 py-2 rounded-full hover:bg-[var(--mist)] transition-colors shadow-2xs cursor-pointer inline-flex items-center justify-center gap-1.5"
                   >
-                    View &amp; Print Official Receipt
+                    <IconPrinter className="w-3.5 h-3.5 text-[#1090F8]" />
+                    <span>View &amp; Print Official Receipt</span>
                   </button>
                   {item.isCompleted && (
                     <button
                       onClick={() => go('review-submit')}
-                      className="bg-[var(--ink)] text-white text-xs font-semibold px-4 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
+                      className="w-full bg-[var(--ink)] text-white text-xs font-semibold px-4 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-sm cursor-pointer inline-flex items-center justify-center"
                     >
                       Leave Review
                     </button>
@@ -340,9 +341,13 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
         )}
 
         {/* ── Official Receipt Modal ── */}
-        <ModalOverlay isOpen={!!downloadModalItem} onClose={() => setDownloadModalItem(null)}>
+        <ModalOverlay
+          isOpen={!!downloadModalItem}
+          onClose={() => setDownloadModalItem(null)}
+          className="printable-receipt-modal"
+        >
           {downloadModalItem && (
-            <div className="bg-white rounded-[2.5rem] max-w-lg w-full max-h-[85vh] shadow-2xl border border-[#24252c]/10 relative p-1.5 sm:p-2.5 overflow-hidden flex flex-col">
+            <div className="printable-receipt-card bg-white rounded-[2.5rem] max-w-lg w-full max-h-[85vh] shadow-2xl border border-[#24252c]/10 relative p-1.5 sm:p-2.5 overflow-hidden flex flex-col print:max-w-none print:w-full print:max-h-none print:shadow-none print:border print:border-gray-300 print:rounded-2xl print:p-6 print:m-0 print:overflow-visible">
               <button
                 type="button"
                 onClick={() => setDownloadModalItem(null)}
@@ -351,65 +356,70 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                 <IconX className="w-5 h-5" />
               </button>
 
-              <div className="flex-1 overflow-y-auto p-5 sm:p-7 space-y-4 modal-scroll pr-4 sm:pr-6">
-                <div className="border-b border-[#24252c]/10 pb-4 mb-2 text-center">
-                  <div className="w-10 h-10 rounded-full bg-[var(--ink)] text-white font-black text-xs flex items-center justify-center mx-auto mb-2">
+              <div className="printable-receipt-content flex-1 overflow-y-auto p-5 sm:p-7 space-y-4 modal-scroll pr-4 sm:pr-6 print:overflow-visible print:max-h-none print:p-0 print:space-y-4">
+                <div className="border-b border-[#24252c]/10 pb-4 mb-2 text-center print:pb-3 print:mb-2 print:border-gray-300">
+                  <div className="w-10 h-10 rounded-full bg-[var(--ink)] text-white font-black text-xs flex items-center justify-center mx-auto mb-2 print:bg-black print:text-white">
                     BC
                   </div>
-                  <h3 className="text-xl font-extrabold text-[var(--ink)]">BINHI Concept</h3>
-                  <p className="text-[11px] text-[#24252c]/60">Official Event Booking Invoice & Slip</p>
-                  <span className="font-mono text-xs font-bold text-[#1090F8] mt-1 inline-block">
+                  <h3 className="text-xl font-extrabold text-[var(--ink)] print:text-black">BINHI Concept</h3>
+                  <p className="text-[11px] text-[#24252c]/60 print:text-gray-600">Official Event Booking Invoice &amp; Slip</p>
+                  <span className="font-mono text-xs font-bold text-[#1090F8] mt-1 inline-block print:text-black">
                     Ref #{downloadModalItem.id}
                   </span>
+                  {downloadModalItem.createdAt && (
+                    <div className="text-[10px] text-[#24252c]/50 print:text-gray-500 mt-0.5">
+                      Booking Date: {downloadModalItem.createdAt}
+                    </div>
+                  )}
                 </div>
 
                 {/* Customer & Event Details */}
-                <div className="grid grid-cols-2 gap-3 py-4 text-xs border-b border-[#24252c]/10">
+                <div className="grid grid-cols-2 gap-3 py-4 text-xs border-b border-[#24252c]/10 print:border-gray-200 print:py-3">
                   <div>
-                    <span className="text-[10px] text-[#24252c]/50 uppercase font-semibold block mb-0.5">Customer Details</span>
-                    <div className="font-bold text-[var(--ink)]">{downloadModalItem.customerName}</div>
-                    <div className="text-[11px] text-[#24252c]/60">{downloadModalItem.customerEmail}</div>
+                    <span className="text-[10px] text-[#24252c]/50 print:text-gray-500 uppercase font-semibold block mb-0.5">Customer Details</span>
+                    <div className="font-bold text-[var(--ink)] print:text-black">{downloadModalItem.customerName}</div>
+                    <div className="text-[11px] text-[#24252c]/60 print:text-gray-700">{downloadModalItem.customerEmail}</div>
                     {downloadModalItem.customerPhone && (
-                      <div className="text-[11px] text-[#24252c]/60">{downloadModalItem.customerPhone}</div>
+                      <div className="text-[11px] text-[#24252c]/60 print:text-gray-700">{downloadModalItem.customerPhone}</div>
                     )}
                   </div>
                   <div>
-                    <span className="text-[10px] text-[#24252c]/50 uppercase font-semibold block mb-0.5">Event Details</span>
-                    <div className="font-bold text-[var(--ink)]">{downloadModalItem.date}</div>
-                    <div className="text-[11px] text-[#24252c]/60">{downloadModalItem.venue}</div>
+                    <span className="text-[10px] text-[#24252c]/50 print:text-gray-500 uppercase font-semibold block mb-0.5">Event Details</span>
+                    <div className="font-bold text-[var(--ink)] print:text-black">{downloadModalItem.date}</div>
+                    <div className="text-[11px] text-[#24252c]/60 print:text-gray-700">{downloadModalItem.venue}</div>
                     {downloadModalItem.eventType && (
-                      <div className="text-[11px] text-[#1090F8] font-semibold">{downloadModalItem.eventType}</div>
+                      <div className="text-[11px] text-[#1090F8] font-semibold print:text-gray-800">{downloadModalItem.eventType}</div>
                     )}
                   </div>
                 </div>
 
                 {/* Line Item Financial Breakdown */}
-                <div className="py-4 space-y-3 text-xs border-b border-[#24252c]/10">
-                  <span className="text-[10px] text-[#24252c]/50 uppercase font-semibold block mb-1">
-                    Itemized Package & Production Inclusions
+                <div className="py-4 space-y-3 text-xs border-b border-[#24252c]/10 print:border-gray-200 print:py-3">
+                  <span className="text-[10px] text-[#24252c]/50 print:text-gray-500 uppercase font-semibold block mb-1">
+                    Itemized Package &amp; Production Inclusions
                   </span>
 
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-2">
-                        <span className="text-[var(--ink)] font-bold">{downloadModalItem.package}</span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[var(--mist)] text-[#1090F8] border border-[#1090F8]/20">
+                        <span className="text-[var(--ink)] font-bold print:text-black">{downloadModalItem.package}</span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[var(--mist)] text-[#1090F8] border border-[#1090F8]/20 print:border-gray-300 print:text-gray-700 print:bg-transparent">
                           {downloadModalItem.packageTag}
                         </span>
                       </div>
-                      <span className="font-mono font-bold text-[var(--ink)]">
+                      <span className="font-mono font-bold text-[var(--ink)] print:text-black">
                         ₱{downloadModalItem.packagePrice.toLocaleString()}
                       </span>
                     </div>
 
                     {/* Detailed Package Equipment & Inclusions List */}
                     {downloadModalItem.packageInclusions && downloadModalItem.packageInclusions.length > 0 && (
-                      <div className="pl-3 py-1.5 border-l-2 border-[#1090F8]/40 bg-[var(--mist)]/50 rounded-r-xl space-y-1 text-[11px] text-[#24252c]/75">
-                        <div className="text-[10px] font-bold uppercase text-[#24252c]/50">Included Technical Gear & Services:</div>
+                      <div className="pl-3 py-1.5 border-l-2 border-[#1090F8]/40 bg-[var(--mist)]/50 rounded-r-xl space-y-1 text-[11px] text-[#24252c]/75 print:border-l-2 print:border-gray-400 print:bg-transparent print:rounded-none">
+                        <div className="text-[10px] font-bold uppercase text-[#24252c]/50 print:text-gray-600">Included Technical Gear &amp; Services:</div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-2 gap-y-0.5">
                           {downloadModalItem.packageInclusions.map((inc: string, i: number) => (
-                            <div key={i} className="flex items-start gap-1">
-                              <span className="text-[#1090F8] font-bold shrink-0">•</span>
+                            <div key={i} className="flex items-start gap-1 text-[11px] print:text-gray-800">
+                              <span className="text-[#1090F8] print:text-gray-600 font-bold shrink-0">•</span>
                               <span>{inc}</span>
                             </div>
                           ))}
@@ -420,14 +430,14 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
 
                   {/* Selected Add-ons */}
                   {downloadModalItem.selectedAddons && downloadModalItem.selectedAddons.length > 0 && (
-                    <div className="space-y-1 pl-3 border-l-2 border-amber-500/40 py-1 bg-amber-50/30 rounded-r-xl">
-                      <span className="text-[10px] font-bold text-amber-800 uppercase">Selected Equipment Add-ons:</span>
+                    <div className="space-y-1 pl-3 border-l-2 border-amber-500/40 py-1 bg-amber-50/30 rounded-r-xl print:border-gray-400 print:bg-transparent print:rounded-none">
+                      <span className="text-[10px] font-bold text-amber-800 print:text-gray-700 uppercase">Selected Equipment Add-ons:</span>
                       {downloadModalItem.selectedAddons.map((addon: string, idx: number) => (
-                        <div key={idx} className="flex justify-between text-[11px] text-[#24252c]/80">
+                        <div key={idx} className="flex justify-between text-[11px] text-[#24252c]/80 print:text-gray-800">
                           <span>• {addon}</span>
                         </div>
                       ))}
-                      <div className="flex justify-between text-[11px] font-bold text-[var(--ink)] pt-1 border-t border-amber-200">
+                      <div className="flex justify-between text-[11px] font-bold text-[var(--ink)] print:text-black pt-1 border-t border-amber-200 print:border-gray-300">
                         <span>Add-ons Subtotal:</span>
                         <span className="font-mono">₱{downloadModalItem.addonsCost.toLocaleString()}</span>
                       </div>
@@ -435,62 +445,68 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                   )}
 
                   {/* Transport Charge */}
-                  <div className="flex justify-between items-center text-[11px] text-[#24252c]/70 pt-1">
-                    <span>Crew Transport & Logistics Charge</span>
-                    <span className="font-mono font-bold text-[#1090F8]">₱{downloadModalItem.transportFee.toLocaleString()}</span>
+                  <div className="flex justify-between items-center text-[11px] text-[#24252c]/70 print:text-gray-700 pt-1">
+                    <span>Crew Transport &amp; Logistics Charge</span>
+                    <span className="font-mono font-bold text-[#1090F8] print:text-black">₱{downloadModalItem.transportFee.toLocaleString()}</span>
                   </div>
 
-                  <div className="flex justify-between items-center text-sm font-extrabold text-[var(--ink)] pt-2 border-t border-[#24252c]/10">
+                  <div className="flex justify-between items-center text-sm font-extrabold text-[var(--ink)] print:text-black pt-2 border-t border-[#24252c]/10 print:border-gray-300">
                     <span>Total Invoice Amount</span>
                     <span className="font-mono text-base">{downloadModalItem.total}</span>
                   </div>
                 </div>
 
                 {/* Payment Settlement History */}
-                <div className="py-4 space-y-2.5 text-xs">
-                  <span className="text-[10px] text-[#24252c]/50 uppercase font-semibold block">
-                    Payment Audit & Settlement Status
+                <div className="py-4 space-y-2.5 text-xs print:py-3">
+                  <span className="text-[10px] text-[#24252c]/50 print:text-gray-500 uppercase font-semibold block">
+                    Payment Audit &amp; Settlement Status
                   </span>
 
-                  <div className="p-3 rounded-xl bg-[var(--mist)] space-y-1">
+                  <div className="p-3 rounded-xl bg-[var(--mist)] space-y-1 print:bg-transparent print:border print:border-gray-200 print:rounded-lg">
                     <div className="flex justify-between">
-                      <span className="text-[#24252c]/60">50% Reservation Deposit Paid:</span>
-                      <span className="font-mono font-bold text-emerald-600">{downloadModalItem.deposit}</span>
+                      <span className="text-[#24252c]/60 print:text-gray-700">50% Reservation Deposit Paid:</span>
+                      <span className="font-mono font-bold text-emerald-600 print:text-black">{downloadModalItem.deposit}</span>
                     </div>
-                    <div className="flex justify-between text-[11px] text-[#24252c]/50">
+                    <div className="flex justify-between text-[11px] text-[#24252c]/50 print:text-gray-600">
                       <span>Deposit Payment Method:</span>
                       <span>{downloadModalItem.paymentChannel}</span>
                     </div>
                   </div>
 
                   {downloadModalItem.isFullyPaid ? (
-                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 space-y-1">
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 space-y-1 print:bg-transparent print:border-gray-200 print:text-black print:rounded-lg">
                       <div className="flex justify-between font-bold">
                         <span>✓ Balance Fully Settled (100% Paid)</span>
                         <span className="font-mono">₱0 Rem.</span>
                       </div>
                       {downloadModalItem.balancePaidAt && (
-                        <div className="flex justify-between text-[11px]">
-                          <span>Full Payment Date & Time:</span>
+                        <div className="flex justify-between text-[11px] print:text-gray-700">
+                          <span>Full Payment Date &amp; Time:</span>
                           <span className="font-semibold">{downloadModalItem.balancePaidAt}</span>
                         </div>
                       )}
                       {downloadModalItem.balancePaymentMethod && (
-                        <div className="flex justify-between text-[11px]">
+                        <div className="flex justify-between text-[11px] print:text-gray-700">
                           <span>Balance Payment Method:</span>
                           <span className="font-semibold">{downloadModalItem.balancePaymentMethod}</span>
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 flex justify-between items-center">
+                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 flex justify-between items-center print:bg-transparent print:border-gray-200 print:text-black print:rounded-lg">
                       <div>
                         <span className="font-bold block">Remaining Balance Due:</span>
-                        <span className="text-[10px] text-amber-700">To be settled on or before event date</span>
+                        <span className="text-[10px] text-amber-700 print:text-gray-600">To be settled on or before event date</span>
                       </div>
-                      <span className="font-mono font-extrabold text-base text-amber-800">{downloadModalItem.remaining}</span>
+                      <span className="font-mono font-extrabold text-base text-amber-800 print:text-black">{downloadModalItem.remaining}</span>
                     </div>
                   )}
+                </div>
+
+                {/* Receipt Print Disclaimer */}
+                <div className="hidden print:block pt-3 border-t border-gray-200 text-center text-[10px] text-gray-500">
+                  <p>Thank you for choosing BINHI Concept for your production &amp; events setup.</p>
+                  <p className="mt-0.5">For inquiries or coordination, reach out to us at support@binhiconcept.ph</p>
                 </div>
 
                 {/* Actions (Print & Close) */}
@@ -498,9 +514,10 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                   <button
                     type="button"
                     onClick={() => window.print()}
-                    className="flex-1 bg-[var(--ink)] text-white text-xs font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-md cursor-pointer text-center"
+                    className="flex-1 bg-[var(--ink)] text-white text-xs font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-md cursor-pointer text-center flex items-center justify-center gap-2"
                   >
-                    Print / Save PDF Receipt
+                    <IconPrinter className="w-4 h-4 text-[#1090F8]" />
+                    <span>Print / Save PDF Receipt</span>
                   </button>
                   <button
                     type="button"
@@ -556,8 +573,8 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                     </span>
                   </div>
 
-                  {/* Interactive Availability Calendar */}
-                  <div className="p-4 rounded-2xl bg-white border border-[#24252c]/15 shadow-2xs">
+                  {/* Interactive Availability Calendar without stroke */}
+                  <div className="p-4 rounded-2xl bg-[var(--mist)]">
                     <BookingRescheduleCalendar
                       originalDate={rescheduleTargetItem.rawDate}
                       selectedDate={newRescheduleDate}
@@ -598,8 +615,7 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                           type="button"
                           onClick={() =>
                             setRescheduleReason(
-                              `Due to unexpected venue availability adjustments, we would like to request moving our event schedule${
-                                newRescheduleDate ? ` to ${formatDisplayDate(newRescheduleDate)}` : ''
+                              `Due to unexpected venue availability adjustments, we would like to request moving our event schedule${newRescheduleDate ? ` to ${formatDisplayDate(newRescheduleDate)}` : ''
                               }.`
                             )
                           }
@@ -611,8 +627,7 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                           type="button"
                           onClick={() =>
                             setRescheduleReason(
-                              `Due to program timeline adjustments and client coordination, we kindly request rescheduling our booking${
-                                newRescheduleDate ? ` to ${formatDisplayDate(newRescheduleDate)}` : ''
+                              `Due to program timeline adjustments and client coordination, we kindly request rescheduling our booking${newRescheduleDate ? ` to ${formatDisplayDate(newRescheduleDate)}` : ''
                               }.`
                             )
                           }
@@ -624,8 +639,7 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                           type="button"
                           onClick={() =>
                             setRescheduleReason(
-                              `Due to weather forecasts and outdoor logistical considerations, we request shifting our event reservation${
-                                newRescheduleDate ? ` to ${formatDisplayDate(newRescheduleDate)}` : ''
+                              `Due to weather forecasts and outdoor logistical considerations, we request shifting our event reservation${newRescheduleDate ? ` to ${formatDisplayDate(newRescheduleDate)}` : ''
                               }.`
                             )
                           }
@@ -637,8 +651,7 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                           type="button"
                           onClick={() =>
                             setRescheduleReason(
-                              `Due to an unavoidable schedule conflict, we would like to request moving our event date${
-                                newRescheduleDate ? ` to ${formatDisplayDate(newRescheduleDate)}` : ''
+                              `Due to an unavoidable schedule conflict, we would like to request moving our event date${newRescheduleDate ? ` to ${formatDisplayDate(newRescheduleDate)}` : ''
                               }.`
                             )
                           }

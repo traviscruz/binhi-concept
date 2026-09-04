@@ -186,26 +186,26 @@ export function BookingRescheduleCalendar({
           const isToday = formattedIso === todayIso;
 
           let cellClass =
-            'bg-[var(--mist)] text-[#24252c]/80 font-semibold cursor-pointer hover:bg-[#1090F8]/15 hover:text-[#1090F8] border border-transparent';
+            'bg-white text-[#24252c]/80 font-semibold cursor-pointer hover:bg-[#1090F8]/15 hover:text-[#1090F8] shadow-2xs';
           let badgeText = '';
 
           if (isSelected) {
             cellClass =
-              'bg-[#1090F8] text-white font-black shadow-md border-2 border-[#1090F8] ring-2 ring-[#1090F8]/30 scale-[1.03] z-10';
+              'bg-[#1090F8] text-white font-black shadow-md scale-[1.03] z-10';
             badgeText = 'New Date';
           } else if (isOriginal) {
             cellClass =
-              'bg-blue-50/70 text-blue-800 border-2 border-dashed border-[#1090F8]/60 font-bold cursor-not-allowed opacity-80 select-none';
+              'bg-blue-100 text-blue-900 font-bold cursor-not-allowed opacity-80 select-none';
             badgeText = 'Original';
           } else if (isPast) {
-            cellClass = 'bg-gray-100/70 text-gray-300 font-medium cursor-not-allowed opacity-40 select-none';
+            cellClass = 'bg-black/[0.03] text-gray-300 font-medium cursor-not-allowed opacity-40 select-none';
             badgeText = 'Past';
           } else if (isBooked) {
             cellClass = 'bg-[var(--ink)] text-white font-semibold shadow-2xs cursor-not-allowed opacity-85 select-none';
             badgeText = 'Booked';
           } else if (isToday) {
             cellClass =
-              'border border-[#1090F8]/50 text-[#1090F8] font-bold bg-[#1090F8]/10 cursor-pointer hover:bg-[#1090F8]/25';
+              'text-[#1090F8] font-bold bg-[#1090F8]/15 cursor-pointer hover:bg-[#1090F8]/25 shadow-2xs';
             badgeText = 'Today';
           }
 
@@ -247,19 +247,19 @@ export function BookingRescheduleCalendar({
         ))}
       </div>
 
-      {/* Legend Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5 pt-3 border-t border-[#24252c]/[0.06] text-[10px] text-[#24252c]/70">
+      {/* Legend Bar without stroke */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 pt-3 text-[10px] text-[#24252c]/70">
         <span className="flex items-center gap-1.5 font-semibold text-[var(--ink)]">
           <span className="w-2.5 h-2.5 rounded-md bg-[var(--ink)]" /> Booked / Unavailable
         </span>
         <span className="flex items-center gap-1.5 font-semibold text-blue-900">
-          <span className="w-2.5 h-2.5 rounded-md border-2 border-dashed border-[#1090F8]/60 bg-blue-50/70" /> Original Date (Disabled)
+          <span className="w-2.5 h-2.5 rounded-md bg-blue-100" /> Original Date
         </span>
         <span className="flex items-center gap-1.5 font-bold text-[#1090F8]">
           <span className="w-2.5 h-2.5 rounded-md bg-[#1090F8]" /> Selected New Date
         </span>
         <span className="flex items-center gap-1.5 text-[#24252c]/60">
-          <span className="w-2.5 h-2.5 rounded-md bg-[var(--mist)] border border-black/10" /> Open Date
+          <span className="w-2.5 h-2.5 rounded-md bg-white shadow-2xs" /> Open Date
         </span>
       </div>
     </div>

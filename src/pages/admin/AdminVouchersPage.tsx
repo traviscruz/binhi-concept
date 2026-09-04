@@ -477,203 +477,309 @@ export default function AdminVouchersPage({ go: _go }: { go: (p: Page) => void }
             </button>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-[#24252c]/[0.06] bg-[var(--mist)]/40 text-[10px] uppercase font-bold tracking-wider text-[#24252c]/50">
-                  <th className="py-3.5 px-5">Voucher Code</th>
-                  <th className="py-3.5 px-4">Discount</th>
-                  <th className="py-3.5 px-4">Usage Cap (1 Use = 1 Checkout)</th>
-                  <th className="py-3.5 px-4">Validity Window</th>
-                  <th className="py-3.5 px-4">Marquee Banner</th>
-                  <th className="py-3.5 px-4">Status</th>
-                  <th className="py-3.5 px-5 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#24252c]/[0.05]">
-                {filteredVouchers.map((v) => {
-                  const statusInfo = getVoucherStatusInfo(v);
-                  const isUnlimited = v.max_uses === null || v.max_uses === undefined || v.max_uses === 0;
-                  const usagePercent = isUnlimited
-                    ? 0
-                    : Math.min(100, Math.round((v.used_count / (v.max_uses || 1)) * 100));
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-[#24252c]/[0.06] bg-[var(--mist)]/40 text-[10px] uppercase font-bold tracking-wider text-[#24252c]/50">
+                    <th className="py-4 px-6">Voucher Code</th>
+                    <th className="py-4 px-6">Discount</th>
+                    <th className="py-4 px-6">Usage Cap (1 Use = 1 Checkout)</th>
+                    <th className="py-4 px-6">Validity Window</th>
+                    <th className="py-4 px-6">Marquee Banner</th>
+                    <th className="py-4 px-6">Status</th>
+                    <th className="py-4 px-6 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#24252c]/[0.05]">
+                  {filteredVouchers.map((v) => {
+                    const statusInfo = getVoucherStatusInfo(v);
+                    const isUnlimited = v.max_uses === null || v.max_uses === undefined || v.max_uses === 0;
+                    const usagePercent = isUnlimited
+                      ? 0
+                      : Math.min(100, Math.round((v.used_count / (v.max_uses || 1)) * 100));
 
-                  const isCopied = copiedCode === v.code;
+                    const isCopied = copiedCode === v.code;
 
-                  return (
-                    <tr key={v.id} className="hover:bg-[var(--mist)]/30 transition-colors">
-                      {/* Code */}
-                      <td className="py-4 px-5">
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleCopy(v.code)}
-                            title="Click to copy code"
-                            className="px-2.5 py-1 rounded-lg bg-[var(--mist)] hover:bg-[#1090F8]/10 text-[var(--ink)] hover:text-[#1090F8] font-mono font-black text-xs tracking-wider border border-[#24252c]/10 transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                    return (
+                      <tr key={v.id} className="hover:bg-[var(--mist)]/30 transition-colors">
+                        {/* Code */}
+                        <td className="py-4 px-6">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(v.code)}
+                              title="Click to copy code"
+                              className="px-3 py-1 rounded-full bg-[var(--mist)] hover:bg-[#1090F8]/10 text-[var(--ink)] hover:text-[#1090F8] font-bold text-xs tracking-wider border border-[#24252c]/10 transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                            >
+                              <span>{v.code}</span>
+                              {isCopied ? (
+                                <IconCheck className="w-3 h-3 text-emerald-600 stroke-[3]" />
+                              ) : (
+                                <span className="text-[10px] text-[#24252c]/40">⧉</span>
+                              )}
+                            </button>
+                          </div>
+                          {v.description && (
+                            <p className="text-[11px] text-[#24252c]/60 mt-1 max-w-xs truncate">
+                              {v.description}
+                            </p>
+                          )}
+                        </td>
+
+                        {/* Discount */}
+                        <td className="py-4 px-6 font-bold">
+                          <span className="text-sm font-black text-[var(--ink)] block">
+                            {v.discount_type === 'percentage'
+                              ? `${v.discount_value}% OFF`
+                              : `₱${v.discount_value.toLocaleString()} OFF`}
+                          </span>
+                          <span className="text-[10px] text-[#24252c]/50 font-normal">
+                            {v.discount_type === 'percentage' ? 'Percentage Deduction' : 'Fixed Amount Deduction'}
+                          </span>
+                        </td>
+
+                        {/* Usage Limit & Progress */}
+                        <td className="py-4 px-6">
+                          {isUnlimited ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                              Unlimited ({v.used_count} redemptions)
+                            </span>
+                          ) : (
+                            <div className="space-y-1 w-36">
+                              <div className="flex justify-between text-[11px] font-semibold text-[#24252c]/75">
+                                <span>{v.used_count} / {v.max_uses} used</span>
+                                <span className="text-[10px] font-semibold">{usagePercent}%</span>
+                              </div>
+                              <div className="w-full h-1.5 rounded-full bg-black/10 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all ${
+                                    v.used_count >= (v.max_uses || 0)
+                                      ? 'bg-rose-500'
+                                      : usagePercent > 75
+                                      ? 'bg-amber-500'
+                                      : 'bg-[#1090F8]'
+                                  }`}
+                                  style={{ width: `${usagePercent}%` }}
+                                />
+                              </div>
+                              {v.used_count >= (v.max_uses || 0) && (
+                                <span className="text-[9px] font-bold text-rose-600 block">
+                                  Limit reached (1 checkout = 1 usage)
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Validity Period */}
+                        <td className="py-4 px-6">
+                          {v.is_all_time ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                              <span>●</span> All Time (No Expiry)
+                            </span>
+                          ) : (
+                            <div className="space-y-0.5">
+                              <span className="font-semibold text-[var(--ink)] block">
+                                {v.start_date
+                                  ? new Date(v.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                  : 'Start'}{' '}
+                                –{' '}
+                                {v.end_date
+                                  ? new Date(v.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                  : 'End'}
+                              </span>
+                              <span className="text-[10px] text-[#24252c]/50 block">
+                                {statusInfo.label === 'Expired'
+                                  ? 'Expired period'
+                                  : statusInfo.label === 'Upcoming'
+                                  ? 'Scheduled future release'
+                                  : 'Active validity window'}
+                              </span>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Marquee Banner Toggle */}
+                        <td className="py-4 px-6">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleBanner(v.id, v.show_in_banner)}
+                              aria-label="Toggle scrolling marquee banner display"
+                              className={`w-11 h-6 rounded-full p-0.5 transition-colors cursor-pointer relative flex items-center ${
+                                v.show_in_banner ? 'bg-[#1090F8]' : 'bg-[#24252c]/20'
+                              }`}
+                            >
+                              <div
+                                className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${
+                                  v.show_in_banner ? 'translate-x-5' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                            <span
+                              className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                                v.show_in_banner
+                                  ? 'bg-[#1090F8]/10 text-[#1090F8]'
+                                  : 'bg-[var(--mist)] text-[#24252c]/50'
+                              }`}
+                            >
+                              {v.show_in_banner ? 'In Banner' : 'Hidden'}
+                            </span>
+                          </div>
+                          <span className="text-[9px] text-[#24252c]/40 block mt-0.5">
+                            {v.show_in_banner ? 'Displayed in top header marquee' : 'Usable via code input only'}
+                          </span>
+                        </td>
+
+                        {/* Status */}
+                        <td className="py-4 px-6">
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${statusInfo.color}`}
                           >
-                            <span>{v.code}</span>
-                            {isCopied ? (
-                              <IconCheck className="w-3 h-3 text-emerald-600 stroke-[3]" />
-                            ) : (
-                              <span className="text-[10px] text-[#24252c]/40">⧉</span>
-                            )}
-                          </button>
-                        </div>
-                        {v.description && (
-                          <p className="text-[11px] text-[#24252c]/60 mt-1 max-w-xs truncate">
-                            {v.description}
-                          </p>
-                        )}
-                      </td>
+                            <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                            {statusInfo.label}
+                          </span>
+                        </td>
 
-                      {/* Discount */}
-                      <td className="py-4 px-4 font-bold">
-                        <span className="text-sm font-black text-[var(--ink)] block">
+                        {/* Actions */}
+                        <td className="py-4 px-6 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStatus(v)}
+                              title={v.status === 'active' ? 'Deactivate Voucher' : 'Activate Voucher'}
+                              className="px-3 py-1 rounded-full text-[#24252c]/70 hover:text-[var(--ink)] bg-[var(--mist)] hover:bg-gray-200 transition-colors cursor-pointer text-xs font-semibold"
+                            >
+                              {v.status === 'active' ? 'Disable' : 'Enable'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(v)}
+                              className="px-3 py-1 rounded-full text-[#1090F8] bg-[#1090F8]/10 hover:bg-[#1090F8]/20 transition-colors cursor-pointer text-xs font-semibold"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeletingId(v.id)}
+                              className="p-1.5 rounded-full text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                            >
+                              <IconTrash className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View - Bookings Manager Style */}
+            <div className="block sm:hidden divide-y divide-[#24252c]/[0.06] p-2">
+              {filteredVouchers.map((v) => {
+                const statusInfo = getVoucherStatusInfo(v);
+                const isUnlimited = v.max_uses === null || v.max_uses === undefined || v.max_uses === 0;
+
+                return (
+                  <div key={v.id} className="p-4 space-y-3 rounded-2xl hover:bg-[var(--mist)]/40 transition-colors">
+                    {/* Top: Code + Status Pill */}
+                    <div className="flex justify-between items-start gap-2">
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(v.code)}
+                          className="px-3 py-1 rounded-full bg-[var(--mist)] text-[var(--ink)] font-bold text-xs border border-[#24252c]/10 inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <span>{v.code}</span>
+                          {copiedCode === v.code ? (
+                            <IconCheck className="w-3 h-3 text-emerald-600 stroke-[3]" />
+                          ) : (
+                            <span className="text-[10px] text-[#24252c]/40">⧉</span>
+                          )}
+                        </button>
+                        <h4 className="font-black text-base text-[var(--ink)] mt-1.5">
                           {v.discount_type === 'percentage'
                             ? `${v.discount_value}% OFF`
                             : `₱${v.discount_value.toLocaleString()} OFF`}
-                        </span>
-                        <span className="text-[10px] text-[#24252c]/50 font-normal">
-                          {v.discount_type === 'percentage' ? 'Percentage Deduction' : 'Fixed Amount Deduction'}
-                        </span>
-                      </td>
-
-                      {/* Usage Limit & Progress */}
-                      <td className="py-4 px-4">
-                        {isUnlimited ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                            Unlimited ({v.used_count} redemptions)
-                          </span>
-                        ) : (
-                          <div className="space-y-1 w-36">
-                            <div className="flex justify-between text-[11px] font-semibold text-[#24252c]/75">
-                              <span>{v.used_count} / {v.max_uses} used</span>
-                              <span className="text-[10px] font-mono">{usagePercent}%</span>
-                            </div>
-                            <div className="w-full h-1.5 rounded-full bg-black/10 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all ${
-                                  v.used_count >= (v.max_uses || 0)
-                                    ? 'bg-rose-500'
-                                    : usagePercent > 75
-                                    ? 'bg-amber-500'
-                                    : 'bg-[#1090F8]'
-                                }`}
-                                style={{ width: `${usagePercent}%` }}
-                              />
-                            </div>
-                            {v.used_count >= (v.max_uses || 0) && (
-                              <span className="text-[9px] font-bold text-rose-600 block">
-                                Limit reached (1 checkout = 1 usage)
-                              </span>
-                            )}
-                          </div>
+                        </h4>
+                        {v.description && (
+                          <div className="text-[11px] text-[#24252c]/65 mt-0.5">{v.description}</div>
                         )}
-                      </td>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border shrink-0 ${statusInfo.color}`}>
+                        {statusInfo.label}
+                      </span>
+                    </div>
 
-                      {/* Validity Period */}
-                      <td className="py-4 px-4">
-                        {v.is_all_time ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                            <span>●</span> All Time (No Expiry)
-                          </span>
-                        ) : (
-                          <div className="space-y-0.5">
-                            <span className="font-semibold text-[var(--ink)] block">
-                              {v.start_date
-                                ? new Date(v.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                                : 'Start'}{' '}
-                              –{' '}
-                              {v.end_date
-                                ? new Date(v.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                                : 'End'}
-                            </span>
-                            <span className="text-[10px] text-[#24252c]/50 block">
-                              {statusInfo.label === 'Expired'
-                                ? 'Expired period'
-                                : statusInfo.label === 'Upcoming'
-                                ? 'Scheduled future release'
-                                : 'Active validity window'}
-                            </span>
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Marquee Banner Toggle */}
-                      <td className="py-4 px-4">
+                    {/* Metadata Box */}
+                    <div className="text-xs space-y-1.5 py-2.5 px-3 rounded-xl bg-[var(--mist)]/70 text-[#24252c]/75">
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-[#24252c]/50 text-[10px] uppercase font-semibold">Usage Cap</span>
+                        <span className="font-semibold text-[var(--ink)]">
+                          {isUnlimited ? 'Unlimited' : `${v.used_count} / ${v.max_uses} used`}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-[#24252c]/50 text-[10px] uppercase font-semibold">Validity</span>
+                        <span className="font-semibold text-[var(--ink)]">
+                          {v.is_all_time ? 'All Time (No Expiry)' : `${v.start_date || 'Start'} – ${v.end_date || 'End'}`}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-[11px] pt-1 border-t border-[#24252c]/[0.06]">
+                        <span className="text-[#24252c]/50 text-[10px] uppercase font-semibold">Header Marquee</span>
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
                             onClick={() => handleToggleBanner(v.id, v.show_in_banner)}
-                            aria-label="Toggle scrolling marquee banner display"
-                            className={`w-11 h-6 rounded-full p-0.5 transition-colors cursor-pointer relative flex items-center ${
+                            className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer relative flex items-center ${
                               v.show_in_banner ? 'bg-[#1090F8]' : 'bg-[#24252c]/20'
                             }`}
                           >
                             <div
-                              className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${
-                                v.show_in_banner ? 'translate-x-5' : 'translate-x-0'
+                              className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+                                v.show_in_banner ? 'translate-x-4' : 'translate-x-0'
                               }`}
                             />
                           </button>
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                              v.show_in_banner
-                                ? 'bg-[#1090F8]/10 text-[#1090F8]'
-                                : 'bg-[var(--mist)] text-[#24252c]/50'
-                            }`}
-                          >
-                            {v.show_in_banner ? 'In Banner' : 'Hidden'}
+                          <span className="text-[10px] font-bold text-[#1090F8]">
+                            {v.show_in_banner ? 'Visible' : 'Hidden'}
                           </span>
                         </div>
-                        <span className="text-[9px] text-[#24252c]/40 block mt-0.5">
-                          {v.show_in_banner ? 'Displayed in top header marquee' : 'Usable via code input only'}
-                        </span>
-                      </td>
+                      </div>
+                    </div>
 
-                      {/* Status */}
-                      <td className="py-4 px-4">
-                        <span
-                          className={`inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${statusInfo.color}`}
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                          {statusInfo.label}
-                        </span>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="py-4 px-5 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleStatus(v)}
-                            title={v.status === 'active' ? 'Deactivate Voucher' : 'Activate Voucher'}
-                            className="p-1.5 rounded-lg text-[#24252c]/60 hover:text-[var(--ink)] hover:bg-black/5 transition-colors cursor-pointer text-xs font-semibold"
-                          >
-                            {v.status === 'active' ? 'Disable' : 'Enable'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(v)}
-                            className="p-1.5 rounded-lg text-[#1090F8] hover:bg-[#1090F8]/10 transition-colors cursor-pointer text-xs font-semibold"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeletingId(v.id)}
-                            className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                          >
-                            <IconTrash className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(v)}
+                        className="flex-1 py-1.5 rounded-full bg-[#1090F8]/10 text-[#1090F8] text-xs font-semibold text-center cursor-pointer hover:bg-[#1090F8]/20 transition-colors"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleStatus(v)}
+                        className="flex-1 py-1.5 rounded-full bg-[var(--mist)] text-[var(--ink)] text-xs font-semibold text-center cursor-pointer hover:bg-gray-200 transition-colors"
+                      >
+                        {v.status === 'active' ? 'Disable' : 'Enable'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeletingId(v.id)}
+                        className="p-1.5 rounded-full text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer shrink-0"
+                      >
+                        <IconTrash className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
 
@@ -696,8 +802,8 @@ export default function AdminVouchersPage({ go: _go }: { go: (p: Page) => void }
                 <IconTicket className="w-4 h-4" />
               </div>
               <div>
-                <span className="text-[10px] font-mono font-bold text-[#1090F8] uppercase tracking-wider block">
-                  {editingVoucher ? `Editing ID: ${editingVoucher.code}` : 'New Voucher Promotion'}
+                <span className="text-[10px] font-bold text-[#1090F8] uppercase tracking-wider block">
+                  {editingVoucher ? `Editing: ${editingVoucher.code}` : 'New Voucher Promotion'}
                 </span>
                 <h2 className="text-xl sm:text-2xl font-extrabold text-[var(--ink)] -mt-0.5">
                   {editingVoucher ? 'Edit Voucher Code' : 'Create New Voucher'}
@@ -730,7 +836,7 @@ export default function AdminVouchersPage({ go: _go }: { go: (p: Page) => void }
                     placeholder="e.g. BINHI2026"
                     value={code}
                     onChange={(e) => setCode(e.target.value.toUpperCase())}
-                    className={`${inputClass} font-mono font-bold tracking-wider`}
+                    className={`${inputClass} font-bold tracking-wider uppercase`}
                   />
                 </div>
 

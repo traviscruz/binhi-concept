@@ -837,6 +837,12 @@ export default function CheckoutPage({
 
       const result = await createPaymongoCheckoutSession(params);
       if (result && result.checkout_url) {
+        if (result.checkout_id) {
+          try {
+            localStorage.setItem('binhi_paymongo_cs_id', result.checkout_id);
+            localStorage.setItem(`binhi_cs_${refNum}`, result.checkout_id);
+          } catch { }
+        }
         window.location.href = result.checkout_url;
       } else {
         throw new Error('No checkout_url returned from Edge Function create-checkout-session.');
@@ -1494,9 +1500,9 @@ export default function CheckoutPage({
         {step === 3 && (
           <div className="bg-white rounded-[2rem] p-6 md:p-8 border border-[#24252c]/[0.08] shadow-sm animate-blur-in space-y-6">
             <div>
-              <h2 className="text-2xl font-extrabold text-[var(--ink)]">Step 3: Select Payment Option</h2>
-              <p className="text-xs text-[#24252c]/60 mt-1">
-                Choose to pay a 50% reservation downpayment to secure your date, or pay 100% in full today for a completely hassle-free event.
+              <h2 className="text-xl sm:text-2xl font-black text-[var(--ink)] tracking-tight">Select Payment Plan</h2>
+              <p className="text-xs text-[#24252c]/60 mt-0.5">
+                Choose how you would like to settle your booking reservation.
               </p>
             </div>
 
@@ -1506,156 +1512,112 @@ export default function CheckoutPage({
               </div>
             )}
 
-            {/* Payment Plan Option Cards */}
-            <div className="grid sm:grid-cols-2 gap-4">
+            {/* Payment Plan Cards */}
+            <div className="grid sm:grid-cols-2 gap-3.5">
               {/* Option 1: 50% Downpayment */}
               <div
                 onClick={() => setPaymentType('deposit')}
-                className={`relative p-5 rounded-3xl border-2 transition-all duration-200 cursor-pointer text-left flex flex-col justify-between ${
+                className={`p-4 sm:p-5 rounded-2xl border-2 transition-all duration-200 cursor-pointer flex flex-col justify-between ${
                   paymentType === 'deposit'
-                    ? 'border-[#1090F8] bg-[#1090F8]/[0.03] shadow-md ring-1 ring-[#1090F8]/20'
-                    : 'border-[#24252c]/[0.08] bg-white hover:border-[#24252c]/20 hover:bg-[var(--mist)]/40'
+                    ? 'border-[#1090F8] bg-[#1090F8]/[0.04] shadow-sm ring-1 ring-[#1090F8]/30'
+                    : 'border-[#24252c]/10 bg-white hover:border-[#24252c]/25 hover:bg-[var(--mist)]/50'
                 }`}
               >
                 <div>
-                  <div className="flex items-center justify-between gap-2 mb-2.5">
-                    <span className="text-[10px] font-extrabold tracking-wider uppercase px-2.5 py-0.5 rounded-full bg-[#1090F8]/10 text-[#1090F8] border border-[#1090F8]/20">
-                      Standard Reservation
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-[#1090F8]/10 text-[#1090F8]">
+                      50% Deposit
                     </span>
                     <div
-                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
-                        paymentType === 'deposit'
-                          ? 'border-[#1090F8] bg-[#1090F8] text-white'
-                          : 'border-[#24252c]/20 bg-white'
+                      className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
+                        paymentType === 'deposit' ? 'border-[#1090F8] bg-[#1090F8] text-white' : 'border-[#24252c]/30 bg-white'
                       }`}
                     >
-                      {paymentType === 'deposit' && <IconCheck className="w-3 h-3 stroke-[3]" />}
+                      {paymentType === 'deposit' && <IconCheck className="w-2.5 h-2.5 stroke-[3]" />}
                     </div>
                   </div>
-
-                  <h3 className="text-base font-extrabold text-[var(--ink)]">50% Downpayment</h3>
-                  <p className="text-[11px] text-[#24252c]/60 mt-0.5 leading-relaxed">
-                    Lock in your event date now. Settle the remaining 50% balance on the day of your event.
-                  </p>
+                  <div className="text-xl font-black text-[var(--ink)]">
+                    ₱{depositRequired.toLocaleString()}
+                  </div>
+                  <span className="text-[11px] text-[#24252c]/50 font-medium">Payable today</span>
                 </div>
 
-                <div className="mt-4 pt-3.5 border-t border-[#24252c]/[0.06] space-y-1">
-                  <div className="flex justify-between items-baseline">
-                    <span className="text-[10px] uppercase font-bold text-[#24252c]/40">Due Today</span>
-                    <span className="text-lg font-black text-[#1090F8]">₱{depositRequired.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between text-[11px] text-[#24252c]/60">
-                    <span>Balance on Event Day</span>
-                    <span className="font-semibold text-[var(--ink)]">₱{balanceDueOnEventDate.toLocaleString()}</span>
-                  </div>
+                <div className="mt-4 pt-3 border-t border-[#24252c]/[0.06] flex items-center justify-between text-[11px]">
+                  <span className="text-[#24252c]/60">Event Day Balance:</span>
+                  <span className="font-bold text-[var(--ink)]">₱{balanceDueOnEventDate.toLocaleString()}</span>
                 </div>
               </div>
 
-              {/* Option 2: Full Payment (100%) */}
+              {/* Option 2: 100% Full Payment */}
               <div
                 onClick={() => setPaymentType('full')}
-                className={`relative p-5 rounded-3xl border-2 transition-all duration-200 cursor-pointer text-left flex flex-col justify-between ${
+                className={`p-4 sm:p-5 rounded-2xl border-2 transition-all duration-200 cursor-pointer flex flex-col justify-between ${
                   paymentType === 'full'
-                    ? 'border-[#1090F8] bg-[#1090F8]/[0.03] shadow-md ring-1 ring-[#1090F8]/20'
-                    : 'border-[#24252c]/[0.08] bg-white hover:border-[#24252c]/20 hover:bg-[var(--mist)]/40'
+                    ? 'border-[#1090F8] bg-[#1090F8]/[0.04] shadow-sm ring-1 ring-[#1090F8]/30'
+                    : 'border-[#24252c]/10 bg-white hover:border-[#24252c]/25 hover:bg-[var(--mist)]/50'
                 }`}
               >
                 <div>
-                  <div className="flex items-center justify-between gap-2 mb-2.5">
-                    <span className="text-[10px] font-extrabold tracking-wider uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                      Recommended · Hassle-Free
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600">
+                      Full Payment
                     </span>
                     <div
-                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
-                        paymentType === 'full'
-                          ? 'border-[#1090F8] bg-[#1090F8] text-white'
-                          : 'border-[#24252c]/20 bg-white'
+                      className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
+                        paymentType === 'full' ? 'border-[#1090F8] bg-[#1090F8] text-white' : 'border-[#24252c]/30 bg-white'
                       }`}
                     >
-                      {paymentType === 'full' && <IconCheck className="w-3 h-3 stroke-[3]" />}
+                      {paymentType === 'full' && <IconCheck className="w-2.5 h-2.5 stroke-[3]" />}
                     </div>
                   </div>
-
-                  <h3 className="text-base font-extrabold text-[var(--ink)]">Full Payment (100%)</h3>
-                  <p className="text-[11px] text-[#24252c]/60 mt-0.5 leading-relaxed">
-                    Settle everything today. Zero balance, no cash handling or payments required on event day.
-                  </p>
+                  <div className="text-xl font-black text-[var(--ink)]">
+                    ₱{totalCost.toLocaleString()}
+                  </div>
+                  <span className="text-[11px] text-[#24252c]/50 font-medium">Payable today</span>
                 </div>
 
-                <div className="mt-4 pt-3.5 border-t border-[#24252c]/[0.06] space-y-1">
-                  <div className="flex justify-between items-baseline">
-                    <span className="text-[10px] uppercase font-bold text-[#24252c]/40">Due Today</span>
-                    <span className="text-lg font-black text-[#1090F8]">₱{totalCost.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between text-[11px] text-[#24252c]/60">
-                    <span>Balance on Event Day</span>
-                    <span className="font-bold text-emerald-600">₱0 (Fully Settled)</span>
-                  </div>
+                <div className="mt-4 pt-3 border-t border-[#24252c]/[0.06] flex items-center justify-between text-[11px]">
+                  <span className="text-[#24252c]/60">Event Day Balance:</span>
+                  <span className="font-bold text-emerald-600">₱0 (Fully Settled)</span>
                 </div>
               </div>
             </div>
 
-            {/* ── Collapsible Promo Code Box ── */}
-            <div className="rounded-2xl border border-[#24252c]/[0.08] bg-white overflow-hidden transition-all shadow-xs">
+            {/* ── Collapsible Promo Code Trigger ── */}
+            <div className="rounded-xl border border-[#24252c]/[0.08] bg-white overflow-hidden shadow-xs">
               <button
                 type="button"
                 onClick={() => setPromoOpen(!promoOpen)}
-                className="w-full px-5 py-3.5 flex items-center justify-between text-left hover:bg-[var(--mist)]/40 transition-colors cursor-pointer"
+                className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-[var(--mist)]/40 transition-colors cursor-pointer"
               >
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-full bg-[#1090F8]/10 text-[#1090F8] flex items-center justify-center shrink-0">
-                    <IconTicket className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-[var(--ink)] block">
-                      {appliedPromo ? (
-                        <span className="flex items-center gap-1.5 text-emerald-600">
-                          <IconCheck className="w-3.5 h-3.5" /> Promo Code Active: <strong>{appliedPromo.code}</strong>
-                        </span>
-                      ) : (
-                        'Have a promo code or voucher?'
-                      )}
-                    </span>
-                    <span className="text-[10px] text-[#24252c]/50">
-                      {appliedPromo
-                        ? `${appliedPromo.description} (-₱${discountAmount.toLocaleString()})`
-                        : 'Click to apply discount coupon or loyalty reward voucher'}
-                    </span>
-                  </div>
-                </div>
                 <div className="flex items-center gap-2">
-                  {appliedPromo && (
-                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                      -₱{discountAmount.toLocaleString()}
-                    </span>
-                  )}
-                  <span className="text-[#24252c]/40">
-                    {promoOpen ? <IconChevronUp className="w-4 h-4" /> : <IconChevronDown className="w-4 h-4" />}
+                  <IconTicket className="w-4 h-4 text-[#1090F8]" />
+                  <span className="text-xs font-semibold text-[var(--ink)]">
+                    {appliedPromo ? (
+                      <span className="text-emerald-600 font-bold">
+                        Voucher Applied: {appliedPromo.code} (-₱{discountAmount.toLocaleString()})
+                      </span>
+                    ) : (
+                      'Have a voucher code?'
+                    )}
                   </span>
                 </div>
+                <span className="text-[#24252c]/40 text-xs">
+                  {promoOpen ? <IconChevronUp className="w-3.5 h-3.5" /> : <IconChevronDown className="w-3.5 h-3.5" />}
+                </span>
               </button>
 
               {promoOpen && (
-                <div className="px-5 pb-5 pt-2 border-t border-[#24252c]/[0.06] bg-[var(--mist)]/20 space-y-3 animate-blur-in">
+                <div className="px-4 pb-4 pt-1 border-t border-[#24252c]/[0.06] bg-[var(--mist)]/30 space-y-2 animate-blur-in">
                   {appliedPromo ? (
-                    <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-xs">
-                          ✓
-                        </span>
-                        <div>
-                          <span className="font-extrabold text-emerald-800 uppercase tracking-wide">
-                            {appliedPromo.code}
-                          </span>
-                          <span className="text-emerald-700 ml-1.5 font-medium text-[11px]">
-                            — {appliedPromo.description} (-₱{discountAmount.toLocaleString()} discount applied)
-                          </span>
-                        </div>
-                      </div>
+                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs">
+                      <span className="text-emerald-800 font-bold">
+                        {appliedPromo.code} — {appliedPromo.description}
+                      </span>
                       <button
                         type="button"
                         onClick={handleRemovePromo}
-                        className="text-[11px] font-bold text-rose-600 hover:text-rose-800 hover:underline cursor-pointer ml-3 shrink-0"
+                        className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer ml-2"
                       >
                         Remove
                       </button>
@@ -1670,8 +1632,8 @@ export default function CheckoutPage({
                             setPromoInput(e.target.value.toUpperCase());
                             setPromoError('');
                           }}
-                          placeholder="e.g. BINHI2026 or BINHI3K"
-                          className="flex-1 rounded-full border border-[#24252c]/15 px-4 py-2.5 text-xs bg-white text-[var(--ink)] font-mono font-bold tracking-wider placeholder:font-sans placeholder:font-normal focus:outline-none focus:border-[#1090F8]"
+                          placeholder="Enter voucher code"
+                          className="flex-1 rounded-lg border border-[#24252c]/15 px-3 py-2 text-xs bg-white text-[var(--ink)] font-mono font-bold uppercase placeholder:font-sans placeholder:font-normal focus:outline-none focus:border-[#1090F8]"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
@@ -1682,14 +1644,13 @@ export default function CheckoutPage({
                         <button
                           type="button"
                           onClick={handleApplyPromo}
-                          className="bg-[var(--ink)] text-white text-xs font-semibold px-5 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer shadow-sm shrink-0"
+                          className="bg-[var(--ink)] text-white text-xs font-semibold px-4 py-2 rounded-lg hover:bg-[var(--ink-soft)] transition-colors cursor-pointer shrink-0"
                         >
-                          Apply Code
+                          Apply
                         </button>
                       </div>
-
                       {promoError && (
-                        <p className="text-[11px] font-semibold text-rose-600 mt-1.5 ml-2">
+                        <p className="text-[11px] font-medium text-rose-600 mt-1">
                           {promoError}
                         </p>
                       )}
@@ -1699,166 +1660,74 @@ export default function CheckoutPage({
               )}
             </div>
 
-            {/* ── Comprehensive Payment Schedule Breakdown ── */}
-            <div className="p-5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] space-y-3 text-xs">
-              <div className="flex items-center justify-between pb-2 border-b border-[#24252c]/[0.06]">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50">Selected Payment Plan</span>
-                <span className="font-bold text-[#1090F8]">
-                  {paymentType === 'full' ? 'Full Payment (100% Settled)' : '50% Downpayment (Reservation)'}
-                </span>
+            {/* ── Itemized Booking Breakdown ── */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-[var(--mist)]/70 border border-[#24252c]/[0.06] space-y-2.5 text-xs">
+              <div className="flex justify-between text-[#24252c]/70">
+                <span>{pkg.name} Base Rate</span>
+                <span className="font-semibold text-[var(--ink)]">₱{(Number(pkg.rawPrice) || 33500).toLocaleString()}</span>
               </div>
 
-              {/* Line items subtotal */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-[#24252c]/60">
-                  <span>Package Base Rate ({pkg.name})</span>
-                  <span className="font-bold text-[var(--ink)]">₱{(Number(pkg.rawPrice) || 33500).toLocaleString()}</span>
+              {addonsCost > 0 && (
+                <div className="flex justify-between text-[#24252c]/70">
+                  <span>Add-ons ({selectedAddons.length})</span>
+                  <span className="font-semibold text-[var(--ink)]">+₱{addonsCost.toLocaleString()}</span>
                 </div>
+              )}
 
-                {addonsCost > 0 && (
-                  <div className="flex justify-between text-[#24252c]/60">
-                    <span>Equipment Add-ons ({selectedAddons.length})</span>
-                    <span className="font-bold text-[var(--ink)]">+₱{addonsCost.toLocaleString()}</span>
-                  </div>
+              <div className="flex justify-between text-[#24252c]/70">
+                <span>Transport ({locationRegionName})</span>
+                {isFreeTransportApplied ? (
+                  <span className="font-bold text-emerald-600">₱0.00 (Waived)</span>
+                ) : (
+                  <span className="font-semibold text-[var(--ink)]">+₱{transportFee.toLocaleString()}</span>
                 )}
+              </div>
 
-                <div className="flex justify-between text-[#24252c]/60">
-                  <span>Transport & Logistics Fee ({locationRegionName})</span>
-                  {isFreeTransportApplied ? (
-                    <span className="font-extrabold text-emerald-600 flex items-center gap-1.5">
-                      <span className="line-through text-gray-400 font-normal text-[11px]">
-                        ₱{standardRegionalFee.toLocaleString()}
-                      </span>
-                      <span>₱0.00 (Waived &lt; {logistics.freeRadiusKm}km)</span>
-                    </span>
-                  ) : (
-                    <span className="font-bold text-[#1090F8]">+₱{transportFee.toLocaleString()}</span>
-                  )}
+              {discountAmount > 0 && (
+                <div className="flex justify-between text-emerald-600 font-semibold">
+                  <span>Promo Discount ({appliedPromo?.code})</span>
+                  <span>-₱{discountAmount.toLocaleString()}</span>
                 </div>
+              )}
 
-                {discountAmount > 0 && (
-                  <div className="flex justify-between text-emerald-600 font-bold">
-                    <span className="flex items-center gap-1">
-                      <IconTicket className="w-3.5 h-3.5" />
-                      Promo Discount ({appliedPromo?.code})
-                    </span>
-                    <span>-₱{discountAmount.toLocaleString()}</span>
-                  </div>
-                )}
-
-                <div className="flex justify-between text-[#24252c]/80 pt-1 border-t border-[#24252c]/[0.05]">
-                  <span className="font-semibold">Total Event Booking Cost</span>
+              {/* Total & Due Today summary rows */}
+              <div className="pt-2.5 border-t border-[#24252c]/10 space-y-1.5">
+                <div className="flex justify-between text-xs text-[#24252c]/60">
+                  <span>Total Event Cost</span>
                   <span className="font-bold text-[var(--ink)]">₱{totalCost.toLocaleString()}</span>
                 </div>
-              </div>
 
-              {/* ── Clear Breakdown: Deposit Due Today (50%) vs Balance Due on Event Date (50%) ── */}
-              <div className="pt-2 border-t border-[#24252c]/[0.08] space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#24252c]/50">
-                    50 / 50 Payment Breakdown
-                  </span>
-                  <span className="text-[11px] font-bold text-[#24252c]/60">
-                    Total: ₱{totalCost.toLocaleString()}
-                  </span>
+                <div className="flex justify-between items-baseline pt-1">
+                  <span className="text-sm font-extrabold text-[var(--ink)]">Amount Due Today</span>
+                  <span className="text-xl sm:text-2xl font-black text-[#1090F8]">₱{amountDueToday.toLocaleString()}</span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {/* Deposit Due Today (50%) */}
-                  <div className="p-3.5 rounded-xl bg-white border border-[#1090F8]/25 shadow-xs space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#1090F8] flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-[#1090F8]" />
-                        Deposit Due Today (50%)
-                      </span>
-                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-[#1090F8]/10 text-[#1090F8]">
-                        Immediate
-                      </span>
-                    </div>
-                    <div className="text-xl font-black text-[#1090F8]">
-                      ₱{depositRequired.toLocaleString()}
-                    </div>
-                    <p className="text-[10px] text-[#24252c]/60 leading-tight">
-                      Required reservation deposit to lock in schedule & crew.
-                    </p>
-                  </div>
-
-                  {/* Balance Due on Event Date (50%) */}
-                  <div className="p-3.5 rounded-xl bg-white border border-[#24252c]/[0.08] shadow-xs space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#24252c]/60 flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-[#24252c]/30" />
-                        Balance Due on Event Date (50%)
-                      </span>
-                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-[var(--mist)] text-[#24252c]/60">
-                        Event Day
-                      </span>
-                    </div>
-                    <div className={`text-xl font-black ${paymentType === 'full' ? 'text-emerald-600' : 'text-[var(--ink)]'}`}>
-                      {paymentType === 'full' ? '₱0 (Settled)' : `₱${balanceDueOnEventDate.toLocaleString()}`}
-                    </div>
-                    <p className="text-[10px] text-[#24252c]/60 leading-tight">
-                      {paymentType === 'full'
-                        ? '100% full payment selected — zero balance due on event date.'
-                        : `Payable on event day (${eventDate ? new Date(eventDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'event date'}).`}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Amount Payable Now banner */}
-              <div className="pt-2 border-t border-[#24252c]/[0.08] flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-extrabold uppercase tracking-wide text-[var(--ink)] block">
-                    Amount Payable Now via PayMongo
-                  </span>
-                  <span className="text-[10px] text-[#24252c]/50">
-                    {paymentType === 'full' ? 'Complete 100% full settlement' : '50% reservation downpayment'}
+                <div className="flex justify-between text-[11px] text-[#24252c]/50 pt-0.5">
+                  <span>Balance Due on Event Date</span>
+                  <span className={paymentType === 'full' ? 'font-bold text-emerald-600' : 'font-semibold text-[var(--ink)]'}>
+                    {paymentType === 'full' ? '₱0 (Fully Settled)' : `₱${remainingBalanceAmount.toLocaleString()}`}
                   </span>
                 </div>
-                <div className="text-right">
-                  <span className="text-2xl font-black text-[#1090F8]">₱{amountDueToday.toLocaleString()}</span>
-                </div>
               </div>
-
-              <div className="pt-2 border-t border-dashed border-[#24252c]/10 flex items-center justify-between text-[11px]">
-                <span className="text-[#24252c]/60">Balance Due on Event Date:</span>
-                <span className={paymentType === 'full' ? 'font-bold text-emerald-600' : 'font-bold text-[var(--ink)]'}>
-                  {paymentType === 'full' ? '₱0 (No balance due on event day)' : `₱${remainingBalanceAmount.toLocaleString()} (Due on Event Date)`}
-                </span>
-              </div>
-            </div>
-
-            {/* Security Guarantee & Channel Notice */}
-            <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-white border border-[#24252c]/[0.08] text-xs text-[#24252c]/60">
-              <div className="flex items-center gap-2">
-                <IconShield className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="text-[11px] font-medium">
-                  Secured by <strong>PayMongo</strong> — QR Ph, GCash, Maya, Cards
-                </span>
-              </div>
-              <span className="text-[10px] font-mono text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                256-Bit SSL
-              </span>
             </div>
 
             {/* Direct PayMongo Pay Button */}
-            <div className="space-y-3 pt-1">
+            <div className="space-y-2.5 pt-1">
               <button
                 type="button"
                 onClick={handlePaymongoPayment}
                 disabled={paymongoLoading}
-                className="w-full bg-[var(--ink)] text-white text-sm font-bold py-4 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-lg cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full bg-[var(--ink)] text-white text-sm font-bold py-3.5 sm:py-4 rounded-xl hover:bg-[var(--ink-soft)] transition-colors shadow-md cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {paymongoLoading ? (
                   <>
                     <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Redirecting to PayMongo Checkout...</span>
+                    <span>Redirecting to Checkout...</span>
                   </>
                 ) : (
                   <span className="flex items-center justify-center gap-2">
                     <span>
-                      Pay ₱{amountDueToday.toLocaleString()} ({paymentType === 'full' ? 'Full Payment' : '50% Downpayment'}) via PayMongo
+                      Pay ₱{amountDueToday.toLocaleString()} ({paymentType === 'full' ? 'Full Settlement' : '50% Downpayment'})
                     </span>
                     <IconArrow className="w-4 h-4" />
                   </span>
@@ -1868,9 +1737,9 @@ export default function CheckoutPage({
               <button
                 type="button"
                 onClick={() => setStep(2)}
-                className="w-full bg-[var(--mist)] text-[var(--ink)] text-sm font-semibold py-4 rounded-full border border-[#24252c]/10 cursor-pointer hover:bg-black/5 transition-colors flex items-center justify-center gap-2"
+                className="w-full bg-[var(--mist)] text-[var(--ink)] text-xs sm:text-sm font-semibold py-3 rounded-xl border border-[#24252c]/10 cursor-pointer hover:bg-black/5 transition-colors flex items-center justify-center gap-2"
               >
-                <span className="rotate-180 inline-flex"><IconArrow className="w-4 h-4" /></span>
+                <span className="rotate-180 inline-flex"><IconArrow className="w-3.5 h-3.5" /></span>
                 <span>Back to Logistics & Venue</span>
               </button>
             </div>

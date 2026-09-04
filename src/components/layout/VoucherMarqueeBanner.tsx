@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { fetchBannerVouchers, getBannerVouchersSync, type Voucher } from '../../utils/voucherService';
-import { IconTicket, IconCheck, IconX, IconChevronDown } from '../shared/icons';
+import { IconCheck, IconX } from '../shared/icons';
 
 export function VoucherMarqueeBanner({
   go: _go,
@@ -14,11 +14,9 @@ export function VoucherMarqueeBanner({
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   const loadVouchers = async () => {
-    // 1. Immediately read from synchronous local cache so it reflects in 0ms!
     const syncActive = getBannerVouchersSync();
     setVouchers(syncActive);
 
-    // 2. Fetch fresh data asynchronously from Supabase in background
     try {
       const active = await fetchBannerVouchers();
       setVouchers(active);
@@ -50,132 +48,138 @@ export function VoucherMarqueeBanner({
     e.stopPropagation();
     navigator.clipboard.writeText(code);
     setCopiedCode(code);
-    setTimeout(() => setCopiedCode(null), 2500);
+    setTimeout(() => setCopiedCode(null), 1800);
   };
 
   if (!vouchers || vouchers.length === 0) {
     return null;
   }
 
-  // If user closed the banner, show a slim banner tab with an arrow icon to reopen it
+  // Floating reopen capsule when dismissed
   if (!isOpen) {
     return (
-      <div className="fixed top-0 inset-x-0 z-[60] flex justify-center pointer-events-none">
+      <div className="fixed top-2 right-4 z-[60] print:hidden animate-fade-in">
         <button
           type="button"
           onClick={() => setIsOpen(true)}
-          title="Open promotional vouchers announcement banner"
-          className="pointer-events-auto bg-[#12131A] hover:bg-black text-white/90 hover:text-white px-3.5 py-1 rounded-b-xl border-x border-b border-white/15 shadow-md flex items-center gap-1.5 text-[10px] font-bold transition-all cursor-pointer group animate-blur-in hover:pt-1.5"
+          title="View active promotional offers"
+          className="bg-[#090a0f]/90 hover:bg-[#12141c] text-white/90 hover:text-white px-3 py-1.5 rounded-full border border-white/10 shadow-lg backdrop-blur-md flex items-center gap-2 text-[11px] font-medium transition-all duration-200 cursor-pointer group hover:border-[#1090F8]/40"
         >
-          <span className="w-1.5 h-1.5 rounded-full bg-[#1090F8] animate-ping" />
-          <IconTicket className="w-3 h-3 text-[#F59E0B]" />
-          <span>Promo Vouchers Available</span>
-          <span className="text-[#1090F8] group-hover:translate-y-0.5 transition-transform inline-flex items-center">
-            <IconChevronDown className="w-3 h-3" />
+          <span className="flex h-1.5 w-1.5 relative">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#1090F8] opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#1090F8]"></span>
           </span>
+          <span className="text-white/80 group-hover:text-white">Special Offers ({vouchers.length})</span>
         </button>
       </div>
     );
   }
 
-  // Repeat vouchers inside single track if few so it fills wide viewports
-  const singleTrackItems = vouchers.length < 5
-    ? [...vouchers, ...vouchers, ...vouchers]
-    : vouchers;
+  // Build a seamless duplicate array (at least 6-8 items per half so wide screens never run out)
+  const repeatCount = Math.max(3, Math.ceil(8 / vouchers.length));
+  const singleSet = Array(repeatCount).fill(vouchers).flat();
 
-  const renderTrack = (trackKey: string) => (
-    <div
-      key={trackKey}
-      aria-hidden={trackKey === 'track2'}
-      className="flex shrink-0 items-center gap-8 pr-8 whitespace-nowrap animate-marquee-infinite group-hover:[animation-play-state:paused]"
-    >
-      {singleTrackItems.map((v, idx) => {
-        const discountText =
-          v.discount_type === 'percentage'
-            ? `${v.discount_value}% OFF`
-            : `₱${v.discount_value.toLocaleString()} OFF`;
+  const renderVoucherItem = (v: Voucher, keyPrefix: string, index: number) => {
+    const discountText =
+      v.discount_type === 'percentage'
+        ? `${v.discount_value}% OFF`
+        : `₱${v.discount_value.toLocaleString()} OFF`;
 
-        const validityText = !v.is_all_time && v.end_date
-          ? `Valid until ${new Date(v.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} only`
-          : v.max_uses !== null && v.max_uses > 0
-          ? `${Math.max(0, v.max_uses - v.used_count)} checkouts left`
-          : 'All-Time Special';
+    const validityText = !v.is_all_time && v.end_date
+      ? `Until ${new Date(v.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+      : v.max_uses !== null && v.max_uses > 0
+      ? `${Math.max(0, v.max_uses - v.used_count)} left`
+      : null;
 
-        const isCopied = copiedCode === v.code;
+    const isCopied = copiedCode === v.code;
 
-        return (
-          <div
-            key={`${trackKey}-${v.id}-${idx}`}
-            className="inline-flex items-center gap-2 shrink-0 group text-white/80 select-none"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-[#1090F8] shrink-0 animate-ping" />
+    return (
+      <div
+        key={`${keyPrefix}-${v.id}-${index}`}
+        className="inline-flex items-center gap-2.5 sm:gap-3 shrink-0 text-white/90 select-none text-[11px] sm:text-xs font-normal"
+      >
+        {/* Minimalist Accent Diamond */}
+        <span className="text-[#1090F8] text-[10px] opacity-80">✦</span>
 
-            <span className="font-extrabold text-[#F59E0B] tracking-wide">
-              {discountText}
-            </span>
+        {/* Crisp Formal Discount Badge */}
+        <span className="font-semibold text-white tracking-tight">
+          {discountText}
+        </span>
 
-            <span className="text-white/60 hidden sm:inline">—</span>
+        <span className="text-white/30 text-[10px]">•</span>
 
-            <span className="text-white/85 font-medium truncate max-w-[200px] sm:max-w-none">
-              {v.description || 'Special Booking Discount'}
-            </span>
+        {/* Clean Description */}
+        <span className="text-white/75 font-normal tracking-wide">
+          {v.description || 'Special Event Production Offer'}
+        </span>
 
-            {/* Interactive Voucher Code Chip */}
-            <button
-              type="button"
-              onClick={(e) => handleCopy(e, v.code)}
-              title="Click to copy voucher code"
-              className={`px-2 py-0.5 rounded-md font-mono font-extrabold text-[10px] tracking-wider transition-all cursor-pointer flex items-center gap-1 border ${
-                isCopied
-                  ? 'bg-emerald-500 text-white border-emerald-400'
-                  : 'bg-white/10 hover:bg-[#1090F8] text-white border-white/15 hover:border-[#1090F8]'
-              }`}
-            >
-              {isCopied ? (
-                <>
-                  <IconCheck className="w-3 h-3 stroke-[3]" />
-                  <span>COPIED!</span>
-                </>
-              ) : (
-                <>
-                  <IconTicket className="w-3 h-3" />
-                  <span>{v.code}</span>
-                </>
-              )}
-            </button>
+        {/* Subtle, zero-distraction code button (no popup toasts, clean inline indicator) */}
+        <button
+          type="button"
+          onClick={(e) => handleCopy(e, v.code)}
+          title={isCopied ? 'Copied' : 'Click to copy promo code'}
+          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold tracking-wider transition-colors duration-200 cursor-pointer ${
+            isCopied
+              ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 font-semibold'
+              : 'bg-white/[0.08] hover:bg-white/[0.15] text-white/90 hover:text-white border border-white/10 hover:border-white/20 active:scale-95'
+          }`}
+        >
+          <span>{v.code}</span>
+          {isCopied ? (
+            <IconCheck className="w-3 h-3 text-emerald-400 stroke-[2.5] shrink-0" />
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" className="w-2.5 h-2.5 opacity-50 shrink-0">
+              <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" strokeWidth="2" />
+            </svg>
+          )}
+        </button>
 
-            <span className="text-[10px] font-medium text-white/50 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 hidden md:inline">
-              {validityText}
-            </span>
+        {/* Subtle validity note if available */}
+        {validityText && (
+          <span className="text-[10px] text-white/40 hidden md:inline font-medium">
+            ({validityText})
+          </span>
+        )}
 
-            <span className="text-white/20 mx-2">✦</span>
-          </div>
-        );
-      })}
-    </div>
-  );
+        {/* Trailing item spacer */}
+        <span className="text-transparent px-2">|</span>
+      </div>
+    );
+  };
 
   return (
     <div
-      aria-label="Promotional Vouchers Announcement Marquee"
-      className="fixed top-0 inset-x-0 z-[60] bg-[#12131A] text-white border-b border-white/[0.08] shadow-xs overflow-hidden h-7.5 sm:h-8 flex items-center text-[11px] sm:text-xs"
+      aria-label="Promotional Announcement Banner"
+      className="fixed top-0 inset-x-0 z-[60] bg-[#090a0f] text-white border-b border-white/[0.07] shadow-xs overflow-hidden h-8 sm:h-8.5 flex items-center text-[11px] sm:text-xs select-none print:hidden transition-all duration-300"
     >
-      {/* Left Edge Gradient Fade Mask */}
-      <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-8 sm:w-12 bg-gradient-to-r from-[#12131A] to-transparent z-10" />
+      {/* Left Edge Ambient Fade Mask */}
+      <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-12 sm:w-24 bg-gradient-to-r from-[#090a0f] via-[#090a0f]/80 to-transparent z-10" />
 
-      {/* Dual Seamless Tracks: Track 1 and Track 2 run side-by-side for an infinite, gapless loop */}
-      <div className="relative flex overflow-hidden w-full select-none group pr-10">
-        {renderTrack('track1')}
-        {renderTrack('track2')}
+      {/* Right Edge Ambient Fade Mask before Close Button */}
+      <div className="pointer-events-none absolute right-8 top-0 bottom-0 w-12 sm:w-24 bg-gradient-to-l from-[#090a0f] via-[#090a0f]/80 to-transparent z-10" />
+
+      {/* Endless Gapless Marquee Track (Full Width, Continuous Smooth Motion) */}
+      <div className="w-full overflow-hidden flex items-center pl-4 pr-10">
+        <div className="animate-marquee-smooth flex items-center gap-6 sm:gap-10">
+          {/* Loop Set 1 */}
+          <div className="flex items-center gap-6 sm:gap-10 shrink-0">
+            {singleSet.map((v, i) => renderVoucherItem(v, 'set1', i))}
+          </div>
+          {/* Loop Set 2 (Exact duplicate for seamless 50% translation loop) */}
+          <div className="flex items-center gap-6 sm:gap-10 shrink-0" aria-hidden="true">
+            {singleSet.map((v, i) => renderVoucherItem(v, 'set2', i))}
+          </div>
+        </div>
       </div>
 
-      {/* Close 'X' Button on the right with dark gradient backdrop */}
-      <div className="absolute right-0 top-0 bottom-0 z-20 flex items-center pr-2 sm:pr-3 pl-6 bg-gradient-to-l from-[#12131A] via-[#12131A]/95 to-transparent">
+      {/* Subtle Minimalist Close Button */}
+      <div className="absolute right-0 top-0 bottom-0 z-20 flex items-center pr-2 sm:pr-3 pl-2 bg-[#090a0f]">
         <button
           type="button"
           onClick={() => setIsOpen(false)}
-          title="Close announcement banner"
-          className="text-white/60 hover:text-white p-1 hover:bg-white/15 rounded-full transition-colors cursor-pointer flex items-center justify-center"
+          title="Dismiss banner"
+          className="text-white/40 hover:text-white p-1 hover:bg-white/10 rounded-full transition-colors cursor-pointer flex items-center justify-center"
         >
           <IconX className="w-3.5 h-3.5" />
         </button>
