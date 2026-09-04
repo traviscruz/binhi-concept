@@ -19,9 +19,10 @@ export function CrewLayout({
   const [crewName, setCrewName] = useState('');
   const [crewAvatar, setCrewAvatar] = useState<string | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
+  const [liveAssignedCount, setLiveAssignedCount] = useState<number>(assignedCount ?? 0);
 
   useEffect(() => {
-    async function fetchCrewProfile() {
+    async function fetchCrewProfileAndCount() {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
@@ -44,6 +45,12 @@ export function CrewLayout({
 
         setCrewName(name || 'Event Staff');
         setCrewAvatar(avatar);
+
+        // Fetch live count
+        const { rawCount } = await import('../../utils/crewService').then((m) =>
+          m.fetchAssignedBookingsForCurrentCrew()
+        );
+        setLiveAssignedCount(rawCount);
       } catch (err) {
         console.error('Error loading crew profile for layout:', err);
         setCrewName('Event Staff');
@@ -52,14 +59,26 @@ export function CrewLayout({
       }
     }
 
-    fetchCrewProfile();
+    fetchCrewProfileAndCount();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
-      fetchCrewProfile();
+      fetchCrewProfileAndCount();
     });
+
+    const channel = supabase
+      .channel('crew-layout-bookings-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings' },
+        () => {
+          fetchCrewProfileAndCount();
+        }
+      )
+      .subscribe();
 
     return () => {
       subscription.unsubscribe();
+      supabase.removeChannel(channel);
     };
   }, []);
 
@@ -118,7 +137,7 @@ export function CrewLayout({
 
         {/* Navigation Items */}
         <div className="space-y-1.5">
-          {navItem('Assigned Bookings', 'crew-assigned-bookings', <IconCalendar className="w-4 h-4" />, assignedCount)}
+          {navItem('Assigned Bookings', 'crew-assigned-bookings', <IconCalendar className="w-4 h-4" />, liveAssignedCount)}
           {navItem('Gear Packing & Specs', 'crew-booking-detail', <IconBox className="w-4 h-4" />)}
           {navItem('Setup / Teardown Status', 'crew-setup-teardown', <IconCheck className="w-4 h-4" />)}
         </div>

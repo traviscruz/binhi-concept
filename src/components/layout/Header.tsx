@@ -27,7 +27,7 @@ export function Header({
     <button
       onClick={() => handleNav(target)}
       className={`px-3.5 py-2 rounded-full text-sm font-medium transition-all outline-none focus:outline-none focus:ring-0 focus-visible:outline-none inline-flex items-center gap-1.5 ${
-        page === target || (target === 'packages' && page === 'package-detail') || (target === 'equipment' && page === 'item-detail')
+        page === target || (target === 'packages' && (page === 'package-detail' || page === 'custom-package')) || (target === 'equipment' && page === 'item-detail')
           ? 'bg-[var(--ink)] text-white font-semibold shadow-sm'
           : 'text-black/60 hover:text-[var(--ink)] hover:bg-black/5'
       }`}
@@ -55,6 +55,7 @@ export function Header({
         <nav className="hidden lg:flex items-center gap-2">
           {navItem('Home', 'landing')}
           {navItem('Packages', 'packages')}
+          {navItem('Custom Setup', 'custom-package')}
           {navItem('Equipment', 'equipment')}
           {navItem('About', 'about')}
           {navItem('Contact', 'contact')}
@@ -63,10 +64,11 @@ export function Header({
         <div className="hidden md:flex items-center gap-3">
           {authPage ? (
             <button
-              onClick={() => handleNav('landing')}
-              className="text-sm font-medium px-5 py-2 rounded-full border border-[#24252c]/10 hover:bg-[var(--mist)] transition-colors outline-none focus:outline-none focus-visible:outline-none"
+              onClick={() => handleNav('packages')}
+              className="text-sm font-semibold px-5 py-2.5 rounded-full bg-[var(--ink)] text-white hover:bg-[var(--ink-soft)] transition-colors inline-flex items-center gap-1.5 outline-none focus:outline-none focus-visible:outline-none shadow-sm"
             >
-              Back to site
+              Explore packages
+              <IconArrow className="w-3.5 h-3.5" />
             </button>
           ) : (
             <>
@@ -96,6 +98,7 @@ export function Header({
         <div className="mx-auto max-w-6xl mt-2 bg-white border border-[#24252c]/[0.08] rounded-3xl shadow-xl p-4 flex flex-col gap-1.5 lg:hidden animate-blur-in">
           {navItem('Home', 'landing')}
           {navItem('Packages', 'packages')}
+          {navItem('Custom Setup', 'custom-package')}
           {navItem('Equipment Catalog', 'equipment')}
           {navItem('About', 'about')}
           {navItem('Contact', 'contact')}

@@ -1,17 +1,19 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconShield, IconX, IconCheck, IconArrow } from '../../components/shared/icons';
+import { IconShield, IconX, IconArrow, IconTicket } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
-
-interface DiscountReward {
-  id: string;
-  cost: number;
-  discountAmount: number;
-  title: string;
-  desc: string;
-  badge?: string;
-}
+import { supabase } from '../../lib/supabase';
+import {
+  fetchUserLoyaltyData,
+  redeemLoyaltyPoints,
+  fetchDiscountRewards,
+  type LoyaltyTransaction,
+  type LoyaltySettings,
+  type DiscountReward,
+  DEFAULT_LOYALTY_SETTINGS,
+  DEFAULT_REWARDS,
+} from '../../utils/loyaltyService';
 
 interface ClaimedVoucher {
   id: string;
@@ -22,97 +24,101 @@ interface ClaimedVoucher {
   expiresAt: string;
 }
 
-const discountRewardsList: DiscountReward[] = [
-  {
-    id: 'disc-500',
-    cost: 100,
-    discountAmount: 500,
-    title: '₱500 Cash Discount Voucher',
-    desc: 'Instant ₱500 deduction applied directly to your booking subtotal on any equipment or package.',
-    badge: 'Popular',
-  },
-  {
-    id: 'disc-1500',
-    cost: 250,
-    discountAmount: 1500,
-    title: '₱1,500 Production Discount Voucher',
-    desc: 'Save ₱1,500 on standard or multi-day event production sound & lighting reservations.',
-    badge: 'Best Value',
-  },
-  {
-    id: 'disc-3000',
-    cost: 500,
-    discountAmount: 3000,
-    title: '₱3,000 Major Event Discount Voucher',
-    desc: 'Flat ₱3,000 cash discount voucher directly applied to celebrations, concerts, or grand setups.',
-    badge: 'High Saver',
-  },
-  {
-    id: 'disc-6500',
-    cost: 1000,
-    discountAmount: 6500,
-    title: '₱6,500 VIP Celebration Voucher',
-    desc: 'Exclusive VIP host voucher offering ₱6,500 in direct rental fee credit.',
-    badge: 'VIP Exclusive',
-  },
-  {
-    id: 'disc-10000',
-    cost: 1500,
-    discountAmount: 10000,
-    title: '₱10,000 Executive Credit Voucher',
-    desc: 'Maximum tier voucher granting ₱10,000 direct deduction on premium arena & wedding packages.',
-    badge: 'Executive Tier',
-  },
-];
-
-const mockHistory = [
-  {
-    id: 'h1',
-    event: 'Completed Booking #BK-2026-081 (Wedding Package)',
-    date: 'Aug 24, 2026',
-    points: '+350 PTS',
-    type: 'earn',
-  },
-  {
-    id: 'h2',
-    event: 'Verified Customer 5-Star Review Bonus',
-    date: 'Aug 25, 2026',
-    points: '+100 PTS',
-    type: 'earn',
-  },
-  {
-    id: 'h3',
-    event: 'VIP Gold Host Annual Milestone Reward',
-    date: 'Aug 01, 2026',
-    points: '+1,000 PTS',
-    type: 'earn',
-  },
-];
-
 export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
-  const [points, setPoints] = useState(1450);
-  const [claimedVouchers, setClaimedVouchers] = useState<ClaimedVoucher[]>([
-    {
-      id: 'v-initial',
-      code: 'BINHI-GOLD-500',
-      title: '₱500 Cash Discount Voucher',
-      discountAmount: 500,
-      claimedAt: 'Aug 26, 2026',
-      expiresAt: 'Dec 31, 2026',
-    },
-  ]);
+  const [points, setPoints] = useState(0);
+  const [tierInfo, setTierInfo] = useState({
+    tierName: 'Standard Host',
+    badgeClass: 'bg-blue-500/20 border-blue-400/40 text-blue-200',
+    glowColor: '#1090F8',
+    nextTierName: 'Silver Host' as string | null,
+    pointsToNext: 500,
+  });
+  const [settings, setSettings] = useState<LoyaltySettings>(DEFAULT_LOYALTY_SETTINGS);
+  const [rewardsList, setRewardsList] = useState<DiscountReward[]>(DEFAULT_REWARDS);
+  const [transactions, setTransactions] = useState<LoyaltyTransaction[]>([]);
+  const [claimedVouchers, setClaimedVouchers] = useState<ClaimedVoucher[]>([]);
   const [activeModalVoucher, setActiveModalVoucher] = useState<ClaimedVoucher | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRedeeming, setIsRedeeming] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-  const handleRedeem = (r: DiscountReward) => {
-    if (points >= r.cost) {
-      const newBalance = points - r.cost;
-      setPoints(newBalance);
+  // Load real user loyalty points, rewards catalog & transaction history from Supabase
+  const loadLoyalty = async () => {
+    try {
+      // 1. Fetch live reward options from database
+      const liveRewards = await fetchDiscountRewards();
+      setRewardsList(liveRewards);
 
-      const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setIsLoading(false);
+        return;
+      }
+      setCurrentUserId(user.id);
+
+      const loyaltyData = await fetchUserLoyaltyData(user.id, user.email || undefined);
+      setPoints(loyaltyData.points);
+      setTierInfo(loyaltyData.tier);
+      setSettings(loyaltyData.settings);
+      setTransactions(loyaltyData.transactions);
+
+      // Fetch user's claimed loyalty vouchers from vouchers table
+      const { data: voucherRows } = await supabase
+        .from('vouchers')
+        .select('*')
+        .like('description', '%Loyalty Reward%')
+        .order('created_at', { ascending: false });
+
+      if (voucherRows && voucherRows.length > 0) {
+        const mapped: ClaimedVoucher[] = voucherRows.map((v: any) => ({
+          id: v.id,
+          code: v.code,
+          title: v.description.replace('Loyalty Reward: ', ''),
+          discountAmount: Number(v.discount_value || 0),
+          claimedAt: new Date(v.created_at).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          }),
+          expiresAt: v.end_date ? new Date(v.end_date).toLocaleDateString() : '60 Days from issue',
+        }));
+        setClaimedVouchers(mapped);
+      }
+    } catch (err) {
+      console.error('Failed to load loyalty page data:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLoyalty();
+  }, []);
+
+  const handleRedeem = async (r: DiscountReward) => {
+    if (!currentUserId) {
+      alert('Please log in to redeem loyalty rewards.');
+      return;
+    }
+    if (points < r.cost) {
+      alert(`You need ${r.cost - points} more points to redeem this voucher.`);
+      return;
+    }
+
+    setIsRedeeming(true);
+    try {
+      const result = await redeemLoyaltyPoints(currentUserId, r.cost, r.discountAmount, r.title);
+      if (!result.success) {
+        alert(result.error || 'Failed to redeem reward.');
+        return;
+      }
+
+      setPoints(result.newBalance);
+
       const newVoucher: ClaimedVoucher = {
         id: `v-${Date.now()}`,
-        code: `BINHI-DISC${r.discountAmount}-${randomSuffix}`,
+        code: result.voucherCode,
         title: r.title,
         discountAmount: r.discountAmount,
         claimedAt: 'Just now',
@@ -121,6 +127,14 @@ export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
 
       setClaimedVouchers((prev) => [newVoucher, ...prev]);
       setActiveModalVoucher(newVoucher);
+
+      // Refresh transactions and balances
+      await loadLoyalty();
+    } catch (err) {
+      console.error('Redeem error:', err);
+      alert('An error occurred while redeeming voucher.');
+    } finally {
+      setIsRedeeming(false);
     }
   };
 
@@ -130,8 +144,8 @@ export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
     setTimeout(() => setCopiedCode(null), 2500);
   };
 
-  // 1 PTS ≈ ₱5.00 cash discount value
-  const estimatedCashValue = points * 5;
+  // 1 PTS ≈ ₱5.00 cash discount value (100 PTS = ₱500)
+  const estimatedCashValue = Math.round(points * 5);
 
   return (
     <section className="pt-28 sm:pt-36 md:pt-40 pb-24 px-4 sm:px-6 min-h-screen bg-[var(--mist)]">
@@ -141,10 +155,10 @@ export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
           <div>
             <MonoBadge icon={IconShield}>BINHI Host Rewards Program</MonoBadge>
             <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight text-[var(--ink)] mt-2">
-              Host Loyalty & Rewards
+              Host Loyalty &amp; Rewards
             </h1>
             <p className="text-xs sm:text-sm text-[#24252c]/60 mt-1 max-w-xl">
-              Earn 1 point per ₱100 spent. Convert your points directly into cash discount vouchers for your next event booking.
+              Earn 1 point per ₱{settings.points_per_peso} spent on completed bookings. Convert your points directly into cash discount vouchers for your next event setup.
             </p>
           </div>
 
@@ -159,31 +173,44 @@ export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
         {/* Status & Points Balance Card */}
         <div className="bg-gradient-to-br from-[#0c162c] via-[#111e3b] to-[#0a1224] rounded-[2rem] p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-white/10">
           {/* Subtle Ambient Backlight Glow */}
-          <div className="absolute -right-16 -bottom-16 w-80 h-80 bg-[#1090F8]/20 rounded-full blur-3xl pointer-events-none" />
+          <div
+            className="absolute -right-16 -bottom-16 w-80 h-80 rounded-full blur-3xl pointer-events-none opacity-40"
+            style={{ backgroundColor: tierInfo.glowColor }}
+          />
 
           <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="space-y-2">
-              <div className="inline-flex items-center gap-2 bg-amber-400/15 border border-amber-400/30 text-amber-300 text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                VIP Gold Host Tier
+              <div
+                className={`inline-flex items-center gap-2 border text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider ${tierInfo.badgeClass}`}
+              >
+                <span className="w-2 h-2 rounded-full bg-current animate-pulse" />
+                {tierInfo.tierName}
               </div>
               <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-                {points.toLocaleString()} <span className="text-[#1090F8]">Points Available</span>
+                {isLoading ? '...' : points.toLocaleString()}{' '}
+                <span className="text-[#1090F8]">Points Available</span>
               </h2>
               <p className="text-xs sm:text-sm text-white/70">
                 Direct Cash Equivalent:{' '}
-                <strong className="text-emerald-400 font-bold">≈ ₱{estimatedCashValue.toLocaleString()}</strong> in rental discount credits
+                <strong className="text-emerald-400 font-bold">
+                  ≈ ₱{estimatedCashValue.toLocaleString()}
+                </strong>{' '}
+                in rental discount credits
               </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3 sm:gap-4 shrink-0">
               <div className="bg-white/10 backdrop-blur-md px-4 sm:px-5 py-3.5 rounded-2xl border border-white/15 text-left">
                 <div className="text-[10px] uppercase font-bold text-white/60 tracking-wider">Points Balance</div>
-                <div className="text-xl sm:text-2xl font-black text-white mt-0.5">{points.toLocaleString()} PTS</div>
+                <div className="text-xl sm:text-2xl font-black text-white mt-0.5">
+                  {isLoading ? '...' : points.toLocaleString()} PTS
+                </div>
               </div>
               <div className="bg-emerald-500/15 backdrop-blur-md px-4 sm:px-5 py-3.5 rounded-2xl border border-emerald-500/30 text-left">
                 <div className="text-[10px] uppercase font-bold text-emerald-300 tracking-wider">Cash Value</div>
-                <div className="text-xl sm:text-2xl font-black text-emerald-300 mt-0.5">₱{estimatedCashValue.toLocaleString()}</div>
+                <div className="text-xl sm:text-2xl font-black text-emerald-300 mt-0.5">
+                  ₱{estimatedCashValue.toLocaleString()}
+                </div>
               </div>
             </div>
           </div>
@@ -191,11 +218,17 @@ export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
           {/* Tier Progress Bar */}
           <div className="relative z-10 mt-6 pt-6 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-white/75">
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-white">Conversion Rate:</span> 100 PTS = ₱500 Direct Cash Discount
+              <span className="font-semibold text-white">Earning Formula:</span> ₱{settings.points_per_peso} spent = 1 Point · 100 PTS = ₱500 Voucher
             </div>
-            <div className="text-xs text-amber-300 font-medium">
-              550 PTS away from VIP Platinum Host Tier
-            </div>
+            {tierInfo.nextTierName && tierInfo.pointsToNext > 0 ? (
+              <div className="text-xs text-amber-300 font-medium">
+                {tierInfo.pointsToNext.toLocaleString()} PTS away from {tierInfo.nextTierName}
+              </div>
+            ) : (
+              <div className="text-xs text-purple-300 font-bold">
+                Max VIP Status Achieved
+              </div>
+            )}
           </div>
         </div>
 
@@ -206,7 +239,7 @@ export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
               <div>
                 <h2 className="text-lg font-bold text-[var(--ink)]">My Active Discount Vouchers</h2>
                 <p className="text-xs text-[#24252c]/60 mt-0.5">
-                  Copy your voucher code and apply it during checkout for instant monetary deduction.
+                  Copy your voucher promo code and apply it during checkout for instant monetary deduction.
                 </p>
               </div>
               <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
@@ -261,7 +294,7 @@ export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-            {discountRewardsList.map((r) => {
+            {rewardsList.map((r) => {
               const canAfford = points >= r.cost;
               return (
                 <div
@@ -294,7 +327,7 @@ export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
 
                   <button
                     onClick={() => handleRedeem(r)}
-                    disabled={!canAfford}
+                    disabled={!canAfford || isRedeeming}
                     className={`w-full text-xs font-semibold py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                       canAfford
                         ? 'bg-[var(--ink)] text-white hover:bg-[#1090F8] shadow-sm'
@@ -315,29 +348,51 @@ export default function LoyaltyPage({ go }: { go: (p: Page) => void }) {
           </div>
         </div>
 
-        {/* Points Activity History */}
+        {/* Points Activity History (Live Database Transactions) */}
         <div className="bg-white rounded-[2rem] p-6 sm:p-7 border border-[#24252c]/[0.08] shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-bold text-[var(--ink)]">Points History & Earnings</h2>
-              <p className="text-xs text-[#24252c]/60 mt-0.5">Recent points transactions from your completed bookings.</p>
+              <h2 className="text-lg font-bold text-[var(--ink)]">Points History &amp; Earnings</h2>
+              <p className="text-xs text-[#24252c]/60 mt-0.5">Real-time point accumulation from your completed bookings &amp; redemptions.</p>
             </div>
-            <span className="text-xs font-medium text-[#24252c]/50">Mock Activity</span>
+            <span className="text-xs font-medium text-[#24252c]/50">
+              {transactions.length} {transactions.length === 1 ? 'Transaction' : 'Transactions'}
+            </span>
           </div>
 
-          <div className="divide-y divide-[#24252c]/[0.06] text-xs">
-            {mockHistory.map((item) => (
-              <div key={item.id} className="py-3.5 flex items-center justify-between gap-4">
-                <div>
-                  <div className="font-semibold text-[var(--ink)]">{item.event}</div>
-                  <div className="text-[11px] text-[#24252c]/50 mt-0.5">{item.date}</div>
+          {transactions.length === 0 ? (
+            <div className="p-8 text-center bg-[var(--mist)] rounded-2xl border border-dashed border-[#24252c]/10 text-xs text-[#24252c]/50">
+              No points history yet. Completed event bookings will automatically award points to your balance!
+            </div>
+          ) : (
+            <div className="divide-y divide-[#24252c]/[0.06] text-xs">
+              {transactions.map((item) => (
+                <div key={item.id} className="py-3.5 flex items-center justify-between gap-4">
+                  <div>
+                    <div className="font-semibold text-[var(--ink)]">{item.event_name}</div>
+                    <div className="text-[11px] text-[#24252c]/50 mt-0.5">
+                      {new Date(item.created_at).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </div>
+                  </div>
+                  <span
+                    className={`font-extrabold px-3 py-1 rounded-full border shrink-0 ${
+                      item.type === 'earn' || item.points > 0
+                        ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
+                        : 'text-rose-600 bg-rose-50 border-rose-200'
+                    }`}
+                  >
+                    {item.points > 0 ? `+${item.points}` : item.points} PTS
+                  </span>
                 </div>
-                <span className="font-extrabold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 shrink-0">
-                  {item.points}
-                </span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Success Redemption Modal */}

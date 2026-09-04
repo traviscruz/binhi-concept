@@ -1,7 +1,18 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconMail, IconX, IconCheck, IconTrash, IconClock, IconSearch } from '../../components/shared/icons';
+import {
+  IconMail,
+  IconX,
+  IconCheck,
+  IconTrash,
+  IconClock,
+  IconSearch,
+  IconCalendar,
+  IconExternal,
+  IconTicket,
+  IconUser,
+} from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { supabase } from '../../utils/supabase';
@@ -27,7 +38,11 @@ export default function AdminInquiriesPage({ go }: { go?: (p: Page) => void }) {
   const [inquiries, setInquiries] = useState<InquiryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'new' | 'replied'>('all');
+
+  // Filters matching Audit Trail & Logs
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [eventTypeFilter, setEventTypeFilter] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | '7days' | '30days'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Reply Modal State
@@ -93,32 +108,68 @@ export default function AdminInquiriesPage({ go }: { go?: (p: Page) => void }) {
     }, 4500);
   };
 
-  // Filtered & Searched Inquiries
+  // Unique event types list for filters
+  const uniqueEventTypes = useMemo(() => {
+    const set = new Set<string>();
+    inquiries.forEach((inq) => {
+      if (inq.event_type && inq.event_type.trim()) {
+        set.add(inq.event_type.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [inquiries]);
+
+  // Filtered Inquiries
   const filteredInquiries = useMemo(() => {
     return inquiries.filter((inq) => {
-      const matchesFilter =
-        filter === 'all'
-          ? true
-          : filter === 'new'
-          ? inq.status === 'New'
-          : inq.status === 'Replied';
+      // 1. Status Filter
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'new' && inq.status !== 'New') return false;
+        if (statusFilter === 'replied' && inq.status !== 'Replied') return false;
+      }
 
-      if (!matchesFilter) return false;
+      // 2. Event Type Filter
+      if (eventTypeFilter !== 'all') {
+        if (inq.event_type.toLowerCase() !== eventTypeFilter.toLowerCase()) return false;
+      }
 
-      if (!searchQuery.trim()) return true;
-      const q = searchQuery.toLowerCase();
-      return (
-        inq.name.toLowerCase().includes(q) ||
-        inq.email.toLowerCase().includes(q) ||
-        inq.event_type.toLowerCase().includes(q) ||
-        inq.message.toLowerCase().includes(q) ||
-        (inq.website && inq.website.toLowerCase().includes(q))
-      );
+      // 3. Date Range Filter
+      if (dateFilter !== 'all') {
+        try {
+          const itemTime = new Date(inq.created_at).getTime();
+          const now = Date.now();
+          if (dateFilter === 'today' && now - itemTime > 24 * 60 * 60 * 1000) return false;
+          if (dateFilter === '7days' && now - itemTime > 7 * 24 * 60 * 60 * 1000) return false;
+          if (dateFilter === '30days' && now - itemTime > 30 * 24 * 60 * 60 * 1000) return false;
+        } catch {}
+      }
+
+      // 4. Keyword Search
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchesSearch =
+          inq.name.toLowerCase().includes(q) ||
+          inq.email.toLowerCase().includes(q) ||
+          inq.event_type.toLowerCase().includes(q) ||
+          inq.message.toLowerCase().includes(q) ||
+          (inq.budget && inq.budget.toLowerCase().includes(q)) ||
+          (inq.website && inq.website.toLowerCase().includes(q));
+
+        if (!matchesSearch) return false;
+      }
+
+      return true;
     });
-  }, [inquiries, filter, searchQuery]);
+  }, [inquiries, statusFilter, eventTypeFilter, dateFilter, searchQuery]);
 
-  const newCount = useMemo(() => inquiries.filter((x) => x.status === 'New').length, [inquiries]);
-  const repliedCount = useMemo(() => inquiries.filter((x) => x.status === 'Replied').length, [inquiries]);
+  // Metrics
+  const metrics = useMemo(() => {
+    const total = inquiries.length;
+    const newItems = inquiries.filter((x) => x.status === 'New').length;
+    const repliedItems = inquiries.filter((x) => x.status === 'Replied').length;
+    const weddingItems = inquiries.filter((x) => x.event_type.toLowerCase().includes('wedding')).length;
+    return { total, newItems, repliedItems, weddingItems };
+  }, [inquiries]);
 
   // Handle Send Reply
   const handleSendReply = async (e: React.FormEvent) => {
@@ -241,7 +292,7 @@ export default function AdminInquiriesPage({ go }: { go?: (p: Page) => void }) {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-12">
       {/* Toast Notification Banner */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-[var(--ink)] text-white text-xs font-semibold px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-2.5 border border-white/20 animate-fade-in">
@@ -258,9 +309,9 @@ export default function AdminInquiriesPage({ go }: { go?: (p: Page) => void }) {
         <div>
           <div className="flex items-center gap-2">
             <MonoBadge icon={IconMail}>Public Inquiries</MonoBadge>
-            {newCount > 0 && (
+            {metrics.newItems > 0 && (
               <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-[#1090F8] text-white">
-                {newCount} New
+                {metrics.newItems} New
               </span>
             )}
           </div>
@@ -284,57 +335,135 @@ export default function AdminInquiriesPage({ go }: { go?: (p: Page) => void }) {
         </div>
       </div>
 
-      {/* Stats and Filter Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[var(--mist)] p-3.5 rounded-2xl border border-[#24252c]/[0.06]">
-        {/* Filter Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto">
-          <button
-            onClick={() => setFilter('all')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-              filter === 'all'
-                ? 'bg-[var(--ink)] text-white shadow-sm'
-                : 'text-[#24252c]/60 hover:text-[var(--ink)] hover:bg-white/60'
-            }`}
-          >
-            All ({inquiries.length})
-          </button>
-          <button
-            onClick={() => setFilter('new')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-              filter === 'new'
-                ? 'bg-[#1090F8] text-white shadow-sm'
-                : 'text-[#24252c]/60 hover:text-[var(--ink)] hover:bg-white/60'
-            }`}
-          >
-            <span>New</span>
-            {newCount > 0 && (
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${filter === 'new' ? 'bg-white text-[#1090F8]' : 'bg-[#1090F8] text-white'}`}>
-                {newCount}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setFilter('replied')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-              filter === 'replied'
-                ? 'bg-emerald-600 text-white shadow-sm'
-                : 'text-[#24252c]/60 hover:text-[var(--ink)] hover:bg-white/60'
-            }`}
-          >
-            Replied ({repliedCount})
-          </button>
+      {/* Summary KPI Cards — Matching Audit Trail & Logs */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#24252c]/[0.08] shadow-xs">
+          <div className="text-[10px] font-bold text-[#24252c]/50 uppercase tracking-wider">
+            Total Inquiries
+          </div>
+          <div className="text-2xl font-black text-[var(--ink)] mt-1">
+            {metrics.total.toLocaleString()}
+          </div>
+          <div className="text-[10px] text-emerald-700 font-medium mt-0.5">
+            Live database records
+          </div>
         </div>
 
-        {/* Search Bar */}
-        <div className="relative w-full sm:w-64">
-          <IconSearch className="w-3.5 h-3.5 text-[#24252c]/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search inquiries..."
-            className="w-full pl-9 pr-3.5 py-1.5 text-xs bg-white rounded-xl border border-black/10 focus:outline-none focus:border-[#1090F8] text-[var(--ink)] placeholder:text-[#24252c]/40 transition-colors"
-          />
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#24252c]/[0.08] shadow-xs">
+          <div className="text-[10px] font-bold text-[#24252c]/50 uppercase tracking-wider">
+            New / Unanswered
+          </div>
+          <div className="text-2xl font-black text-[#1090F8] mt-1">
+            {metrics.newItems.toLocaleString()}
+          </div>
+          <div className="text-[10px] text-[#1090F8]/80 font-medium mt-0.5">
+            Requires email reply
+          </div>
+        </div>
+
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#24252c]/[0.08] shadow-xs">
+          <div className="text-[10px] font-bold text-[#24252c]/50 uppercase tracking-wider">
+            Replied & Resolved
+          </div>
+          <div className="text-2xl font-black text-emerald-600 mt-1">
+            {metrics.repliedItems.toLocaleString()}
+          </div>
+          <div className="text-[10px] text-emerald-700 font-medium mt-0.5">
+            Direct responses sent
+          </div>
+        </div>
+
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#24252c]/[0.08] shadow-xs">
+          <div className="text-[10px] font-bold text-[#24252c]/50 uppercase tracking-wider">
+            Weddings & Premier
+          </div>
+          <div className="text-2xl font-black text-[var(--ink)] mt-1">
+            {metrics.weddingItems.toLocaleString()}
+          </div>
+          <div className="text-[10px] text-[#24252c]/50 mt-0.5">
+            Specialized production leads
+          </div>
+        </div>
+      </div>
+
+      {/* Filter Control Bar — Identical to Audit Trail & Logs */}
+      <div className="bg-white p-4 rounded-2xl border border-[#24252c]/[0.08] shadow-xs space-y-3">
+        {/* Module / Status Oval Pill Tabs */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+          {[
+            { id: 'all', label: `All Inquiries (${inquiries.length})` },
+            { id: 'new', label: `New (${metrics.newItems})` },
+            { id: 'replied', label: `Replied (${metrics.repliedItems})` },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setStatusFilter(tab.id)}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                statusFilter === tab.id
+                  ? 'bg-[var(--ink)] text-white shadow-xs'
+                  : 'bg-[var(--mist)] text-[#24252c]/65 hover:text-[var(--ink)]'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Dropdowns & Search */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+          {/* Event Type Filter */}
+          <div>
+            <select
+              value={eventTypeFilter}
+              onChange={(e) => setEventTypeFilter(e.target.value)}
+              className="w-full bg-[var(--mist)] border border-[#24252c]/10 rounded-full px-4 py-2 text-xs font-medium text-[var(--ink)] focus:outline-none focus:border-[#1090F8] transition-colors cursor-pointer"
+            >
+              <option value="all">All Event Types</option>
+              {uniqueEventTypes.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Status Filter */}
+          <div>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full bg-[var(--mist)] border border-[#24252c]/10 rounded-full px-4 py-2 text-xs font-medium text-[var(--ink)] focus:outline-none focus:border-[#1090F8] transition-colors cursor-pointer"
+            >
+              <option value="all">All Statuses</option>
+              <option value="new">New (Pending Reply)</option>
+              <option value="replied">Replied / Resolved</option>
+            </select>
+          </div>
+
+          {/* Date Range Filter */}
+          <div>
+            <select
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value as any)}
+              className="w-full bg-[var(--mist)] border border-[#24252c]/10 rounded-full px-4 py-2 text-xs font-medium text-[var(--ink)] focus:outline-none focus:border-[#1090F8] transition-colors cursor-pointer"
+            >
+              <option value="all">All Dates</option>
+              <option value="today">Past 24 Hours</option>
+              <option value="7days">Past 7 Days</option>
+              <option value="30days">Past 30 Days</option>
+            </select>
+          </div>
+
+          {/* Search Box */}
+          <div className="relative">
+            <IconSearch className="w-3.5 h-3.5 text-[#24252c]/40 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search client, email, message..."
+              className="w-full bg-[var(--mist)] border border-[#24252c]/10 rounded-full pl-9 pr-4 py-2 text-xs font-medium text-[var(--ink)] focus:outline-none focus:border-[#1090F8] transition-colors"
+            />
+          </div>
         </div>
       </div>
 
@@ -352,8 +481,8 @@ export default function AdminInquiriesPage({ go }: { go?: (p: Page) => void }) {
               title={searchQuery ? 'No matching inquiries found' : 'No inquiries in inbox'}
               description={
                 searchQuery
-                  ? `No inquiries matched "${searchQuery}". Try a different keyword.`
-                  : filter === 'new'
+                  ? `No inquiries matched "${searchQuery}". Try a different filter or keyword.`
+                  : statusFilter === 'new'
                   ? 'There are no pending new inquiries. All caught up!'
                   : 'New event inquiries submitted from the public contact page will appear here.'
               }
@@ -379,9 +508,10 @@ export default function AdminInquiriesPage({ go }: { go?: (p: Page) => void }) {
                           href={inq.website.startsWith('http') ? inq.website : `https://${inq.website}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-[11px] font-medium text-[#1090F8] hover:underline bg-[#1090F8]/10 px-2 py-0.5 rounded-full"
+                          className="text-[11px] font-medium text-[#1090F8] hover:underline bg-[#1090F8]/10 px-2 py-0.5 rounded-full inline-flex items-center gap-1"
                         >
-                          Website / Social ↗
+                          <span>Website / Social</span>
+                          <IconExternal className="w-3 h-3" />
                         </a>
                       )}
                     </div>
@@ -448,30 +578,24 @@ export default function AdminInquiriesPage({ go }: { go?: (p: Page) => void }) {
                 )}
 
                 {/* Action Footer */}
-                <div className="flex items-center justify-between pt-2 border-t border-[#24252c]/5">
-                  <div className="text-[11px] text-[#24252c]/40 font-mono">
-                    ID: {inq.id.slice(0, 8)}...
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        setReplyInquiry(inq);
-                        setReplyError(null);
-                        setReplyMessage(
-                          `Hi ${inq.name},\n\nThank you for reaching out to BINHI Concept regarding your upcoming ${inq.event_type}${
-                            inq.event_date ? ` on ${formatDate(inq.event_date)}` : ''
-                          }.\n\nWe would love to help bring your event vision to life. Based on your requirements, here are our initial recommendations:\n\n- \n- \n\nPlease let us know your preferred schedule for a brief consultation or ocular inspection.\n\nWarm regards,\nBINHI Concept Team`
-                        );
-                      }}
-                      className={`text-xs font-semibold px-4 py-2 rounded-full transition-colors cursor-pointer shadow-sm ${
-                        isNew
-                          ? 'bg-[var(--ink)] text-white hover:bg-[var(--ink-soft)]'
-                          : 'bg-[#EEEEEE] text-[var(--ink)] hover:bg-[#E2E4E8]'
-                      }`}
-                    >
-                      {isNew ? 'Send Email Reply' : 'Send Follow-up Email'}
-                    </button>
-                  </div>
+                <div className="flex items-center justify-end pt-2 border-t border-[#24252c]/[0.06]">
+                  <button
+                    onClick={() => {
+                      setReplyInquiry(inq);
+                      setReplyMessage(
+                        inq.reply_message ||
+                          `Hi ${inq.name},\n\nThank you for reaching out to BINHI Concept regarding your upcoming ${inq.event_type}! We would love to provide the sound, lighting, and stage production support for your event.\n\nCould you share additional details regarding your venue location and setup timeline so we can prepare a customized quotation for you?\n\nWarm regards,\nBINHI Concept Production Team`
+                      );
+                    }}
+                    className={`px-5 py-2.5 rounded-full text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-2 ${
+                      isNew
+                        ? 'bg-[var(--ink)] text-white hover:bg-[var(--ink-soft)]'
+                        : 'bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white'
+                    }`}
+                  >
+                    <IconMail className="w-3.5 h-3.5" />
+                    <span>{isNew ? 'Send Email Response' : 'Send Follow-up Email'}</span>
+                  </button>
                 </div>
               </div>
             );
@@ -479,116 +603,123 @@ export default function AdminInquiriesPage({ go }: { go?: (p: Page) => void }) {
         )}
       </div>
 
-      {/* Send Email Reply Modal */}
-      <ModalOverlay isOpen={!!replyInquiry} onClose={() => !sendingReply && setReplyInquiry(null)}>
-        <div className="bg-white rounded-[2.5rem] p-6 md:p-8 max-w-2xl w-full shadow-2xl border border-[#24252c]/10 relative max-h-[90vh] overflow-y-auto">
-          <button
-            onClick={() => !sendingReply && setReplyInquiry(null)}
-            disabled={sendingReply}
-            className="absolute top-6 right-6 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer disabled:opacity-40"
-          >
-            <IconX className="w-6 h-6" />
-          </button>
+      {/* Reply Modal */}
+      {replyInquiry && (
+        <ModalOverlay isOpen={Boolean(replyInquiry)} onClose={() => !sendingReply && setReplyInquiry(null)}>
+          <div className="bg-white rounded-[2rem] p-6 max-w-lg w-full shadow-2xl border border-[#24252c]/10 relative space-y-4">
+            <button
+              onClick={() => !sendingReply && setReplyInquiry(null)}
+              disabled={sendingReply}
+              className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer disabled:opacity-50"
+            >
+              <IconX className="w-5 h-5" />
+            </button>
 
-          <h3 className="text-2xl font-extrabold text-[var(--ink)] mb-1">
-            Reply to Inquiry
-          </h3>
-          <p className="text-xs font-semibold text-[#1090F8] mb-4">
-            Recipient: <span className="font-bold">{replyInquiry?.name}</span> ({replyInquiry?.email})
-          </p>
-
-          {replyError && (
-            <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 text-xs font-medium">
-              {replyError}
-            </div>
-          )}
-
-          {/* Original Inquiry Summary in Modal */}
-          {replyInquiry && (
-            <div className="mb-4 p-3.5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.06] text-xs">
-              <div className="flex items-center justify-between text-[10px] uppercase font-bold text-[#24252c]/50 mb-1">
-                <span>Inquiry Context: {replyInquiry.event_type}</span>
-                <span>Date: {formatDate(replyInquiry.event_date)}</span>
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-xl bg-[#1090F8]/10 text-[#1090F8] flex items-center justify-center font-bold">
+                <IconMail className="w-4 h-4" />
               </div>
-              <p className="text-[#24252c]/75 italic line-clamp-2">"{replyInquiry.message}"</p>
+              <div>
+                <h3 className="text-base font-extrabold text-[var(--ink)]">Reply to {replyInquiry.name}</h3>
+                <p className="text-[11px] text-[#24252c]/60">Direct email will be dispatched to {replyInquiry.email}</p>
+              </div>
             </div>
-          )}
 
-          <form onSubmit={handleSendReply} className="space-y-4 text-xs">
+            {/* Original Inq Context */}
+            <div className="bg-[var(--mist)] p-3 rounded-xl text-xs space-y-1">
+              <div className="flex items-center justify-between text-[10px] text-[#24252c]/50 font-bold uppercase">
+                <span>{replyInquiry.event_type}</span>
+                <span>{formatDate(replyInquiry.event_date)}</span>
+              </div>
+              <p className="text-[11px] text-[#24252c]/80 line-clamp-2 italic">"{replyInquiry.message}"</p>
+            </div>
+
+            {replyError && (
+              <div className="p-3 bg-rose-50 text-rose-700 text-xs rounded-xl border border-rose-200">
+                {replyError}
+              </div>
+            )}
+
+            <form onSubmit={handleSendReply} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-[var(--ink)] mb-1">Response Message Body</label>
+                <textarea
+                  rows={6}
+                  value={replyMessage}
+                  onChange={(e) => setReplyMessage(e.target.value)}
+                  placeholder="Compose your custom quotation or email message here..."
+                  className="w-full rounded-2xl border border-[#24252c]/15 p-3.5 text-xs bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] text-[var(--ink)] leading-relaxed transition-colors"
+                  required
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setReplyInquiry(null)}
+                  disabled={sendingReply}
+                  className="px-4 py-2.5 rounded-full bg-gray-100 text-gray-700 text-xs font-semibold hover:bg-gray-200 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={sendingReply || !replyMessage.trim()}
+                  className="px-6 py-2.5 rounded-full bg-[#1090F8] text-white text-xs font-bold hover:bg-[#1090F8]/90 transition-all shadow-md disabled:opacity-50 flex items-center gap-2 cursor-pointer"
+                >
+                  {sendingReply ? (
+                    <>
+                      <IconClock className="w-3.5 h-3.5 animate-spin" />
+                      <span>Sending Email...</span>
+                    </>
+                  ) : (
+                    <>
+                      <IconMail className="w-3.5 h-3.5" />
+                      <span>Send Branded Reply</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deletingId && (
+        <ModalOverlay isOpen={Boolean(deletingId)} onClose={() => !isDeleting && setDeletingId(null)}>
+          <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl border border-[#24252c]/10 relative text-center space-y-4">
+            <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-200">
+              <IconTrash className="w-6 h-6" />
+            </div>
             <div>
-              <label className="font-semibold uppercase text-[#24252c]/50 block mb-1.5 text-[11px]">
-                Email Response Message
-              </label>
-              <textarea
-                rows={10}
-                value={replyMessage}
-                onChange={(e) => setReplyMessage(e.target.value)}
-                disabled={sendingReply}
-                placeholder="Compose your personalized response..."
-                className="w-full rounded-2xl border border-black/10 px-4 py-3.5 bg-[#F8F9FA] focus:bg-white focus:outline-none focus:border-[#1090F8] transition-all text-xs font-medium leading-relaxed min-h-[220px] text-[var(--ink)]"
-                required
-              />
-              <p className="text-[11px] text-[#24252c]/50 mt-1.5">
-                This response will be sent via official BINHI Concept SMTP styled with the BINHI Concept letterhead template.
+              <h3 className="text-lg font-extrabold text-[var(--ink)]">Delete Inquiry?</h3>
+              <p className="text-xs text-[#24252c]/60 mt-1">
+                Are you sure you want to permanently remove this inquiry from your inbox? This action cannot be undone.
               </p>
             </div>
-
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div className="flex items-center gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setReplyInquiry(null)}
-                disabled={sendingReply}
-                className="px-5 py-2.5 rounded-full border border-black/10 text-xs font-semibold text-[var(--ink)] hover:bg-[#F0F0F0] transition-colors cursor-pointer disabled:opacity-40"
+                onClick={() => setDeletingId(null)}
+                disabled={isDeleting}
+                className="flex-1 py-2.5 rounded-full bg-gray-100 text-gray-700 text-xs font-bold hover:bg-gray-200 transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
-                type="submit"
-                disabled={sendingReply || !replyMessage.trim()}
-                className="bg-[var(--ink)] text-white font-semibold px-7 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer text-xs shadow-md flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                type="button"
+                onClick={() => deletingId && handleDeleteInquiry(deletingId)}
+                disabled={isDeleting}
+                className="flex-1 py-2.5 rounded-full bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
               >
-                {sendingReply ? (
-                  <>
-                    <IconClock className="w-3.5 h-3.5 animate-spin" />
-                    <span>Sending email...</span>
-                  </>
-                ) : (
-                  <span>Send Email &amp; Mark as Replied</span>
-                )}
+                {isDeleting ? <IconClock className="w-3.5 h-3.5 animate-spin" /> : null}
+                <span>Delete</span>
               </button>
             </div>
-          </form>
-        </div>
-      </ModalOverlay>
-
-      {/* Delete Confirmation Modal */}
-      <ModalOverlay isOpen={!!deletingId} onClose={() => !isDeleting && setDeletingId(null)}>
-        <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl border border-[#24252c]/10 text-center">
-          <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-3">
-            <IconTrash className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold text-[var(--ink)] mb-1">Delete Inquiry?</h3>
-          <p className="text-xs text-[#24252c]/60 mb-5">
-            Are you sure you want to delete this inquiry submission? This action cannot be undone.
-          </p>
-          <div className="flex justify-center gap-3">
-            <button
-              onClick={() => setDeletingId(null)}
-              disabled={isDeleting}
-              className="px-5 py-2 rounded-full border border-black/10 text-xs font-semibold hover:bg-black/5"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => deletingId && handleDeleteInquiry(deletingId)}
-              disabled={isDeleting}
-              className="px-5 py-2 rounded-full bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 flex items-center gap-1.5"
-            >
-              {isDeleting ? 'Deleting...' : 'Delete'}
-            </button>
-          </div>
-        </div>
-      </ModalOverlay>
+        </ModalOverlay>
+      )}
     </div>
   );
 }

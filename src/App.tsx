@@ -22,6 +22,7 @@ import ForgotPasswordPage from './pages/public/ForgotPasswordPage';
 import OtpPage from './pages/public/OtpPage';
 
 import CheckoutPage from './pages/customer/CheckoutPage';
+import CustomPackagePage from './pages/customer/CustomPackagePage';
 import PaymentResultPage from './pages/customer/PaymentResultPage';
 import BookingStatusPage from './pages/customer/BookingStatusPage';
 import BookingHistoryPage from './pages/customer/BookingHistoryPage';
@@ -60,7 +61,8 @@ import AdminReviewsPage from './pages/admin/AdminReviewsPage';
 import AdminAuditLogsPage from './pages/admin/AdminAuditLogsPage';
 import AdminProfilePage from './pages/admin/AdminProfilePage';
 import { FEATURED_PACKAGES, type PackageData } from './data/packages';
-import { supabase } from './utils/supabase';
+import { supabase } from './lib/supabase';
+import { fetchWishlistFromDb, toggleWishlistDb, syncLocalWishlistToDb, getLocalWishlistIds } from './utils/wishlistService';
 
 export default function App() {
   const [page, setPage] = useState<Page>(() => {
@@ -92,13 +94,7 @@ export default function App() {
   const [bookingAddons, setBookingAddons] = useState<string[]>(['add-smoke']);
   const [isCustomerSession, setIsCustomerSession] = useState(false);
   const [hasBannerVouchers, setHasBannerVouchers] = useState(false);
-  const [wishlistIds, setWishlistIds] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('binhi_wishlist_ids');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return ['PKG-INTIMATE-01', 'a'];
-  });
+  const [wishlistIds, setWishlistIds] = useState<string[]>(() => getLocalWishlistIds());
   const [packages, setPackages] = useState<PackageData[]>(FEATURED_PACKAGES);
 
   // Check active banner vouchers for header spacing
@@ -167,7 +163,7 @@ export default function App() {
     return () => window.removeEventListener('inventory-updated', handlePackageUpdate);
   }, []);
 
-  // Sync Supabase Auth session with App state
+  // Sync Supabase Auth session with App state & Wishlist Database CRUD
   useEffect(() => {
     async function checkSession() {
       const { data: { user } } = await supabase.auth.getUser();
@@ -176,18 +172,28 @@ export default function App() {
         if (role === 'customer') {
           setIsCustomerSession(true);
         }
+        // Load user's wishlist from Supabase database
+        const userWishlist = await syncLocalWishlistToDb(user.id);
+        setWishlistIds(userWishlist);
+      } else {
+        const local = await fetchWishlistFromDb(null);
+        setWishlistIds(local);
       }
     }
     checkSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
         const role = session.user.user_metadata?.role || 'customer';
         if (role === 'customer') {
           setIsCustomerSession(true);
         }
+        const userWishlist = await syncLocalWishlistToDb(session.user.id);
+        setWishlistIds(userWishlist);
       } else {
         setIsCustomerSession(false);
+        const local = getLocalWishlistIds();
+        setWishlistIds(local);
       }
     });
 
@@ -196,14 +202,20 @@ export default function App() {
     };
   }, []);
 
-  const toggleWishlist = (id: string) => {
+  const toggleWishlist = async (id: string) => {
+    // Optimistically update local state immediately
     setWishlistIds((prev) => {
-      const updated = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
-      try {
-        localStorage.setItem('binhi_wishlist_ids', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
+      const isCurrentlySaved = prev.includes(id);
+      return isCurrentlySaved ? prev.filter((item) => item !== id) : [...prev, id];
     });
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const updated = await toggleWishlistDb(id, wishlistIds, user?.id || null);
+      setWishlistIds(updated);
+    } catch (err) {
+      console.error('Error toggling wishlist in database:', err);
+    }
   };
 
   const go = (p: Page) => {
@@ -412,6 +424,13 @@ export default function App() {
             wishlistIds={wishlistIds}
             toggleWishlist={toggleWishlist}
             packages={packages}
+            go={go}
+          />
+        )}
+        {page === 'custom-package' && (
+          <CustomPackagePage
+            go={go}
+            startBooking={startBooking}
           />
         )}
         {page === 'package-detail' && (

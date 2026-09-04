@@ -38,7 +38,21 @@ export default function CheckoutPage({
   packages?: PackageData[];
 }) {
   const allPackages = packages && packages.length > 0 ? packages : FEATURED_PACKAGES;
-  const pkg = allPackages.find((p) => p.id === packageId) || allPackages[0];
+  const isCustomPackage = packageId === 'custom-package' || packageId === 'custom';
+  const customPkgFallback: PackageData = {
+    id: 'custom-package',
+    name: 'Custom Tailored Package',
+    tag: 'Custom Setup',
+    price: 'Custom Pricing',
+    rawPrice: 0,
+    desc: 'Bespoke event sound, lighting, and stage production setup tailored by client.',
+    img: '',
+    photos: [],
+    inclusions: ['Client-selected sound, lighting & video gear', 'Full on-site technician & engineering crew'],
+    recommendedFor: ['Custom Events', 'Tailored Celebrations'],
+    specs: { setupTime: 'Flexible Setup', crewSize: 'Dedicated Production Crew' },
+  };
+  const pkg = isCustomPackage ? customPkgFallback : (allPackages.find((p) => p.id === packageId) || allPackages[0]);
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
   // ── Profile / Contact State ────────────────────────────────────────────────

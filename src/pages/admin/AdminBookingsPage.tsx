@@ -16,6 +16,7 @@ import {
   exportFinancialLedgerToCSV,
   type FinancialBookingRecord,
 } from '../../utils/financialExport';
+import { autoComputeAndAwardBookingPoints } from '../../utils/loyaltyService';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -504,6 +505,15 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           remaining: isFullyPaidInput ? '₱0' : settleModalBooking.remaining,
         },
       });
+
+      // Automatically award loyalty points if fully paid
+      if (isFullyPaidInput) {
+        try {
+          await autoComputeAndAwardBookingPoints(settleModalBooking.userId || '', settleModalBooking.email);
+        } catch (loyaltyErr) {
+          console.warn('Loyalty points calculation non-blocking note:', loyaltyErr);
+        }
+      }
 
       await loadBookings();
       setSettleModalBooking(null);

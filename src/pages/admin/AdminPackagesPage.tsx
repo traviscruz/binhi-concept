@@ -1184,7 +1184,7 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
                   className="w-full bg-[var(--ink)] text-white text-sm font-extrabold py-4 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-lg disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
                 >
                   {isSubmitting ? (
-                    <span>Processing & Uploading to Supabase...</span>
+                    <span>Processing & Saving...</span>
                   ) : editingPkg ? (
                     'Save Package Details & Mapped Gear'
                   ) : (
@@ -1207,7 +1207,7 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
             <div>
               <h3 className="font-extrabold text-lg text-[var(--ink)]">Delete Package?</h3>
               <p className="text-xs text-[#24252c]/60 mt-0.5">
-                Are you sure you want to remove <span className="font-bold">{deleteConfirmPkg?.name}</span>? This action will update Supabase database records and audit logs.
+                Are you sure you want to remove <span className="font-bold">{deleteConfirmPkg?.name}</span>? This action will remove the package and update audit logs.
               </p>
             </div>
           </div>

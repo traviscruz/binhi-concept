@@ -8,8 +8,8 @@ export function AdminLayout({
   page,
   go,
   children,
-  pendingBookingsCount = 2,
-  inquiryCount = 1,
+  pendingBookingsCount,
+  inquiryCount,
 }: {
   page: Page;
   go: (p: Page) => void;
@@ -69,7 +69,50 @@ export function AdminLayout({
   }, []);
 
   const [liveInquiryCount, setLiveInquiryCount] = useState(inquiryCount);
+  const [liveBookingsCount, setLiveBookingsCount] = useState<number>(0);
 
+  // Real-time listener & fetcher for Bookings Manager pending count
+  useEffect(() => {
+    async function fetchPendingBookingsCount() {
+      try {
+        const { data, error } = await supabase
+          .from('bookings')
+          .select('id, payment_status, status, reschedule_status');
+
+        if (!error && data) {
+          const pendingCount = data.filter((b: any) => {
+            const s = (b.payment_status || b.status || '').toLowerCase();
+            const isPendingPayment = s === 'pending' || s === 'pending deposit approval' || s === 'unpaid';
+            const isPendingReschedule = b.reschedule_status === 'pending';
+            return isPendingPayment || isPendingReschedule;
+          }).length;
+
+          setLiveBookingsCount(pendingCount);
+        }
+      } catch (err) {
+        console.warn('Error fetching live bookings count for AdminLayout:', err);
+      }
+    }
+
+    fetchPendingBookingsCount();
+
+    const channel = supabase
+      .channel('admin-layout-bookings-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings' },
+        () => {
+          fetchPendingBookingsCount();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // Real-time listener & fetcher for Inquiry Inbox count
   useEffect(() => {
     async function fetchNewInquiryCount() {
       try {
@@ -182,7 +225,7 @@ export function AdminLayout({
 
           <nav className="space-y-1">
             {navItem('Overview & KPIs', 'admin-dashboard', <IconBox className="w-4 h-4" />)}
-            {navItem('Bookings Manager', 'admin-bookings', <IconShield className="w-4 h-4" />, pendingBookingsCount)}
+            {navItem('Bookings Manager', 'admin-bookings', <IconShield className="w-4 h-4" />, liveBookingsCount)}
             {navItem('Package Builder', 'admin-packages', <IconTicket className="w-4 h-4" />)}
             {navItem('Transport Fee Rules', 'admin-transport', <IconBox className="w-4 h-4" />)}
             {navItem('Staff & Accounts', 'admin-staff', <IconUser className="w-4 h-4" />)}

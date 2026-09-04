@@ -18,6 +18,7 @@ export default function PaymentResultPage({
   const [isFullyPaid, setIsFullyPaid] = useState(false);
   const [totalAmount, setTotalAmount] = useState<number | null>(null);
   const [paidAmount, setPaidAmount] = useState<number | null>(null);
+  const [isBalanceSettlement, setIsBalanceSettlement] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -27,15 +28,21 @@ export default function PaymentResultPage({
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const ref = params.get('ref') || params.get('requestReferenceNumber');
+    const ref = params.get('ref') || params.get('requestReferenceNumber') || '';
+    const bookingIdParam = params.get('booking_id');
+    const isBalance = params.get('type') === 'balance' || ref.startsWith('BAL-');
+    setIsBalanceSettlement(isBalance);
+
+    const cleanRef = ref.replace(/^BAL-/, '');
     const csId =
       params.get('cs_id') ||
       params.get('checkout_session_id') ||
+      (cleanRef ? localStorage.getItem(`binhi_cs_${cleanRef}`) : null) ||
       (ref ? localStorage.getItem(`binhi_cs_${ref}`) : null) ||
       localStorage.getItem('binhi_paymongo_cs_id');
 
-    if (ref) {
-      setRefNumber(ref);
+    if (cleanRef || ref) {
+      setRefNumber(cleanRef || ref);
     }
 
     const formatChannelName = (rawType: string) => {
@@ -67,16 +74,18 @@ export default function PaymentResultPage({
       setPaymentChannelName(resolvedChannel);
 
       // Complete or cancel booking record status in Supabase database
-      if (ref) {
+      if (cleanRef || ref || bookingIdParam) {
         try {
-          // Fetch booking record to check payment option & amounts
-          const { data: bookingData } = await supabase
-            .from('bookings')
-            .select('*')
-            .eq('paymongo_reference_number', ref)
-            .single();
+          let query = supabase.from('bookings').select('*');
+          if (bookingIdParam) {
+            query = query.eq('id', bookingIdParam);
+          } else {
+            query = query.or(`paymongo_reference_number.eq.${cleanRef},paymongo_reference_number.eq.${ref}`);
+          }
+          const { data: bookingData } = await query.maybeSingle();
 
           const isFull =
+            isBalance ||
             bookingData?.is_fully_paid === true ||
             (bookingData?.deposit_amount &&
               bookingData?.total_cost &&
@@ -84,8 +93,16 @@ export default function PaymentResultPage({
 
           if (bookingData) {
             setIsFullyPaid(Boolean(isFull));
-            if (bookingData.total_cost) setTotalAmount(Number(bookingData.total_cost));
-            if (bookingData.deposit_amount) setPaidAmount(Number(bookingData.deposit_amount));
+            const total = Number(bookingData.total_cost || 0);
+            const deposit = Number(bookingData.deposit_amount || 0);
+            const remaining = Math.max(0, total - deposit);
+
+            if (bookingData.total_cost) setTotalAmount(total);
+            if (isBalance) {
+              setPaidAmount(remaining > 0 ? remaining : deposit);
+            } else if (bookingData.deposit_amount) {
+              setPaidAmount(deposit);
+            }
             if (bookingData.customer_name) setCustomerName(bookingData.customer_name);
             if (bookingData.customer_email) setCustomerEmail(bookingData.customer_email);
             if (bookingData.customer_phone) setCustomerPhone(bookingData.customer_phone);
@@ -101,25 +118,45 @@ export default function PaymentResultPage({
               updated_at: new Date().toISOString(),
             };
 
-            if (isFull) {
+            if (isFull || isBalance) {
               updatePayload.is_fully_paid = true;
               updatePayload.remaining_balance = 0;
               updatePayload.balance_paid_at = new Date().toISOString();
               updatePayload.balance_payment_method = resolvedChannel;
             }
 
-            await supabase
-              .from('bookings')
-              .update(updatePayload)
-              .eq('paymongo_reference_number', ref);
+            if (bookingData?.id) {
+              await supabase
+                .from('bookings')
+                .update(updatePayload)
+                .eq('id', bookingData.id);
+            } else if (cleanRef) {
+              await supabase
+                .from('bookings')
+                .update(updatePayload)
+                .eq('paymongo_reference_number', cleanRef);
+            }
           } else {
-            await supabase
-              .from('bookings')
-              .update({
-                payment_status: 'cancelled',
-                updated_at: new Date().toISOString(),
-              })
-              .eq('paymongo_reference_number', ref);
+            // If it's a balance settlement attempt that failed or was cancelled, do NOT cancel the confirmed booking
+            if (!isBalance) {
+              if (bookingData?.id) {
+                await supabase
+                  .from('bookings')
+                  .update({
+                    payment_status: 'cancelled',
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', bookingData.id);
+              } else if (cleanRef) {
+                await supabase
+                  .from('bookings')
+                  .update({
+                    payment_status: 'cancelled',
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('paymongo_reference_number', cleanRef);
+              }
+            }
           }
         } catch (err) {
           console.warn('Could not update booking status in DB:', err);
@@ -162,10 +199,16 @@ export default function PaymentResultPage({
             <div className="print:hidden">
               <MonoBadge icon={IconShield}>PayMongo Payment Confirmed</MonoBadge>
               <h1 className="text-2xl font-extrabold text-[var(--ink)] mt-2">
-                {isFullyPaid ? 'Full Payment Completed!' : '50% Deposit Paid!'}
+                {isBalanceSettlement
+                  ? 'Remaining Balance Settled!'
+                  : isFullyPaid
+                  ? 'Full Payment Completed!'
+                  : '50% Deposit Paid!'}
               </h1>
               <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
-                {isFullyPaid
+                {isBalanceSettlement
+                  ? 'Your remaining 50% balance has been successfully processed via PayMongo Checkout. Your booking is now 100% Fully Settled with zero remaining balance!'
+                  : isFullyPaid
                   ? 'Your 100% full payment has been successfully processed via PayMongo Checkout. Your event production schedule is secured and fully settled with zero remaining balance!'
                   : 'Your 50% reservation deposit has been successfully processed via PayMongo Checkout. Your event production schedule is now locked in our system!'}
               </p>
@@ -197,7 +240,11 @@ export default function PaymentResultPage({
               <div className="flex justify-between text-[#24252c]/60 print:text-gray-700">
                 <span>Payment Plan</span>
                 <span className="font-bold text-[var(--ink)] print:text-black">
-                  {isFullyPaid ? 'Full Payment (100%)' : '50% Downpayment (Reservation)'}
+                  {isBalanceSettlement
+                    ? '50% Balance Settlement (Fully Paid 100%)'
+                    : isFullyPaid
+                    ? 'Full Payment (100%)'
+                    : '50% Downpayment (Reservation)'}
                 </span>
               </div>
               {paidAmount !== null && (
@@ -277,10 +324,10 @@ export default function PaymentResultPage({
             </div>
 
             <button
-              onClick={() => handleNavigate('checkout')}
+              onClick={() => handleNavigate(isBalanceSettlement ? 'booking-tracker' : 'checkout')}
               className="w-full bg-[var(--ink)] text-white text-xs font-semibold py-4 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-md cursor-pointer print:hidden"
             >
-              Return to Checkout &amp; Retry →
+              {isBalanceSettlement ? 'Return to Booking Tracker & Retry →' : 'Return to Checkout & Retry →'}
             </button>
           </>
         )}
@@ -297,21 +344,23 @@ export default function PaymentResultPage({
                 Payment Cancelled
               </h1>
               <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
-                You cancelled the PayMongo Checkout session. Your booking draft is still saved. You can complete your payment anytime to confirm your date.
+                {isBalanceSettlement
+                  ? 'You cancelled the remaining balance payment session. Your original reservation and deposit remain active and confirmed.'
+                  : 'You cancelled the PayMongo Checkout session. Your booking draft is still saved. You can complete your payment anytime to confirm your date.'}
               </p>
             </div>
 
             <div className="p-4 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] text-xs text-[#24252c]/60 text-left">
               Reference: <strong className="font-mono text-[var(--ink)]">{refNumber}</strong>
               <br />
-              Status: Draft reservation pending payment.
+              Status: {isBalanceSettlement ? 'Reservation confirmed. Balance payment cancelled.' : 'Draft reservation pending payment.'}
             </div>
 
             <button
-              onClick={() => handleNavigate('checkout')}
+              onClick={() => handleNavigate(isBalanceSettlement ? 'booking-tracker' : 'checkout')}
               className="w-full bg-[var(--ink)] text-white text-xs font-semibold py-4 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-md cursor-pointer print:hidden"
             >
-              Return to Booking Checkout →
+              {isBalanceSettlement ? 'Back to Booking Tracker →' : 'Return to Booking Checkout →'}
             </button>
           </>
         )}

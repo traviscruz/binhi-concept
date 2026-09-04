@@ -3,16 +3,19 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { AssignedBooking } from '../../data/crewBookings';
 import { getGoogleMapsUrl, getWazeUrl } from '../../utils/navigation';
+import { MonoBadge } from '../shared/Badges';
 import {
   IconX,
   IconPin,
-  IconGoogleMaps,
-  IconWaze,
+  IconMap,
   IconCopy,
   IconCheck,
   IconCalendar,
   IconClock,
   IconExternal,
+  IconNavigation,
+  IconBox,
+  IconShield,
 } from '../shared/icons';
 import { ModalOverlay } from '../shared/ModalOverlay';
 
@@ -35,8 +38,8 @@ export default function VenueNavigationModal({
   useEffect(() => {
     if (!isOpen || !booking || !mapContainerRef.current) return;
 
-    const lat = booking.coordinates.lat;
-    const lng = booking.coordinates.lng;
+    const lat = booking.coordinates?.lat || 14.5516;
+    const lng = booking.coordinates?.lng || 121.0478;
 
     // Destroy existing instance if any
     if (mapInstanceRef.current) {
@@ -61,44 +64,45 @@ export default function VenueNavigationModal({
       maxZoom: 19,
     }).addTo(map);
 
-    // Custom modern pulse marker
+    // Custom modern pulse marker in Binhi blue
     const customIcon = L.divIcon({
       className: 'custom-venue-pin',
       html: `
-        <div style="position: relative; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;">
-          <div style="position: absolute; width: 34px; height: 34px; border-radius: 50%; background: rgba(16, 144, 248, 0.25); animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
-          <div style="position: relative; width: 28px; height: 28px; border-radius: 50%; background: #1090F8; color: white; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(0,0,0,0.3); border: 2.5px solid white;">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <div style="position: relative; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
+          <div style="position: absolute; width: 36px; height: 36px; border-radius: 50%; background: rgba(16, 144, 248, 0.25); animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+          <div style="position: relative; width: 30px; height: 30px; border-radius: 50%; background: #1090F8; color: white; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(16, 144, 248, 0.4); border: 2.5px solid white;">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
               <circle cx="12" cy="10" r="3"></circle>
             </svg>
           </div>
         </div>
       `,
-      iconSize: [34, 34],
-      iconAnchor: [17, 34],
-      popupAnchor: [0, -34],
+      iconSize: [36, 36],
+      iconAnchor: [18, 36],
+      popupAnchor: [0, -36],
     });
 
     const marker = L.marker([lat, lng], { icon: customIcon }).addTo(map);
 
     const popupHtml = `
-      <div style="font-family: inherit; padding: 4px;">
-        <strong style="display: block; font-size: 13px; color: #1e293b; margin-bottom: 2px;">${booking.venue}</strong>
-        <p style="margin: 0 0 8px; font-size: 11px; color: #64748b; line-height: 1.3;">${booking.venueAddress}</p>
+      <div style="font-family: inherit; padding: 6px 4px; min-width: 180px;">
+        <div style="font-size: 9px; font-weight: 800; color: #1090F8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Destination</div>
+        <strong style="display: block; font-size: 13px; font-weight: 800; color: #1e293b; margin-bottom: 2px;">${booking.venue}</strong>
+        <p style="margin: 0 0 10px; font-size: 11px; color: #64748b; line-height: 1.35;">${booking.venueAddress}</p>
         <div style="display: flex; gap: 6px;">
-          <a href="${getWazeUrl(booking.venueAddress, lat, lng)}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background: #33CCFF; color: #0d3b4c; font-size: 10px; font-weight: bold; padding: 3px 8px; border-radius: 6px; text-decoration: none;">Open Waze</a>
-          <a href="${getGoogleMapsUrl(booking.venueAddress, lat, lng)}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background: #1A73E8; color: white; font-size: 10px; font-weight: bold; padding: 3px 8px; border-radius: 6px; text-decoration: none;">Google Maps</a>
+          <a href="${getWazeUrl(booking.venueAddress, lat, lng)}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background: #33CCFF; color: #052936; font-size: 10px; font-weight: 800; padding: 4px 9px; border-radius: 8px; text-decoration: none;">Waze</a>
+          <a href="${getGoogleMapsUrl(booking.venueAddress, lat, lng)}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background: #1A73E8; color: white; font-size: 10px; font-weight: 800; padding: 4px 9px; border-radius: 8px; text-decoration: none;">Google Maps</a>
         </div>
       </div>
     `;
 
     marker.bindPopup(popupHtml);
 
-    // Invalidate size after modal animation finishes
+    // Invalidate size after modal open animation completes
     const timer = setTimeout(() => {
       map.invalidateSize();
-    }, 250);
+    }, 280);
 
     return () => {
       clearTimeout(timer);
@@ -119,13 +123,13 @@ export default function VenueNavigationModal({
 
   const wazeUrl = getWazeUrl(
     booking.venueAddress,
-    booking.coordinates.lat,
-    booking.coordinates.lng
+    booking.coordinates?.lat,
+    booking.coordinates?.lng
   );
   const gmapsUrl = getGoogleMapsUrl(
     booking.venueAddress,
-    booking.coordinates.lat,
-    booking.coordinates.lng
+    booking.coordinates?.lat,
+    booking.coordinates?.lng
   );
 
   return (
@@ -133,20 +137,18 @@ export default function VenueNavigationModal({
       <div className="bg-white rounded-[2rem] max-w-2xl w-full shadow-2xl border border-[#24252c]/10 overflow-hidden relative flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="p-5 sm:p-6 pb-4 border-b border-[#24252c]/[0.08] flex items-start justify-between gap-4 bg-gradient-to-r from-[var(--mist)] to-white">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="font-mono font-black text-xs text-[#1090F8] bg-[#1090F8]/10 px-2.5 py-0.5 rounded-full">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="font-mono font-extrabold text-xs text-[#1090F8] bg-[#1090F8]/10 px-2.5 py-0.5 rounded-md">
                 {booking.id}
               </span>
-              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 uppercase tracking-wider">
-                Venue Directions
-              </span>
+              <MonoBadge icon={IconNavigation}>Crew Logistics & Route</MonoBadge>
             </div>
             <h2 className="text-xl sm:text-2xl font-extrabold text-[var(--ink)] tracking-tight">
               Venue Navigation & Route
             </h2>
-            <p className="text-xs text-[#24252c]/60 mt-0.5">
-              One-tap direct routing for assigned crew dispatch and on-site logistics.
+            <p className="text-xs text-[#24252c]/60">
+              One-tap direct GPS routing for technical crew dispatch and venue ingress.
             </p>
           </div>
 
@@ -161,15 +163,15 @@ export default function VenueNavigationModal({
 
         {/* Scrollable Content */}
         <div className="p-5 sm:p-6 space-y-5 overflow-y-auto">
-          {/* Main Venue Card */}
-          <div className="bg-[var(--mist)] p-4 sm:p-5 rounded-2xl border border-[#24252c]/[0.06] space-y-3">
+          {/* Main Destination Venue Card */}
+          <div className="bg-[var(--mist)] p-4 sm:p-5 rounded-2xl border border-[#24252c]/[0.08] space-y-3">
             <div className="flex items-start justify-between gap-3">
-              <div className="space-y-1">
+              <div className="space-y-1 min-w-0">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-[#1090F8]">
                   <IconPin className="w-4 h-4 shrink-0 text-[#1090F8]" />
                   <span>Destination Venue</span>
                 </div>
-                <h3 className="text-base sm:text-lg font-black text-[var(--ink)]">
+                <h3 className="text-base sm:text-lg font-extrabold text-[var(--ink)]">
                   {booking.venue}
                 </h3>
                 <p className="text-xs text-[#24252c]/75 leading-relaxed font-medium">
@@ -179,13 +181,13 @@ export default function VenueNavigationModal({
 
               <button
                 onClick={handleCopy}
-                className="shrink-0 flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-white border border-[#24252c]/10 hover:border-[#1090F8] text-[var(--ink)] transition-colors shadow-2xs cursor-pointer"
+                className="shrink-0 flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-full bg-white border border-[#24252c]/10 hover:border-[#1090F8] text-[var(--ink)] transition-colors shadow-2xs cursor-pointer"
                 title="Copy venue address"
               >
                 {copied ? (
                   <>
                     <IconCheck className="w-3.5 h-3.5 text-emerald-600" />
-                    <span className="text-emerald-700 font-bold">Copied!</span>
+                    <span className="text-emerald-700 font-bold">Copied</span>
                   </>
                 ) : (
                   <>
@@ -197,16 +199,21 @@ export default function VenueNavigationModal({
             </div>
 
             {/* Time & Rigging Badges */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-[#24252c]/[0.06] text-xs">
-              <div className="flex items-center gap-2 bg-white/70 px-3 py-2 rounded-xl border border-[#24252c]/[0.05]">
-                <IconClock className="w-4 h-4 text-amber-600 shrink-0" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-[#24252c]/[0.06] text-xs">
+              <div className="flex items-center gap-2.5 bg-white p-2.5 rounded-xl border border-[#24252c]/[0.06]">
+                <div className="p-1.5 rounded-lg bg-amber-50 text-amber-600">
+                  <IconClock className="w-4 h-4" />
+                </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-[#24252c]/50 block">Call Time</span>
+                  <span className="text-[10px] uppercase font-bold text-[#24252c]/50 block">Venue Call Time</span>
                   <span className="font-extrabold text-[var(--ink)]">{booking.callTime}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-2 bg-white/70 px-3 py-2 rounded-xl border border-[#24252c]/[0.05]">
-                <IconCalendar className="w-4 h-4 text-[#1090F8] shrink-0" />
+
+              <div className="flex items-center gap-2.5 bg-white p-2.5 rounded-xl border border-[#24252c]/[0.06]">
+                <div className="p-1.5 rounded-lg bg-[#1090F8]/10 text-[#1090F8]">
+                  <IconCalendar className="w-4 h-4" />
+                </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-[#24252c]/50 block">Event Date</span>
                   <span className="font-extrabold text-[var(--ink)]">{booking.date}</span>
@@ -215,10 +222,10 @@ export default function VenueNavigationModal({
             </div>
           </div>
 
-          {/* ONE-TAP LAUNCH BUTTONS */}
+          {/* ONE-TAP LAUNCH NAVIGATION CARDS */}
           <div className="space-y-2">
             <label className="text-[11px] font-extrabold text-[#24252c]/60 uppercase tracking-wider block">
-              One-Tap Turn-by-Turn Navigation Apps
+              Turn-by-Turn GPS Navigation Apps
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* WAZE BUTTON */}
@@ -226,21 +233,23 @@ export default function VenueNavigationModal({
                 href={wazeUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="group flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-br from-[#33CCFF] to-[#00B4E8] text-[#052936] hover:shadow-md hover:scale-[1.01] transition-all font-bold cursor-pointer"
+                className="group flex items-center justify-between p-4 rounded-2xl bg-white border border-[#24252c]/10 hover:border-[#1090F8] hover:shadow-md transition-all cursor-pointer"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-white/90 flex items-center justify-center text-[#00B4E8] shadow-xs group-hover:scale-105 transition-transform">
-                    <IconWaze className="w-6 h-6 text-[#0096C7]" />
+                  <div className="w-10 h-10 rounded-xl bg-[#1090F8]/10 text-[#1090F8] flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <IconNavigation className="w-5 h-5" />
                   </div>
                   <div className="text-left">
-                    <div className="text-xs uppercase tracking-wider text-[#052936]/80 font-black">
-                      Navigate with
+                    <div className="text-[10px] uppercase tracking-wider text-[#24252c]/50 font-extrabold">
+                      Live Traffic Route
                     </div>
-                    <div className="text-base font-black text-[#052936]">Waze Live</div>
+                    <div className="text-sm font-extrabold text-[var(--ink)] group-hover:text-[#1090F8] transition-colors">
+                      Open in Waze
+                    </div>
                   </div>
                 </div>
-                <div className="w-7 h-7 rounded-full bg-white/30 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
-                  <IconExternal className="w-4 h-4 text-[#052936]" />
+                <div className="w-7 h-7 rounded-full bg-[var(--mist)] flex items-center justify-center text-[#24252c]/60 group-hover:text-[#1090F8] group-hover:translate-x-0.5 transition-all">
+                  <IconExternal className="w-3.5 h-3.5" />
                 </div>
               </a>
 
@@ -249,21 +258,23 @@ export default function VenueNavigationModal({
                 href={gmapsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="group flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-br from-[#1A73E8] to-[#1557b0] text-white hover:shadow-md hover:scale-[1.01] transition-all font-bold cursor-pointer"
+                className="group flex items-center justify-between p-4 rounded-2xl bg-white border border-[#24252c]/10 hover:border-[#1090F8] hover:shadow-md transition-all cursor-pointer"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
-                    <IconGoogleMaps className="w-6 h-6" />
+                  <div className="w-10 h-10 rounded-xl bg-[#1090F8]/10 text-[#1090F8] flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <IconMap className="w-5 h-5" />
                   </div>
                   <div className="text-left">
-                    <div className="text-xs uppercase tracking-wider text-blue-100 font-black">
-                      Navigate with
+                    <div className="text-[10px] uppercase tracking-wider text-[#24252c]/50 font-extrabold">
+                      Directions & Route
                     </div>
-                    <div className="text-base font-black text-white">Google Maps</div>
+                    <div className="text-sm font-extrabold text-[var(--ink)] group-hover:text-[#1090F8] transition-colors">
+                      Open Google Maps
+                    </div>
                   </div>
                 </div>
-                <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
-                  <IconExternal className="w-4 h-4 text-white" />
+                <div className="w-7 h-7 rounded-full bg-[var(--mist)] flex items-center justify-center text-[#24252c]/60 group-hover:text-[#1090F8] group-hover:translate-x-0.5 transition-all">
+                  <IconExternal className="w-3.5 h-3.5" />
                 </div>
               </a>
             </div>
@@ -275,20 +286,23 @@ export default function VenueNavigationModal({
               <label className="text-[11px] font-extrabold text-[#24252c]/60 uppercase tracking-wider">
                 Venue Location Map Preview
               </label>
-              <span className="text-[10px] text-[#24252c]/50 font-mono">
-                {booking.coordinates.lat.toFixed(4)}° N, {booking.coordinates.lng.toFixed(4)}° E
-              </span>
+              {booking.coordinates && (
+                <span className="text-[10px] text-[#24252c]/50 font-mono">
+                  {booking.coordinates.lat.toFixed(4)}° N, {booking.coordinates.lng.toFixed(4)}° E
+                </span>
+              )}
             </div>
 
-            <div className="rounded-2xl overflow-hidden border border-[#24252c]/10 shadow-inner h-56 sm:h-64 relative bg-gray-100">
+            <div className="rounded-2xl overflow-hidden border border-[#24252c]/10 shadow-xs h-56 sm:h-64 relative bg-[var(--mist)]">
               <div ref={mapContainerRef} className="w-full h-full z-0" />
             </div>
           </div>
 
-          {/* Loading Bay & Ingress Logistics Note */}
-          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs space-y-1">
-            <div className="flex items-center gap-1.5 font-bold text-amber-900 uppercase tracking-wider text-[10px]">
-              <span>Ingress & Loading Bay Gate Instructions</span>
+          {/* Logistics Ingress & Loading Bay Note */}
+          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs space-y-1.5">
+            <div className="flex items-center gap-1.5 font-extrabold text-amber-900 uppercase tracking-wider text-[10px]">
+              <IconBox className="w-3.5 h-3.5 text-amber-700" />
+              <span>Logistics Ingress & Loading Bay Instructions</span>
             </div>
             <p className="text-amber-950 font-medium leading-relaxed">
               {booking.loadingBayNote}
@@ -297,15 +311,20 @@ export default function VenueNavigationModal({
         </div>
 
         {/* Footer */}
-        <div className="p-4 bg-[var(--mist)] border-t border-[#24252c]/[0.08] flex items-center justify-end">
+        <div className="p-4 bg-[var(--mist)] border-t border-[#24252c]/[0.08] flex items-center justify-between gap-3">
+          <div className="text-xs text-[#24252c]/60 flex items-center gap-1.5">
+            <IconShield className="w-3.5 h-3.5 text-[#1090F8]" />
+            <span>Assigned: <strong className="text-[var(--ink)]">{booking.crewSize}</strong></span>
+          </div>
           <button
             onClick={onClose}
-            className="px-5 py-2.5 rounded-full bg-[var(--ink)] text-white text-xs font-bold hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
+            className="px-6 py-2.5 rounded-full bg-[var(--ink)] text-white text-xs font-bold hover:bg-[var(--ink-soft)] transition-colors cursor-pointer shadow-sm"
           >
-            Done
+            Close Navigation
           </button>
         </div>
       </div>
     </ModalOverlay>
   );
 }
+

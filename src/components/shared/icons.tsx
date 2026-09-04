@@ -178,17 +178,32 @@ export const IconNavigation = ({ className = 'w-4 h-4' }: { className?: string }
   </svg>
 );
 
+export const IconMap = ({ className = 'w-4 h-4' }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className}>
+    <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <line x1="8" y1="2" x2="8" y2="18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <line x1="16" y1="6" x2="16" y2="22" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+export const IconCompass = ({ className = 'w-4 h-4' }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className}>
+    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8" />
+    <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 export const IconGoogleMaps = ({ className = 'w-4 h-4' }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" className={className} fill="none">
-    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="#EA4335" />
-    <circle cx="12" cy="9" r="3.2" fill="#FFFFFF" />
-    <circle cx="12" cy="9" r="1.8" fill="#4285F4" />
+  <svg viewBox="0 0 24 24" fill="none" className={className}>
+    <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <line x1="8" y1="2" x2="8" y2="18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <line x1="16" y1="6" x2="16" y2="22" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
 export const IconWaze = ({ className = 'w-4 h-4' }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" className={className} fill="currentColor">
-    <path d="M18.7 8.3C18 4.9 14.9 2.5 11.5 2.5 7.4 2.5 4 5.9 4 10c0 1.2.3 2.3.8 3.3L3.5 17c-.3.7.3 1.5 1.1 1.3l3.6-.9c1 .4 2.1.6 3.3.6 4.1 0 7.5-3.4 7.5-7.5 0-.7-.1-1.5-.3-2.2zM8.5 9.5a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm6 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm-6 4c.6 1 1.7 1.5 3 1.5s2.4-.5 3-1.5H8.5z" />
+  <svg viewBox="0 0 24 24" fill="none" className={className}>
+    <polygon points="3 11 22 2 13 21 11 13 3 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
@@ -196,6 +211,13 @@ export const IconCopy = ({ className = 'w-4 h-4' }: { className?: string }) => (
   <svg viewBox="0 0 24 24" fill="none" className={className}>
     <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+export const IconEdit = ({ className = 'w-4 h-4' }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className}>
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 

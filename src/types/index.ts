@@ -2,6 +2,7 @@ export type Page =
   | 'landing'
   | 'packages'
   | 'package-detail'
+  | 'custom-package'
   | 'equipment'
   | 'item-detail'
   | 'about'

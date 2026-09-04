@@ -223,6 +223,7 @@ export function CustomerHeader({
       {mobileOpen && (
         <div className="mx-auto max-w-7xl mt-2 bg-white border border-[#24252c]/[0.08] rounded-3xl shadow-xl p-4 flex flex-col gap-1.5 lg:hidden animate-blur-in">
           {navItem('Browse Packages', 'packages')}
+          {navItem('✨ Build Custom Package', 'custom-package')}
           {navItem('Active Booking Tracker', 'booking-tracker')}
           {navItem('Booking History', 'booking-history')}
           {navItem('Wishlist', 'wishlist', wishlistCount)}

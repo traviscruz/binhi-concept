@@ -12,159 +12,241 @@ import {
   IconPin,
 } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
-import { INITIAL_ASSIGNED_BOOKINGS, type AssignedBooking } from '../../data/crewBookings';
+import type { AssignedBooking } from '../../data/crewBookings';
 import ClientSignOffModal, { type ClientSignOffData } from '../../components/crew/ClientSignOffModal';
 import { saveClientSignOff, loadClientSignOff } from '../../utils/signoffService';
-
-export interface SetupStage {
-  id: string;
-  stepNum: number;
-  title: string;
-  desc: string;
-  completed: boolean;
-  completedAt?: string;
-}
+import { fetchAssignedBookingsForCurrentCrew } from '../../utils/crewService';
+import {
+  loadBookingWorkflowStages,
+  saveBookingWorkflowStages,
+  type SetupStage,
+} from '../../utils/workflowStageService';
 
 export default function CrewSetupTeardownPage({ go }: { go: (p: Page) => void }) {
+  const [bookingsList, setBookingsList] = useState<AssignedBooking[]>([]);
+  const [loading, setLoading] = useState(true);
+
   // Load selected booking ID from sessionStorage
   const [selectedBookingId, setSelectedBookingId] = useState<string>(() => {
-    return sessionStorage.getItem('crew_selected_booking_id') || INITIAL_ASSIGNED_BOOKINGS[0].id;
+    return sessionStorage.getItem('crew_selected_booking_id') || '';
   });
 
-  const booking = INITIAL_ASSIGNED_BOOKINGS.find((b) => b.id === selectedBookingId) || INITIAL_ASSIGNED_BOOKINGS[0];
-
-  // Client digital sign-off state (persisted in Supabase & local cache per booking ID)
-  const [signOff, setSignOff] = useState<ClientSignOffData | null>(() => {
-    try {
-      const saved = localStorage.getItem(`binhi_crew_signoff_${booking.id}`);
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return null;
-  });
+  const [booking, setBooking] = useState<AssignedBooking | null>(null);
+  const [signOff, setSignOff] = useState<ClientSignOffData | null>(null);
 
   const [signOffModalOpen, setSignOffModalOpen] = useState(false);
   const [viewCertificateModal, setViewCertificateModal] = useState(false);
   const [confirmCompleteModal, setConfirmCompleteModal] = useState(false);
+  const [syncToast, setSyncToast] = useState<string | null>(null);
+
+  const [stages, setStages] = useState<SetupStage[]>([]);
 
   // Sync with Supabase on mount and booking change
   useEffect(() => {
     let isMounted = true;
-    loadClientSignOff(booking.id).then((cloudSignOff) => {
-      if (isMounted && cloudSignOff) {
-        setSignOff(cloudSignOff);
-        setStages((prev) =>
-          prev.map((st) =>
-            st.id === 'st-3' && !st.completed
-              ? { ...st, completed: true, completedAt: cloudSignOff.signedAt }
-              : st
-          )
-        );
+
+    async function initPage() {
+      setLoading(true);
+      try {
+        const { bookings } = await fetchAssignedBookingsForCurrentCrew();
+        if (!isMounted) return;
+        setBookingsList(bookings);
+
+        let activeId = selectedBookingId;
+        let activeBooking = bookings.find((b) => b.id === activeId);
+
+        if (!activeBooking && bookings.length > 0) {
+          activeBooking = bookings[0];
+          activeId = activeBooking.id;
+          setSelectedBookingId(activeId);
+          sessionStorage.setItem('crew_selected_booking_id', activeId);
+        }
+
+        if (activeBooking) {
+          setBooking(activeBooking);
+          const cloudSignOff = await loadClientSignOff(activeBooking.id);
+          if (isMounted) {
+            setSignOff(cloudSignOff);
+            // Load real-time workflow stages from Supabase database
+            const { stages: dbStages, status: dbStatus } = await loadBookingWorkflowStages(
+              activeBooking.id,
+              cloudSignOff
+            );
+            setStages(dbStages);
+            setBooking((prev) => (prev ? { ...prev, status: dbStatus as any } : null));
+          }
+        }
+      } catch (err) {
+        console.error('Error in CrewSetupTeardownPage init:', err);
+      } finally {
+        if (isMounted) setLoading(false);
       }
-    });
+    }
+
+    initPage();
+
     return () => {
       isMounted = false;
     };
-  }, [booking.id]);
-
-  const getInitialStagesForBooking = (b: AssignedBooking, currentSignOff: ClientSignOffData | null): SetupStage[] => {
-    try {
-      const saved = localStorage.getItem(`binhi_crew_stages_${b.id}`);
-      if (saved) return JSON.parse(saved);
-    } catch {}
-
-    if (b.status === 'Teardown Complete') {
-      return [
-        { id: 'st-1', stepNum: 1, title: 'Warehouse Packing & Dispatch', desc: 'Verify all physical units against packing checklist, load rigging truck, and dispatch from warehouse.', completed: true, completedAt: '08:00 AM' },
-        { id: 'st-2', stepNum: 2, title: 'On-Site Stage Rigging & Cable Run', desc: 'Unload gear at venue, position speaker stands, mount LED panels to truss, and lay XLR multi-snake cable runs.', completed: true, completedAt: '10:15 AM' },
-        { id: 'st-3', stepNum: 3, title: 'Sound & LED Display Calibration Test', desc: 'Perform pink noise speaker tuning, test wireless mics, calibrate LED video wall brightness, and test low-fog hazer.', completed: true, completedAt: '11:00 AM' },
-        { id: 'st-4', stepNum: 4, title: 'Live Event Production Support', desc: 'Standby on-site for live sound mixing, stage light cues, and technical troubleshooting throughout the event duration.', completed: true, completedAt: '06:00 PM' },
-        { id: 'st-5', stepNum: 5, title: 'Teardown, Inventory Audit & Return', desc: 'Dismantle stage equipment, pack back into flight cases, audit serial IDs, and return to warehouse shelf storage.', completed: true, completedAt: '08:30 PM' },
-      ];
-    }
-
-    if (b.status === 'Pending Setup') {
-      return [
-        { id: 'st-1', stepNum: 1, title: 'Warehouse Packing & Dispatch', desc: 'Verify all physical units against packing checklist, load rigging truck, and dispatch from warehouse.', completed: false },
-        { id: 'st-2', stepNum: 2, title: 'On-Site Stage Rigging & Cable Run', desc: 'Unload gear at venue, position speaker stands, mount LED panels to truss, and lay XLR multi-snake cable runs.', completed: false },
-        { id: 'st-3', stepNum: 3, title: 'Sound & LED Display Calibration Test', desc: 'Perform pink noise speaker tuning, test wireless mics, calibrate LED video wall brightness, and test low-fog hazer.', completed: Boolean(currentSignOff) },
-        { id: 'st-4', stepNum: 4, title: 'Live Event Production Support', desc: 'Standby on-site for live sound mixing, stage light cues, and technical troubleshooting throughout the event duration.', completed: false },
-        { id: 'st-5', stepNum: 5, title: 'Teardown, Inventory Audit & Return', desc: 'Dismantle stage equipment, pack back into flight cases, audit serial IDs, and return to warehouse shelf storage.', completed: false },
-      ];
-    }
-
-    return [
-      { id: 'st-1', stepNum: 1, title: 'Warehouse Packing & Dispatch', desc: 'Verify all physical units against packing checklist, load rigging truck, and dispatch from warehouse.', completed: true, completedAt: '07:30 AM' },
-      { id: 'st-2', stepNum: 2, title: 'On-Site Stage Rigging & Cable Run', desc: 'Unload gear at venue, position speaker stands, mount LED panels to truss, and lay XLR multi-snake cable runs.', completed: true, completedAt: '09:45 AM' },
-      { id: 'st-3', stepNum: 3, title: 'Sound & LED Display Calibration Test', desc: 'Perform pink noise speaker tuning, test wireless mics, calibrate LED video wall brightness, and test low-fog hazer.', completed: Boolean(currentSignOff), completedAt: currentSignOff?.signedAt },
-      { id: 'st-4', stepNum: 4, title: 'Live Event Production Support', desc: 'Standby on-site for live sound mixing, stage light cues, and technical troubleshooting throughout the event duration.', completed: false },
-      { id: 'st-5', stepNum: 5, title: 'Teardown, Inventory Audit & Return', desc: 'Dismantle stage equipment, pack back into flight cases, audit serial IDs, and return to warehouse shelf storage.', completed: false },
-    ];
-  };
-
-  const [stages, setStages] = useState<SetupStage[]>(() =>
-    getInitialStagesForBooking(booking, signOff)
-  );
+  }, []);
 
   // Sync state when booking changes
   const handleSwitchBooking = async (newId: string) => {
     setSelectedBookingId(newId);
     sessionStorage.setItem('crew_selected_booking_id', newId);
-    const newBooking = INITIAL_ASSIGNED_BOOKINGS.find((b) => b.id === newId) || INITIAL_ASSIGNED_BOOKINGS[0];
+    const newBooking = bookingsList.find((b) => b.id === newId);
+    if (!newBooking) return;
 
+    setBooking(newBooking);
     const currentSignOff = await loadClientSignOff(newBooking.id);
     setSignOff(currentSignOff);
-    setStages(getInitialStagesForBooking(newBooking, currentSignOff));
+
+    const { stages: dbStages, status: dbStatus } = await loadBookingWorkflowStages(
+      newBooking.id,
+      currentSignOff
+    );
+    setStages(dbStages);
+    setBooking((prev) => (prev ? { ...prev, status: dbStatus as any } : null));
   };
 
-  const toggleStage = (id: string) => {
-    setStages((prev) => {
-      const updated = prev.map((st) => {
-        if (st.id === id) {
-          const nextState = !st.completed;
-          return {
-            ...st,
-            completed: nextState,
-            completedAt: nextState ? new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined,
-          };
-        }
-        return st;
-      });
-      try {
-        localStorage.setItem(`binhi_crew_stages_${booking.id}`, JSON.stringify(updated));
-      } catch {}
-      return updated;
+  const toggleStage = async (id: string) => {
+    if (!booking) return;
+
+    const updated = stages.map((st) => {
+      if (st.id === id) {
+        const nextState = !st.completed;
+        return {
+          ...st,
+          completed: nextState,
+          completedAt: nextState
+            ? new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : undefined,
+        };
+      }
+      return st;
     });
+
+    setStages(updated);
+
+    // Persist changes to Supabase Database
+    const { overallStatus } = await saveBookingWorkflowStages(booking.id, updated, {
+      verifiedBy: booking.leadTechnician,
+      hasSignOff: Boolean(signOff),
+      bookingCustomer: booking.customer,
+    });
+
+    setBooking((prev) => (prev ? { ...prev, status: overallStatus as any } : null));
+    setSyncToast('Milestone saved to database');
+    setTimeout(() => setSyncToast(null), 3000);
   };
 
   const handleSaveSignOff = async (data: ClientSignOffData) => {
+    if (!booking) return;
+
     setSignOff(data);
     await saveClientSignOff(booking.id, data);
 
     // Automatically mark calibration stage as completed with the sign-off timestamp
-    setStages((prev) => {
-      const updated = prev.map((st) =>
-        st.id === 'st-3'
-          ? { ...st, completed: true, completedAt: data.signedAt }
-          : st
-      );
-      try {
-        localStorage.setItem(`binhi_crew_stages_${booking.id}`, JSON.stringify(updated));
-      } catch {}
-      return updated;
+    const updated = stages.map((st) =>
+      st.id === 'st-3' ? { ...st, completed: true, completedAt: data.signedAt } : st
+    );
+
+    setStages(updated);
+
+    // Save to Supabase Database
+    const { overallStatus } = await saveBookingWorkflowStages(booking.id, updated, {
+      verifiedBy: data.clientName,
+      hasSignOff: true,
+      bookingCustomer: booking.customer,
     });
+
+    setBooking((prev) => (prev ? { ...prev, status: overallStatus as any } : null));
+    setSyncToast('Client sign-off & stage synced to database');
+    setTimeout(() => setSyncToast(null), 3500);
   };
 
-  const handleClearSignOff = () => {
+  const handleClearSignOff = async () => {
+    if (!booking) return;
     if (window.confirm('Are you sure you want to clear the client signature and re-sign?')) {
       setSignOff(null);
       try {
         localStorage.removeItem(`binhi_crew_signoff_${booking.id}`);
       } catch {}
+
+      const updated = stages.map((st) =>
+        st.id === 'st-3' ? { ...st, completed: false, completedAt: undefined } : st
+      );
+      setStages(updated);
+      const { overallStatus } = await saveBookingWorkflowStages(booking.id, updated, {
+        hasSignOff: false,
+        bookingCustomer: booking.customer,
+      });
+      setBooking((prev) => (prev ? { ...prev, status: overallStatus as any } : null));
     }
   };
 
+  const handleCompleteAllStages = async () => {
+    if (!booking) return;
+
+    const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const updated = stages.map((s) => ({
+      ...s,
+      completed: true,
+      completedAt: s.completedAt || currentTime,
+    }));
+
+    setStages(updated);
+    setConfirmCompleteModal(false);
+
+    // Persist all 5 completed stages to Supabase Database
+    const { overallStatus } = await saveBookingWorkflowStages(booking.id, updated, {
+      verifiedBy: booking.leadTechnician,
+      hasSignOff: true,
+      bookingCustomer: booking.customer,
+    });
+
+    setBooking((prev) => (prev ? { ...prev, status: overallStatus as any } : null));
+    setSyncToast('All stages completed & updated in database');
+    setTimeout(() => setSyncToast(null), 3500);
+  };
+
   const completedCount = stages.filter((st) => st.completed).length;
-  const progressPct = Math.round((completedCount / stages.length) * 100);
+  const progressPct = stages.length > 0 ? Math.round((completedCount / stages.length) * 100) : 0;
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="h-10 w-64 bg-black/10 rounded-xl animate-pulse" />
+        <div className="h-40 w-full bg-white rounded-2xl border border-[#24252c]/10 animate-pulse" />
+      </div>
+    );
+  }
+
+  if (!booking) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-3xl p-8 sm:p-12 text-center border border-[#24252c]/10 shadow-sm space-y-4 max-w-xl mx-auto my-6">
+          <div className="w-14 h-14 rounded-full bg-[#1090F8]/10 text-[#1090F8] flex items-center justify-center mx-auto border border-[#1090F8]/20">
+            <IconShield className="w-7 h-7" />
+          </div>
+          <div>
+            <h3 className="text-lg font-extrabold text-[var(--ink)]">No Assigned Event Selected</h3>
+            <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
+              You are not currently assigned to any active event booking. Once the administrator designates you to an upcoming booking, your stage milestones and digital sign-off tools will appear here.
+            </p>
+          </div>
+          <div className="pt-2">
+            <button
+              onClick={() => go('crew-assigned-bookings')}
+              className="px-5 py-2.5 rounded-full bg-[var(--ink)] text-white text-xs font-bold hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
+            >
+              Back to Assigned Bookings
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -187,12 +269,21 @@ export default function CrewSetupTeardownPage({ go }: { go: (p: Page) => void })
           </p>
         </div>
 
-        <button
-          onClick={() => setConfirmCompleteModal(true)}
-          className="bg-emerald-600 text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-emerald-700 transition-colors shadow-sm self-start sm:self-auto cursor-pointer"
-        >
-          Mark All Stages Complete
-        </button>
+        <div className="flex items-center gap-3 self-start sm:self-auto">
+          {syncToast && (
+            <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-200 shadow-2xs animate-fade-in">
+              <IconCheck className="w-3.5 h-3.5 stroke-[3]" />
+              <span className="font-bold">{syncToast}</span>
+            </div>
+          )}
+
+          <button
+            onClick={() => setConfirmCompleteModal(true)}
+            className="bg-emerald-600 text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-emerald-700 transition-colors shadow-sm cursor-pointer"
+          >
+            Mark All Stages Complete
+          </button>
+        </div>
       </div>
 
       {/* Booking Quick Context Card */}
@@ -203,7 +294,7 @@ export default function CrewSetupTeardownPage({ go }: { go: (p: Page) => void })
               {booking.id}
             </span>
             <span className="font-extrabold text-[var(--ink)] text-sm">{booking.package}</span>
-            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/10">
+            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 uppercase tracking-wider">
               {booking.status}
             </span>
           </div>
@@ -215,20 +306,22 @@ export default function CrewSetupTeardownPage({ go }: { go: (p: Page) => void })
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-[#24252c]/10">
-          <div className="flex items-center gap-1.5 bg-[var(--mist)] px-3 py-1.5 rounded-xl border border-[#24252c]/10">
-            <span className="text-[11px] font-bold text-[#24252c]/60">Assignment:</span>
-            <select
-              value={booking.id}
-              onChange={(e) => handleSwitchBooking(e.target.value)}
-              className="bg-transparent text-[var(--ink)] font-extrabold text-xs focus:outline-none cursor-pointer"
-            >
-              {INITIAL_ASSIGNED_BOOKINGS.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.id} — {b.customer}
-                </option>
-              ))}
-            </select>
-          </div>
+          {bookingsList.length > 1 && (
+            <div className="flex items-center gap-1.5 bg-[var(--mist)] px-3 py-1.5 rounded-xl border border-[#24252c]/10">
+              <span className="text-[11px] font-bold text-[#24252c]/60">Assignment:</span>
+              <select
+                value={booking.id}
+                onChange={(e) => handleSwitchBooking(e.target.value)}
+                className="bg-transparent text-[var(--ink)] font-extrabold text-xs focus:outline-none cursor-pointer max-w-[200px] truncate"
+              >
+                {bookingsList.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.id} — {b.customer}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <button
             onClick={() => go('crew-booking-detail')}
@@ -257,7 +350,7 @@ export default function CrewSetupTeardownPage({ go }: { go: (p: Page) => void })
         </div>
       </div>
 
-      {/* CLIENT INGRESS / SOUNDCHECK DIGITAL SIGN-OFF CARD (FEATURE 17) */}
+      {/* CLIENT INGRESS / SOUNDCHECK DIGITAL SIGN-OFF CARD */}
       <div
         className={`rounded-2xl p-6 border transition-all shadow-sm space-y-4 ${
           signOff
@@ -356,15 +449,15 @@ export default function CrewSetupTeardownPage({ go }: { go: (p: Page) => void })
               {/* Verified Checklist Badges */}
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-800 border border-emerald-500/20 flex items-center gap-1">
-                  <IconCheck className="w-3 h-3 text-emerald-600" />
+                  <IconCheck className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Soundcheck Approved</span>
                 </span>
                 <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-800 border border-emerald-500/20 flex items-center gap-1">
-                  <IconCheck className="w-3 h-3 text-emerald-600" />
+                  <IconCheck className="w-3.5 h-3.5 text-emerald-600" />
                   <span>LED & Lighting Responsive</span>
                 </span>
                 <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-800 border border-emerald-500/20 flex items-center gap-1">
-                  <IconCheck className="w-3 h-3 text-emerald-600" />
+                  <IconCheck className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Rigging & Cabling Safe</span>
                 </span>
               </div>
@@ -392,14 +485,12 @@ export default function CrewSetupTeardownPage({ go }: { go: (p: Page) => void })
         )}
       </div>
 
-      {/* Interactive Setup Stages List */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between text-xs px-1">
-          <span className="font-extrabold text-[#24252c]/70 uppercase tracking-wider">
-            Operational Stages Checklist
-          </span>
-          <span className="text-[#24252c]/50">
-            Tap 'Mark Stage Done' to toggle individual milestones
+      {/* STAGE MILESTONES WORKFLOW TIMELINE */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-extrabold text-[var(--ink)]">Production Workflow Timeline</h2>
+          <span className="text-xs text-[#24252c]/60">
+            {completedCount} of {stages.length} milestones complete
           </span>
         </div>
 
@@ -408,45 +499,38 @@ export default function CrewSetupTeardownPage({ go }: { go: (p: Page) => void })
             key={st.id}
             className={`p-5 rounded-2xl border transition-all ${
               st.completed
-                ? 'bg-emerald-500/[0.04] border-emerald-500/30'
-                : 'bg-white border-[#24252c]/[0.08] shadow-sm hover:border-[#1090F8]/40'
+                ? 'bg-white border-emerald-500/30 shadow-xs'
+                : 'bg-white border-[#24252c]/[0.08] hover:border-[#1090F8]/30 shadow-2xs'
             }`}
           >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+              <div className="flex items-start gap-3.5 min-w-0">
                 <div
-                  className={`w-11 h-11 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 ${
-                    st.completed
-                      ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
-                      : 'bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/10'
+                  className={`w-8 h-8 rounded-full flex items-center justify-center font-extrabold text-xs shrink-0 transition-colors ${
+                    st.completed ? 'bg-emerald-600 text-white' : 'bg-[var(--mist)] text-[var(--ink)]'
                   }`}
                 >
-                  0{st.stepNum}
+                  {st.completed ? <IconCheck className="w-4 h-4 stroke-[3]" /> : st.stepNum}
                 </div>
 
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[var(--mist)] text-[var(--ink)]">
-                      Step {st.stepNum}
-                    </span>
-                    <h3 className="font-extrabold text-base text-[var(--ink)]">{st.title}</h3>
-                    {st.completedAt && (
-                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                        Logged at {st.completedAt}
-                      </span>
-                    )}
-                    {st.id === 'st-3' && signOff && (
-                      <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                        Client Signed
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className={`font-bold text-sm ${st.completed ? 'text-[var(--ink)]' : 'text-[var(--ink)]'}`}>
+                      {st.title}
+                    </h3>
+                    {st.completed && st.completedAt && (
+                      <span className="text-[10px] font-mono font-semibold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded border border-emerald-200">
+                        {st.completedAt}
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-[#24252c]/65 mt-1 leading-relaxed">{st.desc}</p>
+                  <p className="text-xs text-[#24252c]/65 leading-relaxed">{st.desc}</p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
                 <button
+                  type="button"
                   onClick={() => toggleStage(st.id)}
                   className={`w-full sm:w-auto text-xs font-extrabold px-5 py-2.5 rounded-full border transition-all shrink-0 cursor-pointer ${
                     st.completed
@@ -476,7 +560,7 @@ export default function CrewSetupTeardownPage({ go }: { go: (p: Page) => void })
           </div>
           <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">Mark Event Complete?</h3>
           <p className="text-xs text-[#24252c]/60 mb-5">
-            This will mark all 5 setup & teardown stages as complete and update inventory status back to warehouse storage.
+            This will mark all 5 setup & teardown stages as complete and update inventory status back to warehouse storage in the database.
           </p>
 
           <div className="flex items-center gap-3 text-xs">
@@ -487,10 +571,7 @@ export default function CrewSetupTeardownPage({ go }: { go: (p: Page) => void })
               Cancel
             </button>
             <button
-              onClick={() => {
-                setStages((prev) => prev.map((s) => ({ ...s, completed: true })));
-                setConfirmCompleteModal(false);
-              }}
+              onClick={handleCompleteAllStages}
               className="flex-1 bg-emerald-600 text-white font-semibold py-3 rounded-full hover:bg-emerald-700 transition-colors shadow-md cursor-pointer"
             >
               Yes, Complete Event

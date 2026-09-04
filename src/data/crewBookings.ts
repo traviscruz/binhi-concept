@@ -14,6 +14,7 @@ export interface AssignedBooking {
   powerSpecs: string;
   riggingWindow: string;
   status: 'Pending Setup' | 'Setup In Progress' | 'Setup Complete' | 'Teardown Complete';
+  rawDate?: string;
 }
 
 export const INITIAL_ASSIGNED_BOOKINGS: AssignedBooking[] = [

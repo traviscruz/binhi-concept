@@ -1,7 +1,8 @@
 import { useRef } from 'react';
+import type { Page } from '../../types';
 import { FEATURED_PACKAGES, type PackageData, getPackagePhotoCount } from '../../data/packages';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconArrow, IconTicket, IconHeart } from '../../components/shared/icons';
+import { IconArrow, IconTicket, IconHeart, IconBox } from '../../components/shared/icons';
 import { ImageWithSkeleton } from '../../components/shared/ImageWithSkeleton';
 
 export default function PackageCatalogPage({
@@ -10,12 +11,14 @@ export default function PackageCatalogPage({
   wishlistIds = [],
   toggleWishlist,
   packages = [],
+  go,
 }: {
   goPackageDetail: (id: string) => void;
   isCustomer?: boolean;
   wishlistIds?: string[];
   toggleWishlist?: (id: string) => void;
   packages?: PackageData[];
+  go?: (p: Page) => void;
 }) {
   const displayPackages = [...(packages && packages.length > 0 ? packages : FEATURED_PACKAGES)].sort((a, b) =>
     a.name.localeCompare(b.name)
@@ -203,6 +206,35 @@ export default function PackageCatalogPage({
             })}
           </div>
         )}
+
+        {/* ── Custom Package Call-to-Action Banner (Below Packages) ── */}
+        <div className="mt-12 sm:mt-16 p-6 sm:p-8 rounded-[2rem] bg-gradient-to-r from-[var(--ink)] via-[#20222a] to-[#121318] text-white shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative overflow-hidden group">
+          <div className="relative z-10 space-y-2 max-w-xl">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-white/10 text-white border border-white/20">
+              <span>Custom Production Setup</span>
+            </div>
+            <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight">
+              Create &amp; Customize Your Own Package
+            </h2>
+            <p className="text-xs sm:text-sm text-white/75 leading-relaxed">
+              Prefer to pick your own sound gear, stage lights, moving heads, wireless mics, and LED video panels? Build your bespoke package directly from our live warehouse inventory.
+            </p>
+          </div>
+
+          <div className="relative z-10 shrink-0">
+            <button
+              type="button"
+              onClick={() => go?.('custom-package')}
+              className="w-full sm:w-auto bg-[#1090F8] hover:bg-[#1090F8]/90 text-white font-extrabold text-xs px-6 py-3.5 rounded-full transition-all shadow-md hover:shadow-lg hover:scale-[1.02] cursor-pointer inline-flex items-center justify-center gap-2"
+            >
+              <span>Build Custom Package</span>
+              <span>→</span>
+            </button>
+          </div>
+
+          {/* Subtle ambient lighting effect */}
+          <div className="absolute -right-8 -bottom-8 w-44 h-44 rounded-full bg-[#1090F8]/20 blur-3xl pointer-events-none" />
+        </div>
       </div>
     </section>
   );

@@ -8,6 +8,7 @@ import { BookingRescheduleCalendar } from '../../components/shared/BookingResche
 import { supabase } from '../../lib/supabase';
 import { formatDisplayDate } from '../../utils/bookingService';
 import { sendAdminRescheduleAlert } from '../../utils/emailService';
+import { createPaymongoCheckoutSession } from '../../utils/paymongoPayment';
 
 export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
   const [bookings, setBookings] = useState<any[]>([]);
@@ -17,6 +18,10 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
   const [loading, setLoading] = useState(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Remaining Balance Settlement State
+  const [payingBalance, setPayingBalance] = useState(false);
+  const [balanceError, setBalanceError] = useState('');
 
   // Reschedule Request Modal State
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
@@ -211,6 +216,75 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
     }
   };
 
+  const handlePayRemainingBalance = async (booking: any) => {
+    if (!booking) return;
+    setPayingBalance(true);
+    setBalanceError('');
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      const total = Number(booking.total_cost || 0);
+      const deposit = Number(booking.deposit_amount || 0);
+      const rem = Math.max(0, total - deposit);
+
+      if (rem <= 0) {
+        alert('This booking has no remaining balance.');
+        return;
+      }
+
+      const cleanRef = booking.paymongo_reference_number || `BNH-${booking.id.slice(0, 8)}`;
+      const refNum = `BAL-${cleanRef}`;
+
+      const fullName = (booking.customer_name || user?.user_metadata?.full_name || '').trim();
+      const nameParts = fullName ? fullName.split(' ') : [];
+      const firstName = nameParts[0] || user?.user_metadata?.first_name || 'Valued';
+      const lastName = nameParts.slice(1).join(' ') || user?.user_metadata?.last_name || 'Customer';
+      const email = booking.customer_email || user?.email || 'customer@binhiconcept.ph';
+      const phone = booking.customer_phone || user?.user_metadata?.phone || '';
+
+      const origin = window.location.origin;
+      const redirectUrl = {
+        success: `${origin}/?page=payment-success&ref=${cleanRef}&type=balance&booking_id=${booking.id}`,
+        failure: `${origin}/?page=payment-failure&ref=${cleanRef}&type=balance&booking_id=${booking.id}`,
+        cancel: `${origin}/?page=payment-cancel&ref=${cleanRef}&type=balance&booking_id=${booking.id}`,
+      };
+
+      const sessionResult = await createPaymongoCheckoutSession({
+        amount: rem,
+        itemDesc: `50% Remaining Balance - ${booking.package_name || 'Event Production'}`,
+        referenceNumber: refNum,
+        buyer: {
+          firstName,
+          lastName,
+          email,
+          phone,
+        },
+        redirectUrl,
+      });
+
+      if (sessionResult?.checkout_url) {
+        if (sessionResult.checkout_id) {
+          try {
+            localStorage.setItem('binhi_paymongo_cs_id', sessionResult.checkout_id);
+            localStorage.setItem(`binhi_cs_${cleanRef}`, sessionResult.checkout_id);
+            localStorage.setItem(`binhi_cs_${refNum}`, sessionResult.checkout_id);
+          } catch { }
+        }
+        window.location.href = sessionResult.checkout_url;
+      } else {
+        throw new Error('Unable to generate PayMongo checkout URL.');
+      }
+    } catch (err: any) {
+      console.error('Balance settlement error:', err);
+      setBalanceError(err?.message || 'Failed to initiate PayMongo payment. Please try again.');
+    } finally {
+      setPayingBalance(false);
+    }
+  };
+
   if (loading) {
     return (
       <section className="pt-36 pb-24 px-6 min-h-screen bg-[var(--mist)]">
@@ -301,6 +375,28 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
   return (
     <section className="pt-36 pb-24 px-4 sm:px-6 min-h-screen bg-[var(--mist)]">
       <div className="max-w-4xl mx-auto space-y-6">
+
+        {/* Balance Error Toast */}
+        {balanceError && (
+          <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-rose-900 shadow-sm flex items-center justify-between gap-3 animate-fade-in text-xs">
+            <div className="flex items-center gap-2.5">
+              <span className="w-6 h-6 rounded-full bg-rose-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                !
+              </span>
+              <div>
+                <strong className="font-extrabold text-sm block">Payment Initialization Failed</strong>
+                <span>{balanceError}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBalanceError('')}
+              className="text-rose-700 hover:text-rose-950 font-bold p-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Success Toast */}
         {rescheduleSuccessToast && (
@@ -434,7 +530,7 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
 
         {/* ── Active Booking Details & Timeline ───────────────────────── */}
         <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-[#24252c]/[0.08] shadow-sm relative">
-          {/* Header with Status & Reschedule Action aligned Top-Right */}
+          {/* Header with Status & Actions aligned Top-Right */}
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-6 border-b border-[#24252c]/[0.06]">
             {/* Left: Package Info */}
             <div className="flex-1 pr-0 sm:pr-4">
@@ -456,7 +552,7 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
               </div>
             </div>
 
-            {/* Right: Top-Right Aligned Status & Request Reschedule Button */}
+            {/* Right: Top-Right Aligned Status & Request Reschedule Action */}
             <div className="flex flex-col sm:items-end gap-2.5 shrink-0">
               <div className="flex items-center gap-2 flex-wrap sm:justify-end">
                 {isPending ? (
@@ -464,10 +560,15 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
                     <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
                     Deposit Pending Approval
                   </span>
+                ) : isFullyPaid ? (
+                  <span className="inline-flex items-center gap-1.5 bg-emerald-500/15 text-emerald-700 font-extrabold text-xs px-3.5 py-1.5 rounded-full border border-emerald-500/30 whitespace-nowrap shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+                    Fully Paid (100%) ✓
+                  </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 bg-emerald-500/10 text-emerald-700 font-extrabold text-xs px-3.5 py-1.5 rounded-full border border-emerald-500/20 whitespace-nowrap shadow-2xs">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                    Confirmed & Date Secured
+                    50% Deposit Secured
                   </span>
                 )}
 
@@ -581,27 +682,52 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
             </div>
           </div>
 
-          {/* Selected Add-ons (if any) */}
-          {Array.isArray(activeBooking.selected_addons) && activeBooking.selected_addons.length > 0 && (
-            <div className="mb-6 p-4 rounded-2xl bg-white border border-[#24252c]/[0.08]">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#24252c]/50 block mb-2">
-                Custom Production Add-ons
+          {/* ── Remaining 50% Balance Settlement Banner (ONLY shown if NOT fully paid) ── */}
+          {!isFullyPaid && remBal > 0 && !isPending && (
+            <div className="my-6 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-50 via-emerald-50/50 to-white border border-emerald-300 text-xs shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white font-extrabold flex items-center justify-center shrink-0 text-base shadow-sm mt-0.5">
+                  ₱
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-extrabold text-sm text-emerald-950">
+                      50% Remaining Balance Due: ₱{remBal.toLocaleString()}
+                    </h4>
+                    <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 uppercase tracking-wider">
+                      Pending Settlement
+                    </span>
+                  </div>
+                  <p className="text-xs text-emerald-900/80 mt-1 leading-relaxed">
+                    Settle your remaining balance of <strong className="text-emerald-950 font-bold">₱{remBal.toLocaleString()}</strong> anytime before or on the day of your event via PayMongo (GCash, Maya, Cards, or QR Ph).
+                  </p>
+                </div>
+              </div>
+
+              <div className="shrink-0 flex items-center">
+                <button
+                  type="button"
+                  disabled={payingBalance}
+                  onClick={() => handlePayRemainingBalance(activeBooking)}
+                  className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold px-5 py-2.5 rounded-full transition-all shadow-md hover:shadow-lg cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  <span>{payingBalance ? 'Connecting to PayMongo...' : `Pay Remaining Balance (₱${remBal.toLocaleString()}) →`}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── 100% Fully Settled Badge Banner (ONLY shown if fully paid) ── */}
+          {isFullyPaid && (
+            <div className="my-6 p-4 rounded-2xl bg-emerald-50/90 border border-emerald-200 text-emerald-950 text-xs shadow-2xs flex items-center gap-3">
+              <span className="w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+                ✓
               </span>
-              <div className="flex flex-wrap gap-2">
-                {activeBooking.selected_addons.map((addon: any, idx: number) => (
-                  <span
-                    key={idx}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#1090F8]/10 text-[#1090F8] border border-[#1090F8]/20"
-                  >
-                    <span>+</span>
-                    <span>{addon.name || addon.title || 'Add-on'}</span>
-                    {addon.price && (
-                      <span className="text-[10px] opacity-75 font-mono">
-                        (₱{Number(addon.price).toLocaleString()})
-                      </span>
-                    )}
-                  </span>
-                ))}
+              <div>
+                <strong className="font-bold text-emerald-900 block text-xs">Event Reservation 100% Fully Paid</strong>
+                <span className="text-[11px] text-emerald-800">
+                  All production package and add-on costs have been completely settled ({activeBooking.balance_payment_method || 'PayMongo Online Payment'}). Zero remaining balance.
+                </span>
               </div>
             </div>
           )}

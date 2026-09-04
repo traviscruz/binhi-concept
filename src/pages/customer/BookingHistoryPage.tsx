@@ -1,18 +1,23 @@
 import { useState, useEffect } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconTicket, IconCalendar, IconPin, IconX, IconPrinter } from '../../components/shared/icons';
+import { IconTicket, IconCalendar, IconPin, IconX, IconPrinter, IconCheck } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { BookingRescheduleCalendar } from '../../components/shared/BookingRescheduleCalendar';
 import { supabase } from '../../lib/supabase';
 import { formatDisplayDate } from '../../utils/bookingService';
 import { sendAdminRescheduleAlert } from '../../utils/emailService';
+import { createPaymongoCheckoutSession } from '../../utils/paymongoPayment';
 
 export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
   const [historyItems, setHistoryItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadModalItem, setDownloadModalItem] = useState<any | null>(null);
+
+  // Balance Payment State
+  const [payingBalanceId, setPayingBalanceId] = useState<string | null>(null);
+  const [balanceError, setBalanceError] = useState('');
 
   // Reschedule Request Modal States
   const [rescheduleTargetItem, setRescheduleTargetItem] = useState<any | null>(null);
@@ -76,6 +81,9 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
               date: formatDisplayDate(b.event_date),
               rawDate: b.event_date || '',
               venue: b.venue_address || 'Selected Location',
+              rawTotal: total,
+              rawDeposit: deposit,
+              rawRemaining: remBal,
               total: `₱${total.toLocaleString()}`,
               deposit: `₱${deposit.toLocaleString()}`,
               remaining: `₱${remBal.toLocaleString()}`,
@@ -189,6 +197,73 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
     }
   };
 
+  const handlePayRemainingBalance = async (item: any) => {
+    if (!item) return;
+    setPayingBalanceId(item.dbId);
+    setBalanceError('');
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      const total = item.rawTotal || Number((item.total || '').replace(/[^\d.]/g, '')) || 0;
+      const deposit = item.rawDeposit || Number((item.deposit || '').replace(/[^\d.]/g, '')) || 0;
+      const rem = item.rawRemaining !== undefined ? item.rawRemaining : Math.max(0, total - deposit);
+
+      if (rem <= 0) {
+        alert('This booking is already fully settled.');
+        return;
+      }
+
+      const cleanRef = item.id || `BNH-${item.dbId.slice(0, 8)}`;
+      const refNum = `BAL-${cleanRef}`;
+
+      const fullName = (item.customerName || user?.user_metadata?.full_name || '').trim();
+      const nameParts = fullName ? fullName.split(' ') : [];
+      const firstName = nameParts[0] || user?.user_metadata?.first_name || 'Valued';
+      const lastName = nameParts.slice(1).join(' ') || user?.user_metadata?.last_name || 'Customer';
+      const email = item.customerEmail || user?.email || 'customer@binhiconcept.ph';
+      const phone = item.customerPhone || user?.user_metadata?.phone || '';
+
+      const origin = window.location.origin;
+      const redirectUrl = {
+        success: `${origin}/?page=payment-success&ref=${cleanRef}&type=balance&booking_id=${item.dbId}`,
+        failure: `${origin}/?page=payment-failure&ref=${cleanRef}&type=balance&booking_id=${item.dbId}`,
+        cancel: `${origin}/?page=payment-cancel&ref=${cleanRef}&type=balance&booking_id=${item.dbId}`,
+      };
+
+      const sessionResult = await createPaymongoCheckoutSession({
+        amount: rem,
+        itemDesc: `50% Remaining Balance - ${item.package || 'Event Production'}`,
+        referenceNumber: refNum,
+        buyer: {
+          firstName,
+          lastName,
+          email,
+          phone,
+        },
+        redirectUrl,
+      });
+
+      if (sessionResult?.checkout_url) {
+        if (sessionResult.checkout_id) {
+          try {
+            localStorage.setItem('binhi_paymongo_cs_id', sessionResult.checkout_id);
+            localStorage.setItem(`binhi_cs_${cleanRef}`, sessionResult.checkout_id);
+            localStorage.setItem(`binhi_cs_${refNum}`, sessionResult.checkout_id);
+          } catch { }
+        }
+        window.location.href = sessionResult.checkout_url;
+      } else {
+        throw new Error('Unable to generate PayMongo checkout URL.');
+      }
+    } catch (err: any) {
+      console.error('Balance settlement error:', err);
+      setBalanceError(err?.message || 'Failed to initiate PayMongo payment. Please try again.');
+    } finally {
+      setPayingBalanceId(null);
+    }
+  };
+
   return (
     <section className={`pt-36 pb-24 px-6 min-h-screen bg-[var(--mist)] ${downloadModalItem ? 'print:hidden' : ''}`}>
       <div className="max-w-5xl mx-auto space-y-6">
@@ -201,6 +276,28 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
             View all past and upcoming event reservations, invoices, and payment receipts.
           </p>
         </div>
+
+        {/* Balance Error Toast */}
+        {balanceError && (
+          <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-rose-900 shadow-sm flex items-center justify-between gap-3 animate-fade-in text-xs">
+            <div className="flex items-center gap-2.5">
+              <span className="w-6 h-6 rounded-full bg-rose-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                !
+              </span>
+              <div>
+                <strong className="font-extrabold text-sm block">Payment Initialization Failed</strong>
+                <span>{balanceError}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBalanceError('')}
+              className="text-rose-700 hover:text-rose-950 font-bold p-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Success Toast */}
         {rescheduleSuccessToast && (
@@ -264,12 +361,12 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                       </span>
                     )}
                     {item.isFullyPaid ? (
-                      <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-500 text-white uppercase tracking-wider">
-                        Fully Paid (100%)
+                      <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-500 text-white uppercase tracking-wider shadow-2xs">
+                        Fully Paid (100%) ✓
                       </span>
                     ) : (
                       <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20 uppercase tracking-wider">
-                        50% Reservation Secured (Remaining Bal: {item.remaining})
+                        50% Deposit Paid (Balance: {item.remaining})
                       </span>
                     )}
                     <span className="text-[10px] font-semibold text-[#24252c]/50">
@@ -307,6 +404,18 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                     >
                       <span>Track Live Setup</span>
                       <span className="font-bold">→</span>
+                    </button>
+                  )}
+                  {/* Pay Remaining Balance Button (ONLY if NOT fully paid and NOT cancelled) */}
+                  {!item.isCompleted && item.status !== 'Cancelled' && !item.isFullyPaid && item.rawRemaining > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => handlePayRemainingBalance(item)}
+                      disabled={payingBalanceId === item.dbId}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-full transition-all shadow-2xs cursor-pointer inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+                    >
+                      <IconCheck className="w-3.5 h-3.5" />
+                      <span>{payingBalanceId === item.dbId ? 'Connecting...' : `Pay Balance (${item.remaining})`}</span>
                     </button>
                   )}
                   {!item.isCompleted && item.status !== 'Cancelled' && (
