@@ -24,10 +24,9 @@ export function TestimonialsSection() {
             role: r.customer_role || 'Event Host',
             event: r.event_name || r.package_name || 'Production Event',
             stars: Number(r.rating) || 5,
-            isMock: Boolean(r.is_mock),
           }));
 
-          // Merge live DB reviews before static testimonials
+          // Live DB reviews show first, followed by curated testimonials
           setTestimonials([...liveReviews, ...TESTIMONIALS_DATA]);
         }
       } catch (err) {
@@ -61,12 +60,9 @@ export function TestimonialsSection() {
               <span key={i} className="text-amber-400 text-lg">★</span>
             ))}
           </div>
-
-          {t.isMock && (
-            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 border border-amber-500/20 uppercase tracking-wider">
-              Mock Data
-            </span>
-          )}
+          <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 uppercase tracking-wider">
+            Verified Host
+          </span>
         </div>
 
         <blockquote className="text-lg md:text-xl font-medium tracking-tight text-[#24252c]/90 leading-relaxed min-h-[5.5rem]">

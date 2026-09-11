@@ -461,6 +461,9 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
         is_fully_paid: isFullPayment,
         remaining_balance: remainingBalanceAmount,
         payment_status: 'paid',
+        status: 'Confirmed',
+        booking_status: 'confirmed',
+        is_completed: false,
         payment_channel: `${finalChannel} (${finalMethod})`,
         paymongo_reference_number: paymentRefNumber.trim() || `BNH-MANUAL-${Date.now().toString().slice(-6)}`,
         customer_name: fullCustomerName,
@@ -480,6 +483,9 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
       if (insertError) {
         delete bookingPayload.deposit_receipt_url;
         delete bookingPayload.booking_source;
+        delete bookingPayload.status;
+        delete bookingPayload.booking_status;
+        delete bookingPayload.is_completed;
         const { error: fallbackErr } = await supabase.from('bookings').insert(bookingPayload);
         if (fallbackErr) throw fallbackErr;
       }

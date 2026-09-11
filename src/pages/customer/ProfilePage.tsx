@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
 import { OtpInput } from '../../components/shared/OtpInput';
-import { IconShield, IconX, IconEye, IconEyeOff, IconUser, IconLock } from '../../components/shared/icons';
+import { IconShield, IconX, IconEye, IconEyeOff, IconUser, IconLock, IconTicket, IconArrow } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { supabase } from '../../utils/supabase';
 import { validatePassword } from '../../utils/passwordValidation';
 import { PasswordChecklist } from '../../components/shared/PasswordChecklist';
+import { fetchUserLoyaltyData } from '../../utils/loyaltyService';
 
 const inputClass =
   'w-full rounded-full border px-5 py-3.5 bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors text-sm';
@@ -22,6 +23,8 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
   const [countryCode, setCountryCode] = useState('+63');
   const [phoneDigits, setPhoneDigits] = useState('');
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
+  const [userTier, setUserTier] = useState('Standard Host');
+  const [loyaltyPoints, setLoyaltyPoints] = useState(0);
 
   // Avatar state
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -85,6 +88,17 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
           if (profile.phone) setPhoneDigits(parseDigits(profile.phone));
           if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
           if (profile.is_phone_verified !== undefined) setIsPhoneVerified(profile.is_phone_verified);
+        }
+
+        // Fetch user loyalty status
+        try {
+          const loyalty = await fetchUserLoyaltyData(user.id, user.email || undefined);
+          if (loyalty?.tier?.tierName) {
+            setUserTier(loyalty.tier.tierName);
+            setLoyaltyPoints(loyalty.points);
+          }
+        } catch (tierErr) {
+          console.warn('Loyalty tier load note:', tierErr);
         }
       } catch (err) {
         console.error('Error loading profile:', err);
@@ -422,17 +436,37 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
     <section className="pt-36 pb-24 px-6 min-h-screen bg-white">
       <div className="max-w-5xl mx-auto space-y-8">
         
-        {/* Header Badge */}
-        <div className="border-b border-[#24252c]/[0.06] pb-4">
+        {/* Header Badge & VIP Status Card */}
+        <div className="border-b border-[#24252c]/[0.06] pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <MonoBadge icon={IconShield}>Account Settings</MonoBadge>
             <h1 className="text-3xl font-extrabold tracking-tight text-[var(--ink)] mt-2">
               Customer Profile & Security
             </h1>
             <p className="text-xs text-[#24252c]/60 mt-1">
-              Manage your personal details, profile picture, and security settings.
+              Manage your personal details, membership status, profile picture, and security settings.
             </p>
           </div>
+
+          {/* Current VIP Tier Badge */}
+          <button
+            type="button"
+            onClick={() => go('loyalty')}
+            className="flex items-center gap-3 bg-gradient-to-br from-slate-900 to-slate-800 hover:from-black hover:to-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-sm border border-slate-700/60 shrink-0 transition-all cursor-pointer group text-left"
+            title="View Host Loyalty & Rewards"
+          >
+            <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center shrink-0 border border-white/15">
+              <IconTicket className="w-4 h-4 text-[#1090F8]" />
+            </div>
+            <div>
+              <div className="text-[9px] font-bold text-white/50 uppercase tracking-widest">Membership Status</div>
+              <div className="text-xs font-black text-white flex items-center gap-1.5 mt-0.5">
+                <span>{userTier}</span>
+                <span className="text-[10px] text-[#1090F8] font-extrabold">({loyaltyPoints.toLocaleString()} PTS)</span>
+              </div>
+            </div>
+            <IconArrow className="w-3.5 h-3.5 text-white/40 group-hover:text-white group-hover:translate-x-0.5 transition-all ml-1 shrink-0" />
+          </button>
         </div>
 
         {/* SECTION 1: Personal Details & Avatar Upload */}

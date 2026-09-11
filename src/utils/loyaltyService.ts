@@ -256,33 +256,47 @@ export function computeLoyaltyTier(points: number, settings: LoyaltySettings): {
 }
 
 /**
- * Automatically compute and award points for completed bookings
+ * Automatically compute and award points for completed and fully paid bookings
  */
 export async function autoComputeAndAwardBookingPoints(userId: string, userEmail?: string): Promise<number> {
+  if (!userId && !userEmail) return 0;
   try {
     const settings = await fetchLoyaltySettings();
+    const ptsRatio = Number(settings.points_per_peso) || 100;
 
-    // 1. Find all completed bookings for this user
+    // 1. Find all bookings for this user (by user_id or customer_email)
     let query = supabase.from('bookings').select('*');
-    if (userId) {
-      query = query.or(`user_id.eq.${userId},email.eq.${userEmail || ''}`);
+    if (userId && userEmail) {
+      query = query.or(`user_id.eq.${userId},customer_email.ilike.${userEmail}`);
+    } else if (userId) {
+      query = query.eq('user_id', userId);
     } else if (userEmail) {
-      query = query.eq('email', userEmail);
+      query = query.ilike('customer_email', userEmail);
     }
 
     const { data: bookings, error: bookingsErr } = await query;
     if (bookingsErr || !bookings || bookings.length === 0) return 0;
 
-    // Filter for completed or fully settled bookings
-    const completedBookings = bookings.filter((b: any) => {
-      const status = (b.status || '').toLowerCase();
-      const paymentStatus = (b.payment_status || '').toLowerCase();
-      return status === 'completed' || paymentStatus === 'completed' || b.is_fully_paid === true;
+    // 2. Filter strictly for COMPLETED and FULLY PAID bookings (not cancelled)
+    const qualifyingBookings = bookings.filter((b: any) => {
+      const rawStatus = (b.status || '').toLowerCase();
+      const rawPaymentStatus = (b.payment_status || '').toLowerCase();
+      const rawBookingStatus = (b.booking_status || '').toLowerCase();
+
+      if (rawStatus === 'cancelled' || rawPaymentStatus === 'cancelled' || rawBookingStatus === 'cancelled') {
+        return false;
+      }
+
+      const isPast = b.event_date ? new Date(b.event_date).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0) : false;
+      const isCompleted = b.is_completed === true || rawStatus === 'completed' || rawPaymentStatus === 'completed' || rawBookingStatus === 'completed' || isPast;
+      const isFullyPaid = b.is_fully_paid === true || (Number(b.remaining_balance ?? 0) <= 0 && rawPaymentStatus === 'paid');
+
+      return isCompleted && isFullyPaid;
     });
 
-    if (completedBookings.length === 0) return 0;
+    if (qualifyingBookings.length === 0) return 0;
 
-    // 2. Fetch existing loyalty transactions for this user
+    // 3. Fetch existing loyalty transactions for this user to prevent double crediting
     const { data: existingTx } = await supabase
       .from('loyalty_transactions')
       .select('booking_id')
@@ -293,59 +307,61 @@ export async function autoComputeAndAwardBookingPoints(userId: string, userEmail
     let totalNewPoints = 0;
     const newTransactions: any[] = [];
 
-    for (const booking of completedBookings) {
-      const bId = booking.id || booking.booking_id;
+    for (const booking of qualifyingBookings) {
+      const bId = booking.id;
       if (!creditedBookingIds.has(bId) && !booking.points_awarded) {
-        // Calculate: 1 Point per ₱100 spent (or per admin setting)
-        const rawTotal = Number(booking.total_cost || booking.total_price || booking.raw_price || 0) ||
-          parseInt(String(booking.total || '0').replace(/\D/g, ''), 10) || 0;
-
-        const earnedPoints = Math.max(1, Math.floor(rawTotal / settings.points_per_peso));
+        // Calculate points based on total_cost and admin points_per_peso formula
+        const totalAmountSpent = Number(booking.total_cost || booking.total_price || booking.raw_price || 0) || 0;
+        const earnedPoints = Math.max(1, Math.floor(totalAmountSpent / ptsRatio));
         totalNewPoints += earnedPoints;
+
+        const bookingRef = booking.paymongo_reference_number || (bId ? `BNH-${bId.slice(0, 8)}` : 'Completed Booking');
+        const pkgName = booking.package_name || 'Event Production Setup';
 
         newTransactions.push({
           user_id: userId,
           booking_id: bId,
-          event_name: `Completed Booking #${booking.booking_id || bId} (${booking.package_name || 'Production Setup'})`,
+          event_name: `Completed Event (${pkgName}) - Ref #${bookingRef}`,
           points: earnedPoints,
           type: 'earn',
           created_at: new Date().toISOString(),
         });
 
-        // Mark points awarded on booking record
-        await supabase
-          .from('bookings')
-          .update({ points_awarded: true })
-          .eq('id', booking.id);
+        // Mark booking points_awarded flag in database
+        try {
+          await supabase
+            .from('bookings')
+            .update({ points_awarded: true })
+            .eq('id', bId);
+        } catch (updateErr) {
+          console.warn('Booking points_awarded update note:', updateErr);
+        }
       }
     }
 
     if (newTransactions.length > 0) {
-      // Insert transactions
+      // Insert new transactions to database ledger
       await supabase.from('loyalty_transactions').insert(newTransactions);
+    }
 
-      // Update user's profile loyalty_points balance
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('loyalty_points')
-        .eq('id', userId)
-        .maybeSingle();
+    // 4. Reconcile total points balance in profiles table from transaction history
+    const { data: allUserTx } = await supabase
+      .from('loyalty_transactions')
+      .select('points')
+      .eq('user_id', userId);
 
-      const currentBalance = Number(profile?.loyalty_points || 0);
-      const updatedBalance = currentBalance + totalNewPoints;
-
+    if (allUserTx) {
+      const reconciledBalance = allUserTx.reduce((sum: number, tx: any) => sum + (Number(tx.points) || 0), 0);
       await supabase
         .from('profiles')
         .update({
-          loyalty_points: updatedBalance,
+          loyalty_points: Math.max(0, reconciledBalance),
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId);
-
-      return totalNewPoints;
     }
 
-    return 0;
+    return totalNewPoints;
   } catch (err) {
     console.error('Error auto-computing loyalty points for completed bookings:', err);
     return 0;
@@ -476,5 +492,48 @@ export async function redeemLoyaltyPoints(
       voucherCode: '',
       error: err.message || 'Failed to process redemption',
     };
+  }
+}
+
+/**
+ * Award +100 bonus loyalty points when customer submits a verified review
+ */
+export async function awardReviewBonusPoints(userId: string, eventName?: string): Promise<number> {
+  if (!userId) return 0;
+  try {
+    const bonusPoints = 100;
+
+    // 1. Fetch current profile loyalty points
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('loyalty_points')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const currentPoints = Number(profile?.loyalty_points || 0);
+    const newPoints = currentPoints + bonusPoints;
+
+    // 2. Update profile points balance
+    await supabase
+      .from('profiles')
+      .update({
+        loyalty_points: newPoints,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    // 3. Record transaction in loyalty_transactions
+    await supabase.from('loyalty_transactions').insert({
+      user_id: userId,
+      event_name: `Verified Review Bonus (+100 PTS) - ${eventName || 'Event Review'}`,
+      points: bonusPoints,
+      type: 'earn',
+      created_at: new Date().toISOString(),
+    });
+
+    return bonusPoints;
+  } catch (err) {
+    console.error('Error awarding review bonus points:', err);
+    return 0;
   }
 }

@@ -5,6 +5,7 @@ import { ModalOverlay } from '../shared/ModalOverlay';
 import { Logo } from './Logo';
 import { supabase } from '../../utils/supabase';
 import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
+import { fetchUserLoyaltyData } from '../../utils/loyaltyService';
 
 export function CustomerHeader({
   page,
@@ -21,6 +22,7 @@ export function CustomerHeader({
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [customerName, setCustomerName] = useState('');
+  const [currentTierName, setCurrentTierName] = useState('Standard');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -97,6 +99,17 @@ export function CustomerHeader({
 
         setCustomerName(name || 'Customer Account');
         setAvatarUrl(avatar);
+
+        // Fetch user loyalty status
+        try {
+          const loyalty = await fetchUserLoyaltyData(user.id, user.email || undefined);
+          if (loyalty?.tier?.tierName) {
+            const shortTier = loyalty.tier.tierName.replace(' Host', '').replace('VIP ', '');
+            setCurrentTierName(shortTier);
+          }
+        } catch (tierErr) {
+          console.warn('Loyalty tier load note:', tierErr);
+        }
       } catch (err) {
         console.error('Error fetching customer profile for header:', err);
         setCustomerName('Customer Account');
@@ -180,7 +193,7 @@ export function CustomerHeader({
         <div className="hidden md:flex items-center gap-3">
           <button
             onClick={() => handleNav('profile')}
-            className={`flex items-center gap-2 pl-1 pr-3 py-1 rounded-full border transition-all outline-none cursor-pointer ${
+            className={`flex items-center gap-2 pl-1.5 pr-3 py-1 rounded-full border transition-all outline-none cursor-pointer ${
               page === 'profile'
                 ? 'bg-[var(--ink)] text-white border-[var(--ink)] shadow-sm'
                 : 'bg-[var(--mist)] text-[var(--ink)] border-[#24252c]/[0.08] hover:border-[#1090F8]/50'
@@ -201,7 +214,24 @@ export function CustomerHeader({
             {loadingProfile ? (
               <span className="w-16 h-3.5 bg-black/10 animate-pulse rounded-full" />
             ) : (
-              <span className="text-sm font-medium">{customerName}</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-semibold">{customerName}</span>
+                <span
+                  className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                    page === 'profile'
+                      ? 'bg-white/20 text-white border border-white/30'
+                      : currentTierName === 'Platinum'
+                      ? 'bg-purple-100 text-purple-800 border border-purple-300'
+                      : currentTierName === 'Gold'
+                      ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                      : currentTierName === 'Silver'
+                      ? 'bg-slate-200 text-slate-800 border border-slate-300'
+                      : 'bg-blue-100 text-blue-800 border border-blue-200'
+                  }`}
+                >
+                  {currentTierName}
+                </span>
+              </div>
             )}
           </button>
 
@@ -223,7 +253,7 @@ export function CustomerHeader({
       {mobileOpen && (
         <div className="mx-auto max-w-7xl mt-2 bg-white border border-[#24252c]/[0.08] rounded-3xl shadow-xl p-4 flex flex-col gap-1.5 lg:hidden animate-blur-in">
           {navItem('Browse Packages', 'packages')}
-          {navItem('✨ Build Custom Package', 'custom-package')}
+          {navItem('Build Custom Package', 'custom-package')}
           {navItem('Active Booking Tracker', 'booking-tracker')}
           {navItem('Booking History', 'booking-history')}
           {navItem('Wishlist', 'wishlist', wishlistCount)}
@@ -239,7 +269,7 @@ export function CustomerHeader({
           >
             Calendar
           </button>
-          {navItem('Profile Settings', 'profile')}
+          {navItem(`Profile Settings (${currentTierName} Host)`, 'profile')}
           <div className="h-px bg-[#24252c]/[0.06] my-1" />
           <button
             onClick={handleLogout}

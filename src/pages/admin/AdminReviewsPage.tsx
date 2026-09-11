@@ -14,8 +14,7 @@ interface ReviewItem {
   packageName: string;
   eventName: string;
   comment: string;
-  status: string; // 'pending', 'approved', 'featured', 'hidden'
-  isMock: boolean;
+  status: string; // 'pending', 'approved', 'featured'
 }
 
 export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void }) {
@@ -47,7 +46,6 @@ export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void })
           eventName: r.event_name || 'Event Production',
           comment: r.comment,
           status: r.status || 'pending',
-          isMock: Boolean(r.is_mock),
         }));
         setReviews(mapped);
       }
@@ -92,7 +90,6 @@ export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void })
     if (filter === 'All') return true;
     if (filter === 'Pending') return r.status === 'pending';
     if (filter === 'Approved') return r.status === 'approved' || r.status === 'featured';
-    if (filter === 'Hidden') return r.status === 'hidden';
     return true;
   });
 
@@ -105,14 +102,14 @@ export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void })
             Customer Review Moderation
           </h1>
           <p className="text-xs text-[#24252c]/60 mt-1">
-            Approve, feature, or hide customer reviews before they appear on the landing page testimonials.
+            Review and approve customer feedback to feature them live on the landing page testimonials.
           </p>
         </div>
       </div>
 
       {/* Filter Tabs */}
       <div className="flex items-center gap-2">
-        {['All', 'Pending', 'Approved', 'Hidden'].map((tab) => (
+        {['All', 'Pending', 'Approved'].map((tab) => (
           <button
             key={tab}
             onClick={() => setFilter(tab)}
@@ -151,20 +148,13 @@ export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void })
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-base text-[var(--ink)]">{r.author}</span>
                     <span className="text-xs font-bold text-amber-500">{'★'.repeat(r.rating)}</span>
-                    {r.isMock && (
-                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 border border-amber-500/20 uppercase tracking-wider">
-                        Mock Data
-                      </span>
-                    )}
                   </div>
 
                   <span
                     className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
                       isApproved
                         ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
-                        : r.status === 'pending'
-                        ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
-                        : 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
+                        : 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
                     }`}
                   >
                     {r.status}
@@ -179,19 +169,22 @@ export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void })
                   "{r.comment}"
                 </p>
 
-                <div className="flex justify-end gap-2">
+                <div className="flex justify-end gap-2 pt-1">
                   {isApproved ? (
-                    <button
-                      onClick={() => handleUpdateStatus(r.id, 'hidden')}
-                      className="text-xs font-semibold px-4 py-2 rounded-full border bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100 transition-all cursor-pointer"
-                    >
-                      Hide Review
-                    </button>
+                    <div className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                      </svg>
+                      Published on Landing Page
+                    </div>
                   ) : (
                     <button
                       onClick={() => handleUpdateStatus(r.id, 'approved')}
-                      className="text-xs font-semibold px-4 py-2 rounded-full bg-emerald-600 text-white border border-emerald-600 hover:bg-emerald-700 transition-all cursor-pointer shadow-sm"
+                      className="text-xs font-semibold px-4 py-2 rounded-full bg-emerald-600 text-white border border-emerald-600 hover:bg-emerald-700 transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
                     >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                      </svg>
                       Approve & Publish to Landing Page
                     </button>
                   )}

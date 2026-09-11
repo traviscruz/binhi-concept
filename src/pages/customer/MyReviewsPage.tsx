@@ -3,6 +3,7 @@ import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { supabase } from '../../lib/supabase';
+import { awardReviewBonusPoints } from '../../utils/loyaltyService';
 
 const inputClass =
   'w-full rounded-2xl border px-5 py-3.5 bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors text-sm';
@@ -119,6 +120,11 @@ export default function MyReviewsPage({ go }: { go: (p: Page) => void }) {
         status: 'pending', // Pending Admin Moderation
         is_mock: false,
       });
+
+      // Award +100 bonus loyalty points to user profile
+      if (user?.id) {
+        await awardReviewBonusPoints(user.id, selected?.eventName);
+      }
     } catch (err) {
       console.warn('Review save note:', err);
     } finally {
