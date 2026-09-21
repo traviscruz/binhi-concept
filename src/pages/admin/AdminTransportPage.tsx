@@ -319,10 +319,22 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
   }, [tempLogistics.freeRadiusKm, tempLogistics.isFreeRadiusEnabled]);
 
   // ── Save Warehouse & Free Radius Rule ───────────────────────────────────────
-  const handleSaveLogistics = async () => {
+  const handleSaveLogistics = async (customConfig?: Partial<LogisticsConfig>) => {
     setSavingLogistics(true);
     try {
-      const saved = await saveLogisticsConfig(tempLogistics);
+      // Guard against React SyntheticEvent / MouseEvent being passed when called from onClick
+      const isPlainObject =
+        customConfig &&
+        typeof customConfig === 'object' &&
+        !('nativeEvent' in customConfig) &&
+        !('target' in customConfig) &&
+        !('preventDefault' in customConfig);
+
+      const configToSave: Partial<LogisticsConfig> = isPlainObject
+        ? { ...tempLogistics, ...customConfig }
+        : tempLogistics;
+
+      const saved = await saveLogisticsConfig(configToSave);
       setLogistics(saved);
       setTempLogistics(saved);
       setShowWarehouseModal(false);
@@ -331,7 +343,7 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
         module: 'transport',
         targetId: 'warehouse-proximity-rule',
         targetName: saved.warehouseName,
-        details: `Updated Warehouse Location & Proximity Waiver: ${saved.freeRadiusKm} km free transport radius (${saved.isFreeRadiusEnabled ? 'Active' : 'Disabled'}) at [${saved.warehouseLat}, ${saved.warehouseLng}]`,
+        details: `Updated Transport Logistics Config: Mode=${saved.pricingMode.toUpperCase()} (${saved.pricingMode === 'per_km' ? `₱${saved.costPerKm}/km` : 'Regional Rates'}), Free Radius=${saved.freeRadiusKm}km (${saved.isFreeRadiusEnabled ? 'Active' : 'Disabled'})`,
         currentData: saved,
       });
 
@@ -344,6 +356,10 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
       setSavingLogistics(false);
     }
   };
+
+  // Simulator test distance state
+  const [simulatorDistance, setSimulatorDistance] = useState<number>(3);
+
   // ── Fetch Rules from Supabase ──────────────────────────────────────────────
   const fetchRules = async () => {
     setLoading(true);
@@ -704,57 +720,224 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
         </button>
       </div>
 
-      {/* ── Warehouse Origin & Proximity Waiver Quick Summary Card ── */}
-      <div className="bg-white rounded-3xl p-5 sm:p-6 border border-[#24252c]/[0.08] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-start sm:items-center gap-4">
-          <div className="w-11 h-11 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.06] flex items-center justify-center shrink-0 text-[#1090F8]">
-            <IconPin className="w-5 h-5" />
-          </div>
+      {/* ── Top Controls Grid: Pricing Strategy & Warehouse Proximity (Side-by-Side on Desktop) ── */}
+      <div className="grid lg:grid-cols-2 gap-4 sm:gap-5 items-stretch">
+        {/* Card 1: Active Transport Pricing Calculation Mode */}
+        <div className="bg-white rounded-3xl p-5 border border-[#24252c]/[0.08] shadow-sm flex flex-col justify-between gap-4">
           <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-base font-bold text-[var(--ink)]">
-                {logistics.warehouseName || 'Warehouse Origin & Local Waiver'}
-              </h2>
+            <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#24252c]/[0.06]">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-[#1090F8]/10 text-[#1090F8] flex items-center justify-center shrink-0">
+                  <IconBox className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--ink)]">
+                    Pricing Calculation Mode
+                  </h3>
+                  <p className="text-[11px] text-[#24252c]/60">Choose active calculation method</p>
+                </div>
+              </div>
+              <span
+                className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                  logistics.pricingMode === 'per_km'
+                    ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                    : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                }`}
+              >
+                {logistics.pricingMode === 'per_km' ? `₱${logistics.costPerKm}/km Active` : 'Regional Rates Active'}
+              </span>
+            </div>
+
+            {/* Segmented Mode Switcher */}
+            <div className="grid grid-cols-2 gap-2 mt-3.5 p-1 bg-[var(--mist)] rounded-2xl border border-[#24252c]/[0.06]">
+              <button
+                type="button"
+                onClick={() => {
+                  setTempLogistics((prev) => ({ ...prev, pricingMode: 'fixed' }));
+                  handleSaveLogistics({ pricingMode: 'fixed' });
+                }}
+                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  logistics.pricingMode === 'fixed'
+                    ? 'bg-white text-[var(--ink)] shadow-xs border border-[#24252c]/10'
+                    : 'text-[#24252c]/60 hover:text-[var(--ink)]'
+                }`}
+              >
+                <span>Fixed Regional</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTempLogistics((prev) => ({ ...prev, pricingMode: 'per_km' }));
+                  handleSaveLogistics({ pricingMode: 'per_km' });
+                }}
+                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  logistics.pricingMode === 'per_km'
+                    ? 'bg-[#1090F8] text-white shadow-xs'
+                    : 'text-[#24252c]/60 hover:text-[var(--ink)]'
+                }`}
+              >
+                <span>Per-Km Distance</span>
+              </button>
+            </div>
+
+            {/* Subcontent based on mode */}
+            {logistics.pricingMode === 'per_km' ? (
+              <div className="mt-3.5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-[#24252c]/70">Rate:</span>
+                    <div className="relative w-24">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-bold text-[#1090F8] text-xs">₱</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="1000"
+                        value={tempLogistics.costPerKm}
+                        onChange={(e) =>
+                          setTempLogistics((prev) => ({
+                            ...prev,
+                            costPerKm: Math.max(1, parseFloat(e.target.value) || 1),
+                          }))
+                        }
+                        className="w-full rounded-full border border-[#24252c]/15 bg-[var(--mist)] pl-6 pr-2 py-1 text-xs font-bold text-[var(--ink)] focus:outline-none focus:border-[#1090F8]"
+                      />
+                    </div>
+                    <span className="text-[10px] text-[#24252c]/50 font-semibold">/ km</span>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    {[50, 80, 100, 120].map((rate) => (
+                      <button
+                        key={rate}
+                        type="button"
+                        onClick={() => setTempLogistics((prev) => ({ ...prev, costPerKm: rate }))}
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-all cursor-pointer ${
+                          tempLogistics.costPerKm === rate
+                            ? 'bg-[var(--ink)] text-white'
+                            : 'bg-[var(--mist)] text-[#24252c]/70 hover:bg-gray-200'
+                        }`}
+                      >
+                        ₱{rate}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSaveLogistics(tempLogistics)}
+                    disabled={savingLogistics}
+                    className="bg-[var(--ink)] hover:bg-[var(--ink-soft)] text-white text-[11px] font-bold px-3 py-1 rounded-full transition-colors cursor-pointer shadow-2xs shrink-0"
+                  >
+                    Save
+                  </button>
+                </div>
+
+                {/* Compact Mini Simulator */}
+                <div className="p-2.5 rounded-xl bg-[var(--mist)] border border-[#24252c]/[0.06] flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold uppercase text-[#24252c]/50">Simulate:</span>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0.5"
+                      max="100"
+                      value={simulatorDistance}
+                      onChange={(e) => setSimulatorDistance(Math.max(0.1, parseFloat(e.target.value) || 0.1))}
+                      className="w-14 rounded-md border border-[#24252c]/15 bg-white px-1.5 py-0.5 text-xs text-center font-bold"
+                    />
+                    <span className="text-[10px] text-[#24252c]/50 font-bold">km</span>
+                  </div>
+                  <div className="text-right">
+                    {logistics.isFreeRadiusEnabled && simulatorDistance <= logistics.freeRadiusKm ? (
+                      <span className="text-emerald-600 font-extrabold text-xs">₱0.00 (Waived ≤ {logistics.freeRadiusKm}km)</span>
+                    ) : (
+                      <span className="text-[#1090F8] font-extrabold text-xs">
+                        = ₱{(simulatorDistance * (tempLogistics.costPerKm || 80)).toLocaleString()} ({simulatorDistance}km × ₱{tempLogistics.costPerKm || 80})
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3.5 p-3 rounded-xl bg-[var(--mist)] border border-[#24252c]/[0.06] text-xs text-[#24252c]/70 flex items-center justify-between">
+                <span>Charges fixed transport fees by region zone</span>
+                <span className="font-bold text-emerald-700 text-[11px]">
+                  {filteredRules.length} Zones Configured Below
+                </span>
+              </div>
+            )}
+          </div>
+
+          {logisticsSavedToast && (
+            <div className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 flex items-center gap-1.5 self-start">
+              <IconCheck className="w-3 h-3" /> Pricing Strategy Updated
+            </div>
+          )}
+        </div>
+
+        {/* Card 2: Warehouse Origin & Proximity Waiver */}
+        <div className="bg-white rounded-3xl p-5 border border-[#24252c]/[0.08] shadow-sm flex flex-col justify-between gap-4">
+          <div>
+            <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#24252c]/[0.06]">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-[var(--mist)] border border-[#24252c]/[0.06] flex items-center justify-center shrink-0 text-[#1090F8]">
+                  <IconPin className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--ink)]">
+                    Warehouse & Proximity Waiver
+                  </h3>
+                  <p className="text-[11px] text-[#24252c]/60">Dispatch origin & local free radius</p>
+                </div>
+              </div>
+
               {logistics.isFreeRadiusEnabled ? (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  Free Transportation: ≤ {logistics.freeRadiusKm} km Waived
+                  ≤ {logistics.freeRadiusKm} km Free
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-600 border border-gray-200">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-600 border border-gray-200 shrink-0">
                   <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-                  Waiver Disabled
+                  Waiver Off
                 </span>
               )}
             </div>
-            <p className="text-xs text-[#24252c]/60 mt-0.5 max-w-xl line-clamp-1">
-              {logistics.warehouseAddress || 'No address specified'} · Coordinates: [{logistics.warehouseLat}, {logistics.warehouseLng}]
-            </p>
-          </div>
-        </div>
 
-        <div className="flex items-center gap-3 shrink-0">
-          {logisticsSavedToast && (
-            <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-200 animate-fade-in flex items-center gap-1.5">
-              <IconCheck className="w-3.5 h-3.5" /> Rule Saved
+            <div className="mt-3.5 space-y-1.5">
+              <h4 className="text-xs font-bold text-[var(--ink)] truncate">
+                {logistics.warehouseName || 'BINHI Central Warehouse'}
+              </h4>
+              <p className="text-[11px] text-[#24252c]/60 line-clamp-2 leading-relaxed">
+                {logistics.warehouseAddress || 'Bonifacio Global City, Taguig, Metro Manila'}
+              </p>
+              <p className="text-[10px] font-mono text-[#24252c]/50 pt-0.5">
+                Coords: [{logistics.warehouseLat}, {logistics.warehouseLng}]
+              </p>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-[#24252c]/[0.06] flex items-center justify-between">
+            <span className="text-[11px] text-[#24252c]/60">
+              Free Radius: <strong>{logistics.freeRadiusKm} km</strong> ({logistics.isFreeRadiusEnabled ? 'Active' : 'Disabled'})
             </span>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              setTempLogistics(logistics);
-              setShowWarehouseModal(true);
-            }}
-            className="bg-[var(--mist)] hover:bg-black/5 text-[var(--ink)] text-xs font-semibold px-4 py-2.5 rounded-full border border-[#24252c]/10 transition-colors cursor-pointer flex items-center gap-1.5"
-          >
-            <IconBox className="w-3.5 h-3.5 text-[#1090F8]" />
-            Configure Warehouse & Waiver
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTempLogistics(logistics);
+                setShowWarehouseModal(true);
+              }}
+              className="bg-[var(--mist)] hover:bg-black/5 text-[var(--ink)] text-xs font-semibold px-3.5 py-1.5 rounded-full border border-[#24252c]/10 transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+            >
+              <IconBox className="w-3.5 h-3.5 text-[#1090F8]" />
+              Configure Map & Waiver
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Search Bar */}
-      <div className="flex items-center gap-3">
+      {/* Search Bar & Zone List Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="relative flex-1 max-w-sm">
           <IconSearch className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[#24252c]/40" />
           <input
@@ -765,9 +948,16 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
             className={inputClass + ' pl-10'}
           />
         </div>
-        <span className="text-xs text-[#24252c]/50 font-medium">
-          {filteredRules.length} region{filteredRules.length !== 1 ? 's' : ''} configured
-        </span>
+        <div className="flex items-center gap-2">
+          {logistics.pricingMode === 'per_km' && (
+            <span className="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1 rounded-full">
+              System Mode: ₱{logistics.costPerKm}/km Distance Rate Active
+            </span>
+          )}
+          <span className="text-xs text-[#24252c]/50 font-medium">
+            {filteredRules.length} region{filteredRules.length !== 1 ? 's' : ''} configured
+          </span>
+        </div>
       </div>
 
       {/* Content Area */}
@@ -1450,7 +1640,7 @@ export default function AdminTransportPage({ go: _go }: { go: (p: Page) => void 
                 </button>
                 <button
                   type="button"
-                  onClick={handleSaveLogistics}
+                  onClick={() => handleSaveLogistics()}
                   disabled={savingLogistics}
                   className="bg-[var(--ink)] disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer text-xs shadow-md flex items-center gap-1.5"
                 >

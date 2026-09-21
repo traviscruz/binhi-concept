@@ -228,6 +228,7 @@ export function AdminLayout({
             {navItem('Bookings Manager', 'admin-bookings', <IconShield className="w-4 h-4" />, liveBookingsCount)}
             {navItem('Package Builder', 'admin-packages', <IconTicket className="w-4 h-4" />)}
             {navItem('Transport Fee Rules', 'admin-transport', <IconBox className="w-4 h-4" />)}
+            {navItem('Cancellation Policy', 'admin-cancellation-policy', <IconShield className="w-4 h-4" />)}
             {navItem('Staff & Accounts', 'admin-staff', <IconUser className="w-4 h-4" />)}
             {navItem('Event Calendar', 'admin-calendar', <IconCalendar className="w-4 h-4" />)}
             {navItem('Revenue Analytics', 'admin-reports', <IconTicket className="w-4 h-4" />)}

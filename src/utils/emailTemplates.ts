@@ -646,3 +646,321 @@ export function getCustomerRescheduleRejectedHtml(data: RescheduleRejectionEmail
   });
 }
 
+// ─── Cancellation & Refund System Email Templates ───────────────────────────
+
+export interface CancellationRequestEmailData {
+  bookingId: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone?: string;
+  packageName: string;
+  eventDate: string;
+  venue?: string;
+  reason: string;
+  paidAmount?: string;
+  totalCost?: string;
+  depositPaid?: string;
+  policyNetRefund?: string;
+  tierApplied?: string;
+}
+
+export interface CancellationRefundEmailData {
+  customerName: string;
+  customerEmail: string;
+  bookingId: string;
+  packageName: string;
+  eventDate: string;
+  venue?: string;
+  refundAmount: string;
+  refundChannel: string;
+  refundReferenceNumber?: string;
+  adminNotes?: string;
+  isDirectAdminCancellation?: boolean;
+  reflectionDaysEstimate?: string;
+  refundReceiptUrl?: string;
+}
+
+export interface CancellationRejectionEmailData {
+  customerName: string;
+  customerEmail: string;
+  bookingId: string;
+  packageName: string;
+  eventDate: string;
+  adminNotes?: string;
+}
+
+/**
+ * 6. Template: Admin Alert - Customer Cancellation & Refund Request
+ * Sent to all system admins when a customer requests to cancel their booking.
+ */
+export function getAdminCancellationRequestAlertHtml(data: CancellationRequestEmailData): string {
+  const safeName = escapeHtml(data.customerName || 'Valued Customer');
+  const safeEmail = escapeHtml(data.customerEmail);
+  const safePhone = data.customerPhone ? escapeHtml(data.customerPhone) : 'Not provided';
+  const safePkg = escapeHtml(data.packageName || 'Production Package');
+  const safeRef = escapeHtml(data.bookingId);
+  const safeDate = escapeHtml(data.eventDate);
+  const safeReason = escapeHtml(data.reason || 'No reason provided').replace(/\n/g, '<br/>');
+  const safeVenue = data.venue ? escapeHtml(data.venue) : 'Selected Venue';
+  const safePaid = data.paidAmount ? escapeHtml(data.paidAmount) : 'N/A';
+  const safePolicyRefund = data.policyNetRefund ? escapeHtml(data.policyNetRefund) : safePaid;
+  const safeTier = data.tierApplied ? escapeHtml(data.tierApplied) : 'Standard Cancellation Tier';
+
+  const bodyContent = `
+    <p class="text-muted" style="margin:0 0 16px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      A customer has submitted a <strong class="text-ink" style="color:#E11D48;">booking cancellation and refund request</strong> that requires your review in the Admin Dashboard.
+    </p>
+
+    <!-- Cancellation Highlight Card -->
+    <div style="background-color:#FFF1F2; border:1.5px solid #FECDD3; border-radius:12px; padding:18px 20px; margin-bottom:20px;">
+      <div style="font-size:10px; font-weight:700; color:#BE123C; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">
+        Policy Net Refund Recommendation
+      </div>
+      <div style="font-size:22px; font-weight:900; color:#BE123C; margin-bottom:4px;">
+        ${safePolicyRefund}
+      </div>
+      <div style="font-size:12px; color:#881337; opacity:0.9;">
+        Booking #${safeRef} · ${safePkg} · Event: <strong>${safeDate}</strong>
+      </div>
+    </div>
+
+    <!-- Booking Summary Details -->
+    <div class="code-box" style="background-color:#ECEEF1; border:1px solid #E4E6EA; border-radius:8px; padding:18px 22px; margin-bottom:20px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Booking Reference</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val font-mono font-bold" style="font-family:monospace; color:#E11D48;">#${safeRef}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Customer Name</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val">${safeName}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Customer Contact</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val"><a href="mailto:${safeEmail}" style="color:#1090F8; text-decoration:none;">${safeEmail}</a> · ${safePhone}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Production Package</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val">${safePkg}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Venue Location</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val">${safeVenue}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Amount Customer Paid</td>
+          <td style="padding:4px 0; text-align:right; font-weight:700; color:#24252C;" class="item-val">${safePaid}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Policy Tier Applied</td>
+          <td style="padding:4px 0; text-align:right; font-weight:600; color:#4B5563;" class="item-val">${safeTier}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Policy Net Refund</td>
+          <td style="padding:4px 0; text-align:right; font-weight:800; color:#E11D48; font-size:14px;" class="item-val">${safePolicyRefund}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Reason Box -->
+    <div style="margin-bottom:22px; padding:14px 18px; background-color:#FAFAFB; border-left:3px solid #E11D48; border-radius:0 8px 8px 0;">
+      <div style="font-size:10px; font-weight:700; color:#BE123C; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">Customer Cancellation Reason</div>
+      <div style="font-size:12px; color:#374151; line-height:1.6; font-style:italic;">"${safeReason}"</div>
+    </div>
+
+    <p class="text-muted" style="margin:0 0 20px 0; font-size:12px; color:#6B7280; line-height:1.6; font-family:Arial,Helvetica,sans-serif;">
+      Please log in to the BINHI Concept Admin Dashboard to review this cancellation request and disburse the refund via PayMongo or manual proof upload.
+    </p>
+
+    <!-- Action Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0">
+      <tr>
+        <td align="center" bgcolor="#E11D48" style="border-radius:24px;">
+          <a href="https://binhiconcept.ph" style="display:inline-block; padding:12px 28px; font-size:12px; font-weight:700; color:#FFFFFF; text-decoration:none; letter-spacing:0.5px; font-family:Arial,Helvetica,sans-serif;">
+            Review in Admin Dashboard →
+          </a>
+        </td>
+      </tr>
+    </table>
+  `;
+
+  return renderEmailShell({
+    title: `Cancellation Request: ${safeName} (#${safeRef}) - BINHI Concept`,
+    badgeText: 'CANCELLATION REQUEST',
+    headline: 'Booking Cancellation & Refund Request',
+    bodyContent,
+  });
+}
+
+/**
+ * 7. Template: Customer Confirmation - Cancellation & Refund Processed
+ * Sent to the customer when their booking cancellation and refund are processed.
+ */
+export function getCustomerCancellationRefundHtml(data: CancellationRefundEmailData): string {
+  const safeName = escapeHtml(data.customerName || 'Valued Customer');
+  const safePkg = escapeHtml(data.packageName || 'Production Package');
+  const safeRef = escapeHtml(data.bookingId);
+  const safeDate = escapeHtml(data.eventDate);
+  const safeRefund = escapeHtml(data.refundAmount);
+  const safeChannel = escapeHtml(data.refundChannel || 'PayMongo Original Payment');
+  const safeRefNum = data.refundReferenceNumber ? escapeHtml(data.refundReferenceNumber) : null;
+  const safeAdminNotes = data.adminNotes ? escapeHtml(data.adminNotes).replace(/\n/g, '<br/>') : '';
+  const isPaymongo = safeChannel.toLowerCase().includes('paymongo');
+  const reflectionTimeline = data.reflectionDaysEstimate || (isPaymongo ? '5 to 10 business days' : '1 to 2 business days');
+
+  const bodyContent = `
+    <p class="text-muted" style="margin:0 0 16px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      Dear <strong class="text-ink" style="color:#24252C;">${safeName}</strong>,
+    </p>
+    <p class="text-muted" style="margin:0 0 20px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      ${
+        data.isDirectAdminCancellation
+          ? `Your booking <strong class="text-ink" style="color:#24252C;">#${safeRef}</strong> for <strong style="color:#24252C;">${safeDate}</strong> has been cancelled by our production team, and your refund has been processed.`
+          : `Your request to cancel booking <strong class="text-ink" style="color:#24252C;">#${safeRef}</strong> has been approved and your refund has been successfully processed.`
+      }
+    </p>
+
+    <!-- Refund Processed Highlight Card -->
+    <div style="background-color:#FFF1F2; border:1.5px solid #FECDD3; border-radius:12px; padding:18px 22px; margin-bottom:22px;">
+      <div style="font-size:10px; font-weight:700; color:#BE123C; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">
+        Refund Successfully Processed
+      </div>
+      <div style="font-size:22px; font-weight:900; color:#E11D48; margin-bottom:4px;">
+        ${safeRefund}
+      </div>
+      <div style="font-size:12px; color:#881337; font-weight:600;">
+        Disbursed via ${safeChannel}${safeRefNum ? ` · Ref #${safeRefNum}` : ''}
+      </div>
+    </div>
+
+    <!-- Timeline & Important Notice -->
+    <div style="background-color:#F8FAFC; border:1px solid #E2E8F0; border-radius:10px; padding:16px 18px; margin-bottom:20px;">
+      <div style="font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">
+        Refund Processing &amp; Reflection Timeline
+      </div>
+      <p style="margin:0; font-size:12px; color:#475569; line-height:1.6;">
+        ${
+          isPaymongo
+            ? `For refunds issued back to your original payment method (Credit/Debit Card, GCash, or Maya via PayMongo), please allow <strong style="color:#0F172A;">${reflectionTimeline}</strong> for the credit to reflect back on your account or statement, depending on your bank/issuer's processing schedule.`
+            : `Your refund was issued manually via <strong style="color:#0F172A;">${safeChannel}</strong>. Please check your account. The transaction proof has been verified and logged in our system.`
+        }
+      </p>
+    </div>
+
+    <!-- Booking & Refund Summary Details -->
+    <div class="code-box" style="background-color:#ECEEF1; border:1px solid #E4E6EA; border-radius:8px; padding:18px 22px; margin-bottom:20px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Booking Reference</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val font-mono font-bold" style="font-family:monospace; color:#24252C;">#${safeRef}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Package Reserved</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val">${safePkg}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Cancelled Event Date</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val text-muted" style="text-decoration:line-through; color:#9CA3AF;">${safeDate}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Disbursement Method</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val font-semibold">${safeChannel}</td>
+        </tr>
+        ${
+          safeRefNum
+            ? `
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Transaction Reference</td>
+          <td style="padding:4px 0; text-align:right;" class="item-val font-mono">${safeRefNum}</td>
+        </tr>
+        `
+            : ''
+        }
+        <tr>
+          <td style="padding:4px 0;" class="item-label">Refund Status</td>
+          <td style="padding:4px 0; text-align:right; font-weight:800; color:#E11D48;" class="item-val">REFUNDED</td>
+        </tr>
+      </table>
+    </div>
+
+    ${
+      safeAdminNotes
+        ? `
+      <div style="margin:20px 0; padding:14px 18px; background-color:#FAFAFB; border-left:3px solid #E11D48; border-radius:0 8px 8px 0;">
+        <div style="font-size:10px; font-weight:700; color:#BE123C; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">Note from Production Administrator</div>
+        <div style="font-size:12px; color:#374151; line-height:1.6;">${safeAdminNotes}</div>
+      </div>
+    `
+        : ''
+    }
+
+    <p class="text-muted" style="margin:20px 0 0 0; font-size:12px; color:#6B7280; line-height:1.6; font-family:Arial,Helvetica,sans-serif;">
+      We hope to have the opportunity to work with you on future events. If you have questions regarding this refund, feel free to reply directly to this email.
+    </p>
+  `;
+
+  return renderEmailShell({
+    title: `Booking Cancelled & Refund Processed: #${safeRef} - BINHI Concept`,
+    badgeText: 'REFUND PROCESSED',
+    headline: 'Booking Cancellation & Refund Notice',
+    bodyContent,
+  });
+}
+
+/**
+ * 8. Template: Customer Notification - Cancellation Request Declined
+ * Sent to the customer when their cancellation/refund request is declined.
+ */
+export function getCustomerCancellationRejectedHtml(data: CancellationRejectionEmailData): string {
+  const safeName = escapeHtml(data.customerName || 'Valued Customer');
+  const safePkg = escapeHtml(data.packageName || 'Production Package');
+  const safeRef = escapeHtml(data.bookingId);
+  const safeDate = escapeHtml(data.eventDate);
+  const safeAdminNotes = data.adminNotes ? escapeHtml(data.adminNotes).replace(/\n/g, '<br/>') : '';
+
+  const bodyContent = `
+    <p class="text-muted" style="margin:0 0 16px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      Dear <strong class="text-ink" style="color:#24252C;">${safeName}</strong>,
+    </p>
+    <p class="text-muted" style="margin:0 0 20px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      Thank you for reaching out. We have reviewed your cancellation request for booking <strong class="text-ink" style="color:#24252C;">#${safeRef}</strong>. Regrettably, we are unable to process this cancellation request at this time.
+    </p>
+
+    <!-- Secured Booking Notice -->
+    <div style="background-color:#FFFBEB; border:1.5px solid #FDE68A; border-radius:12px; padding:18px 22px; margin-bottom:22px;">
+      <div style="font-size:10px; font-weight:700; color:#B45309; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">
+        Your Event Reservation Remains Active
+      </div>
+      <div style="font-size:16px; font-weight:800; color:#92400E; margin-bottom:4px;">
+        ${safeDate}
+      </div>
+      <div style="font-size:11px; color:#78350F;">
+        Your reservation for <strong>${safePkg}</strong> remains confirmed in our production schedule.
+      </div>
+    </div>
+
+    ${
+      safeAdminNotes
+        ? `
+      <div style="margin:20px 0; padding:14px 18px; background-color:#FAFAFB; border-left:3px solid #F59E0B; border-radius:0 8px 8px 0;">
+        <div style="font-size:10px; font-weight:700; color:#B45309; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">Explanation from Production Team</div>
+        <div style="font-size:12px; color:#374151; line-height:1.6;">${safeAdminNotes}</div>
+      </div>
+    `
+        : ''
+    }
+
+    <p class="text-muted" style="margin:20px 0 0 0; font-size:13px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      If you need to discuss rescheduling or have questions regarding our cancellation policy, please reply directly to this email or contact our support team.
+    </p>
+  `;
+
+  return renderEmailShell({
+    title: `Cancellation Request Status: #${safeRef} - BINHI Concept`,
+    badgeText: 'CANCELLATION UPDATE',
+    headline: 'Cancellation Request Status Update',
+    bodyContent,
+  });
+}
+
+

@@ -11,6 +11,9 @@ import {
   IconChevronDown,
   IconEye,
   IconUser,
+  IconShield,
+  IconClock,
+  IconAlertTriangle,
 } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
@@ -20,13 +23,25 @@ import { supabase } from '../../lib/supabase';
 import { logAuditEvent } from '../../utils/auditLogger';
 import { AssignCrewModal } from '../../components/admin/AssignCrewModal';
 import { formatDisplayDate } from '../../utils/bookingService';
-import { sendCustomerRescheduleApproval, sendCustomerRescheduleRejection } from '../../utils/emailService';
+import {
+  sendCustomerRescheduleApproval,
+  sendCustomerRescheduleRejection,
+  sendCustomerCancellationRefundEmail,
+  sendCustomerCancellationRejectionEmail,
+} from '../../utils/emailService';
 import {
   exportFinancialLedgerToExcel,
   exportFinancialLedgerToCSV,
   type FinancialBookingRecord,
 } from '../../utils/financialExport';
 import { autoComputeAndAwardBookingPoints } from '../../utils/loyaltyService';
+import {
+  type CancellationPolicyConfig,
+  DEFAULT_CANCELLATION_POLICY,
+  loadCancellationPolicy,
+  calculateCancellationRefund,
+} from '../../utils/cancellationPolicy';
+import { createPaymongoRefund } from '../../utils/paymongoPayment';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
@@ -53,8 +68,23 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
   const [cancelBookingId, setCancelBookingId] = useState<string | null>(null);
   const [assignCrewBooking, setAssignCrewBooking] = useState<any | null>(null);
 
-  // ── Refund Processing Modal State (Informational Preview) ──────────────
-  const [refundModalBooking, setRefundModalBooking] = useState<any | null>(null);
+  // ── Cancellation & Refund System States ───────────────────────────────────
+  const [reviewCancellationBooking, setReviewCancellationBooking] = useState<any | null>(null);
+  const [adminCancelAndRefundBooking, setAdminCancelAndRefundBooking] = useState<any | null>(null);
+  const [viewRefundDetailsBooking, setViewRefundDetailsBooking] = useState<any | null>(null);
+  const [refundChannelInput, setRefundChannelInput] = useState('PayMongo Original Payment');
+  const [refundCustomChannel, setRefundCustomChannel] = useState('');
+  const [refundReferenceInput, setRefundReferenceInput] = useState('');
+  const [refundAdminNotes, setRefundAdminNotes] = useState('');
+  const [refundReceiptFile, setRefundReceiptFile] = useState<File | null>(null);
+  const [refundReceiptPreview, setRefundReceiptPreview] = useState<string>('');
+  const [isProcessingRefund, setIsProcessingRefund] = useState(false);
+  const [adminPolicyConfig, setAdminPolicyConfig] = useState<CancellationPolicyConfig>(DEFAULT_CANCELLATION_POLICY);
+  const [refundAmountInput, setRefundAmountInput] = useState<number | string>('');
+
+  useEffect(() => {
+    loadCancellationPolicy().then(setAdminPolicyConfig).catch(() => {});
+  }, []);
 
   // ── Full Payment Settlement Modal State ─────────────────────────────────
   const [settleModalBooking, setSettleModalBooking] = useState<any | null>(null);
@@ -135,6 +165,8 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
               completedAt: b.completed_at || null,
               paymentChannel: b.payment_channel || 'PayMongo',
               bookingSource: bookingSource,
+              paymongoCheckoutId: b.paymongo_checkout_id || null,
+              paymongoReferenceNumber: b.paymongo_reference_number || null,
               slipRef: b.paymongo_reference_number ? `Ref #${b.paymongo_reference_number}` : 'Deposit Pending',
               isFullyPaid: isFull,
               balancePaymentMethod: b.balance_payment_method || 'Cash on Site / Event Day',
@@ -142,12 +174,24 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
               depositReceiptUrl: b.deposit_receipt_url || '',
               balancePaidAt: b.balance_paid_at ? new Date(b.balance_paid_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '',
               rawBalancePaidAt: b.balance_paid_at || null,
+              createdAt: b.created_at || '',
               assignedCrew: Array.isArray(b.assigned_crew) ? b.assigned_crew : [],
               rescheduleStatus: b.reschedule_status || null,
               rescheduleRequestedDate: b.reschedule_requested_date || null,
               rescheduleReason: b.reschedule_reason || null,
               rescheduleRequestedAt: b.reschedule_requested_at || null,
               rescheduleAdminNotes: b.reschedule_admin_notes || null,
+              cancellationStatus: (b.cancellation_data?.status || b.cancellation_status) || null,
+              cancellationReason: (b.cancellation_data?.reason || b.cancellation_reason) || null,
+              cancellationRequestedAt: (b.cancellation_data?.requested_at || b.cancellation_requested_at) || null,
+              cancellationAdminNotes: (b.cancellation_data?.admin_notes || b.cancellation_admin_notes) || null,
+              cancellationReviewedAt: (b.cancellation_data?.reviewed_at || b.cancellation_reviewed_at) || null,
+              refundStatus: (b.cancellation_data?.refund_status || b.refund_status) || null,
+              refundAmount: b.cancellation_data?.refund_amount ? Number(b.cancellation_data.refund_amount) : (b.refund_amount ? Number(b.refund_amount) : null),
+              refundChannel: (b.cancellation_data?.refund_channel || b.refund_channel) || null,
+              refundReferenceNumber: (b.cancellation_data?.refund_reference_number || b.refund_reference_number) || null,
+              refundReceiptUrl: (b.cancellation_data?.refund_receipt_url || b.refund_receipt_url) || null,
+              refundedAt: (b.cancellation_data?.refunded_at || b.refunded_at) || null,
             };
           })
         );
@@ -585,6 +629,455 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
     }
   };
 
+  const getCancellationApprovalEmailTemplate = (booking: any, channel: string, refNumber?: string, refundAmountNum?: number) => {
+    if (!booking) return '';
+    const refundAmt = typeof refundAmountNum === 'number'
+      ? `₱${refundAmountNum.toLocaleString()}`
+      : (booking.isFullyPaid ? booking.total : booking.deposit);
+
+    if (channel.toLowerCase().includes('paymongo')) {
+      return `Dear ${booking.customer},\n\nWe have approved your cancellation request for Booking #${booking.id} (${booking.package}).\n\nYour net refundable amount of ${refundAmt} has been processed via your original PayMongo payment method.\n\nPlease allow 5 to 10 business days for the credit to officially reflect in your account or card balance according to standard banking processing timelines.\n\nWarm regards,\nBINHI Concept Production Team`;
+    }
+    return `Dear ${booking.customer},\n\nWe have approved your cancellation request for Booking #${booking.id} (${booking.package}).\n\nYour net refund of ${refundAmt} has been disbursed manually via ${channel}${refNumber ? ` (Ref #${refNumber})` : ''}.\n\nWarm regards,\nBINHI Concept Production Team`;
+  };
+
+  const getCancellationDeclineEmailTemplate = (booking: any) => {
+    if (!booking) return '';
+    return `Dear ${booking.customer},\n\nThank you for reaching out regarding Booking #${booking.id} (${booking.package}).\n\nWe have reviewed your cancellation request. Regrettably, your cancellation could not be accommodated at this time in accordance with our reservation policy and production schedule. Your booking remains active and confirmed for ${booking.date}.\n\nPlease feel free to reply if you would like to discuss rescheduling to an alternative date.\n\nBest regards,\nBINHI Concept Production Team`;
+  };
+
+  const getDirectCancellationEmailTemplate = (booking: any, channel: string, refNumber?: string, refundAmountNum?: number) => {
+    if (!booking) return '';
+    const refundAmt = typeof refundAmountNum === 'number'
+      ? `₱${refundAmountNum.toLocaleString()}`
+      : (booking.isFullyPaid ? booking.total : booking.deposit);
+
+    if (channel.toLowerCase().includes('paymongo')) {
+      return `Dear ${booking.customer},\n\nThis is an official notice that Booking #${booking.id} (${booking.package}) has been cancelled by our production administration.\n\nYour net refundable sum of ${refundAmt} has been processed via your original PayMongo payment method.\n\nPlease allow 5 to 10 business days for the refund credit to reflect in your statement/balance.\n\nWarm regards,\nBINHI Concept Production Team`;
+    }
+    return `Dear ${booking.customer},\n\nThis is an official notice that Booking #${booking.id} (${booking.package}) has been cancelled by our production administration.\n\nYour net refund of ${refundAmt} has been disbursed manually via ${channel}${refNumber ? ` (Ref #${refNumber})` : ''}.\n\nWarm regards,\nBINHI Concept Production Team`;
+  };
+
+  const handleOpenReviewCancellation = (booking: any) => {
+    const policyCalc = calculateCancellationRefund({
+      eventDateStr: booking.rawDate,
+      bookingCreatedAt: booking.createdAt,
+      amountPaid: booking.isFullyPaid ? booking.totalNum : booking.depositNum,
+      totalCost: booking.totalNum,
+      policy: adminPolicyConfig,
+    });
+    setReviewCancellationBooking(booking);
+    setRefundChannelInput('PayMongo Original Payment');
+    setRefundCustomChannel('');
+    setRefundReferenceInput('');
+    setRefundReceiptFile(null);
+    setRefundReceiptPreview('');
+    setRefundAmountInput(policyCalc.netRefundable);
+    setRefundAdminNotes(getCancellationApprovalEmailTemplate(booking, 'PayMongo Original Payment', undefined, policyCalc.netRefundable));
+  };
+
+  const handleOpenDirectCancel = (booking: any) => {
+    const policyCalc = calculateCancellationRefund({
+      eventDateStr: booking.rawDate,
+      bookingCreatedAt: booking.createdAt,
+      amountPaid: booking.isFullyPaid ? booking.totalNum : booking.depositNum,
+      totalCost: booking.totalNum,
+      policy: adminPolicyConfig,
+    });
+    setAdminCancelAndRefundBooking(booking);
+    setRefundChannelInput('PayMongo Original Payment');
+    setRefundCustomChannel('');
+    setRefundReferenceInput('');
+    setRefundReceiptFile(null);
+    setRefundReceiptPreview('');
+    setRefundAmountInput(policyCalc.netRefundable);
+    setRefundAdminNotes(getDirectCancellationEmailTemplate(booking, 'PayMongo Original Payment', undefined, policyCalc.netRefundable));
+  };
+
+  const handleOpenViewRefund = (booking: any) => {
+    setViewRefundDetailsBooking(booking);
+  };
+
+  const handleApproveCustomerCancellation = async () => {
+    if (!reviewCancellationBooking) return;
+    setIsProcessingRefund(true);
+
+    try {
+      let receiptUrl = '';
+      if (refundReceiptFile) {
+        try {
+          const fileExt = refundReceiptFile.name.split('.').pop() || 'png';
+          const fileName = `refund-receipts/${reviewCancellationBooking.dbId}-${Date.now()}.${fileExt}`;
+          const { data: uploadData, error: uploadErr } = await supabase.storage
+            .from('booking-receipts')
+            .upload(fileName, refundReceiptFile, { upsert: true });
+
+          if (!uploadErr && uploadData) {
+            const { data: publicUrlData } = supabase.storage.from('booking-receipts').getPublicUrl(fileName);
+            if (publicUrlData?.publicUrl) {
+              receiptUrl = publicUrlData.publicUrl;
+            }
+          } else {
+            receiptUrl = refundReceiptPreview;
+          }
+        } catch {
+          receiptUrl = refundReceiptPreview;
+        }
+      } else if (refundReceiptPreview) {
+        receiptUrl = refundReceiptPreview;
+      }
+
+      const finalChannel = refundChannelInput === 'Others'
+        ? (refundCustomChannel.trim() || 'Others')
+        : refundChannelInput;
+
+      const policyCalc = calculateCancellationRefund({
+        eventDateStr: reviewCancellationBooking.rawDate,
+        bookingCreatedAt: reviewCancellationBooking.createdAt,
+        amountPaid: reviewCancellationBooking.isFullyPaid
+          ? reviewCancellationBooking.totalNum
+          : reviewCancellationBooking.depositNum,
+        totalCost: reviewCancellationBooking.totalNum,
+        policy: adminPolicyConfig,
+      });
+
+      const finalRefundNum = typeof refundAmountInput === 'number'
+        ? refundAmountInput
+        : (Number(refundAmountInput) >= 0 && refundAmountInput !== '' ? Number(refundAmountInput) : policyCalc.netRefundable);
+
+      const maxPaid = reviewCancellationBooking.isFullyPaid
+        ? reviewCancellationBooking.totalNum
+        : reviewCancellationBooking.depositNum;
+
+      if (finalRefundNum > maxPaid) {
+        alert(`Refund disbursement amount (₱${finalRefundNum.toLocaleString()}) cannot exceed the total amount paid by the customer (₱${maxPaid.toLocaleString()}).`);
+        setIsProcessingRefund(false);
+        return;
+      }
+
+      if (finalRefundNum < 0 || isNaN(finalRefundNum)) {
+        alert('Please enter a valid refund amount (₱0 or higher).');
+        setIsProcessingRefund(false);
+        return;
+      }
+
+      const refundAmountFormatted = `₱${finalRefundNum.toLocaleString()}`;
+
+      let finalRefundRef = refundReferenceInput.trim();
+      let paymongoRefundMeta: any = {};
+
+      // If disbursing via PayMongo, trigger the official PayMongo Refunds API
+      if (finalChannel.toLowerCase().includes('paymongo') && reviewCancellationBooking.paymongoCheckoutId) {
+        try {
+          const pmRes = await createPaymongoRefund({
+            checkoutSessionId: reviewCancellationBooking.paymongoCheckoutId,
+            amount: finalRefundNum,
+            notes: refundAdminNotes.trim() || `Refund for Booking #${reviewCancellationBooking.id}`,
+          });
+
+          if (pmRes.success && pmRes.refundId) {
+            finalRefundRef = pmRes.refundId;
+            paymongoRefundMeta = {
+              paymongo_refund_id: pmRes.refundId,
+              paymongo_refund_status: pmRes.status || 'succeeded',
+            };
+          } else if (pmRes.error) {
+            console.warn('[PayMongo API] Refund notice:', pmRes.error);
+          }
+        } catch (pmErr) {
+          console.warn('[PayMongo API] Refund request error:', pmErr);
+        }
+      }
+
+      const { error: updateErr } = await supabase
+        .from('bookings')
+        .update({
+          status: 'Cancelled',
+          payment_status: 'cancelled',
+          booking_status: 'cancelled',
+          is_completed: false,
+          cancellation_data: {
+            status: 'approved',
+            reason: reviewCancellationBooking.cancellationReason || '',
+            requested_at: reviewCancellationBooking.cancellationRequestedAt || null,
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: 'Admin',
+            admin_notes: refundAdminNotes.trim() || null,
+            refund_status: 'processed',
+            refund_amount: finalRefundNum,
+            refund_percentage: policyCalc.refundPercentage,
+            policy_net_refund: policyCalc.netRefundable,
+            tier_applied: policyCalc.tierLabel,
+            refund_channel: finalChannel,
+            refund_reference_number: finalRefundRef || null,
+            refund_receipt_url: receiptUrl || null,
+            refunded_at: new Date().toISOString(),
+            ...paymongoRefundMeta,
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', reviewCancellationBooking.dbId);
+
+      if (updateErr) throw updateErr;
+
+      await logAuditEvent({
+        action: 'APPROVE_CANCELLATION_AND_REFUND',
+        module: 'bookings',
+        targetId: reviewCancellationBooking.id,
+        targetName: `${reviewCancellationBooking.customer} - ${reviewCancellationBooking.package}`,
+        details: `Approved cancellation & processed refund (${refundAmountFormatted}) via ${finalChannel}${finalRefundRef ? ` (Ref #${finalRefundRef})` : ''} for #${reviewCancellationBooking.id}`,
+        previousData: { status: reviewCancellationBooking.status, cancellation_status: 'requested' },
+        currentData: { status: 'Cancelled', cancellation_status: 'approved', refund_status: 'processed', refund_amount: finalRefundNum, refund_channel: finalChannel },
+      });
+
+      // Send Customer Email
+      await sendCustomerCancellationRefundEmail({
+        customerName: reviewCancellationBooking.customer,
+        customerEmail: reviewCancellationBooking.email,
+        bookingId: reviewCancellationBooking.id,
+        packageName: reviewCancellationBooking.package,
+        eventDate: reviewCancellationBooking.date,
+        venue: reviewCancellationBooking.venue,
+        refundAmount: refundAmountFormatted,
+        refundChannel: finalChannel,
+        refundReferenceNumber: finalRefundRef || undefined,
+        refundReceiptUrl: receiptUrl || undefined,
+        adminNotes: refundAdminNotes.trim() || undefined,
+        isPayMongoRefund: finalChannel.toLowerCase().includes('paymongo'),
+        isDirectAdminCancel: false,
+      });
+
+      setRescheduleToast(`Cancellation approved & refund processed (${refundAmountFormatted}) for #${reviewCancellationBooking.id}! Customer emailed.`);
+      setTimeout(() => setRescheduleToast(null), 6000);
+      setReviewCancellationBooking(null);
+      await loadBookings();
+    } catch (err: any) {
+      console.error('Error approving cancellation and refund:', err);
+      alert(`Failed to approve cancellation and refund: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsProcessingRefund(false);
+    }
+  };
+
+  const handleDeclineCustomerCancellation = async () => {
+    if (!reviewCancellationBooking) return;
+    setIsProcessingRefund(true);
+
+    try {
+      // Ensure decline note does NOT contain approval text
+      let finalDeclineNotes = refundAdminNotes.trim();
+      if (!finalDeclineNotes || finalDeclineNotes.toLowerCase().includes('approved') || finalDeclineNotes.toLowerCase().includes('refundable')) {
+        finalDeclineNotes = `Your cancellation request could not be approved at this time under our reservation policy. Your booking remains active and confirmed for ${reviewCancellationBooking.date}.`;
+      }
+
+      const { error } = await supabase
+        .from('bookings')
+        .update({
+          cancellation_data: {
+            status: 'rejected',
+            reason: reviewCancellationBooking.cancellationReason || '',
+            requested_at: reviewCancellationBooking.cancellationRequestedAt || null,
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: 'Admin',
+            admin_notes: finalDeclineNotes,
+            refund_status: 'declined',
+            refund_amount: 0,
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', reviewCancellationBooking.dbId);
+
+      if (error) throw error;
+
+      await logAuditEvent({
+        action: 'DECLINE_CANCELLATION',
+        module: 'bookings',
+        targetId: reviewCancellationBooking.id,
+        targetName: `${reviewCancellationBooking.customer} - ${reviewCancellationBooking.package}`,
+        details: `Declined cancellation request for booking #${reviewCancellationBooking.id}. Reservation remains active.`,
+      });
+
+      await sendCustomerCancellationRejectionEmail({
+        customerName: reviewCancellationBooking.customer,
+        customerEmail: reviewCancellationBooking.email,
+        bookingId: reviewCancellationBooking.id,
+        packageName: reviewCancellationBooking.package,
+        eventDate: reviewCancellationBooking.date,
+        adminNotes: finalDeclineNotes,
+      });
+
+      setRescheduleToast(`Cancellation declined for #${reviewCancellationBooking.id}. Customer notified and booking remains active.`);
+      setTimeout(() => setRescheduleToast(null), 6000);
+      setReviewCancellationBooking(null);
+      await loadBookings();
+    } catch (err: any) {
+      console.error('Error declining cancellation:', err);
+      alert(`Failed to decline cancellation: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsProcessingRefund(false);
+    }
+  };
+
+  const handleDirectAdminCancelAndRefund = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminCancelAndRefundBooking) return;
+    setIsProcessingRefund(true);
+
+    try {
+      let receiptUrl = '';
+      if (refundReceiptFile) {
+        try {
+          const fileExt = refundReceiptFile.name.split('.').pop() || 'png';
+          const fileName = `refund-receipts/${adminCancelAndRefundBooking.dbId}-${Date.now()}.${fileExt}`;
+          const { data: uploadData, error: uploadErr } = await supabase.storage
+            .from('booking-receipts')
+            .upload(fileName, refundReceiptFile, { upsert: true });
+
+          if (!uploadErr && uploadData) {
+            const { data: publicUrlData } = supabase.storage.from('booking-receipts').getPublicUrl(fileName);
+            if (publicUrlData?.publicUrl) {
+              receiptUrl = publicUrlData.publicUrl;
+            }
+          } else {
+            receiptUrl = refundReceiptPreview;
+          }
+        } catch {
+          receiptUrl = refundReceiptPreview;
+        }
+      } else if (refundReceiptPreview) {
+        receiptUrl = refundReceiptPreview;
+      }
+
+      const finalChannel = refundChannelInput === 'Others'
+        ? (refundCustomChannel.trim() || 'Others')
+        : refundChannelInput;
+
+      const policyCalc = calculateCancellationRefund({
+        eventDateStr: adminCancelAndRefundBooking.rawDate,
+        bookingCreatedAt: adminCancelAndRefundBooking.createdAt,
+        amountPaid: adminCancelAndRefundBooking.isFullyPaid
+          ? adminCancelAndRefundBooking.totalNum
+          : adminCancelAndRefundBooking.depositNum,
+        totalCost: adminCancelAndRefundBooking.totalNum,
+        policy: adminPolicyConfig,
+      });
+
+      const finalRefundNum = typeof refundAmountInput === 'number'
+        ? refundAmountInput
+        : (Number(refundAmountInput) >= 0 && refundAmountInput !== '' ? Number(refundAmountInput) : policyCalc.netRefundable);
+
+      const maxPaid = adminCancelAndRefundBooking.isFullyPaid
+        ? adminCancelAndRefundBooking.totalNum
+        : adminCancelAndRefundBooking.depositNum;
+
+      if (finalRefundNum > maxPaid) {
+        alert(`Refund disbursement amount (₱${finalRefundNum.toLocaleString()}) cannot exceed the total amount paid by the customer (₱${maxPaid.toLocaleString()}).`);
+        setIsProcessingRefund(false);
+        return;
+      }
+
+      if (finalRefundNum < 0 || isNaN(finalRefundNum)) {
+        alert('Please enter a valid refund amount (₱0 or higher).');
+        setIsProcessingRefund(false);
+        return;
+      }
+
+      const refundAmountFormatted = `₱${finalRefundNum.toLocaleString()}`;
+
+      let finalRefundRef = refundReferenceInput.trim();
+      let paymongoRefundMeta: any = {};
+
+      // If disbursing via PayMongo, trigger the official PayMongo Refunds API
+      if (finalChannel.toLowerCase().includes('paymongo') && adminCancelAndRefundBooking.paymongoCheckoutId) {
+        try {
+          const pmRes = await createPaymongoRefund({
+            checkoutSessionId: adminCancelAndRefundBooking.paymongoCheckoutId,
+            amount: finalRefundNum,
+            notes: refundAdminNotes.trim() || `Direct cancellation refund for Booking #${adminCancelAndRefundBooking.id}`,
+          });
+
+          if (pmRes.success && pmRes.refundId) {
+            finalRefundRef = pmRes.refundId;
+            paymongoRefundMeta = {
+              paymongo_refund_id: pmRes.refundId,
+              paymongo_refund_status: pmRes.status || 'succeeded',
+            };
+          } else if (pmRes.error) {
+            console.warn('[PayMongo API] Direct cancel refund notice:', pmRes.error);
+          }
+        } catch (pmErr) {
+          console.warn('[PayMongo API] Direct cancel refund request error:', pmErr);
+        }
+      }
+
+      const { error: updateErr } = await supabase
+        .from('bookings')
+        .update({
+          status: 'Cancelled',
+          payment_status: 'cancelled',
+          booking_status: 'cancelled',
+          is_completed: false,
+          cancellation_data: {
+            status: 'approved',
+            reason: 'Cancelled directly by System Administrator',
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: 'Admin',
+            admin_notes: refundAdminNotes.trim() || 'Directly cancelled & refunded by System Administrator',
+            refund_status: 'processed',
+            refund_amount: finalRefundNum,
+            refund_percentage: policyCalc.refundPercentage,
+            policy_net_refund: policyCalc.netRefundable,
+            tier_applied: policyCalc.tierLabel,
+            refund_channel: finalChannel,
+            refund_reference_number: finalRefundRef || null,
+            refund_receipt_url: receiptUrl || null,
+            refunded_at: new Date().toISOString(),
+            ...paymongoRefundMeta,
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', adminCancelAndRefundBooking.dbId);
+
+      if (updateErr) throw updateErr;
+
+      await logAuditEvent({
+        action: 'ADMIN_CANCEL_AND_REFUND_BOOKING',
+        module: 'bookings',
+        targetId: adminCancelAndRefundBooking.id,
+        targetName: `${adminCancelAndRefundBooking.customer} - ${adminCancelAndRefundBooking.package}`,
+        details: `Directly cancelled & refunded (${refundAmountFormatted}) via ${finalChannel}${finalRefundRef ? ` (Ref #${finalRefundRef})` : ''} for #${adminCancelAndRefundBooking.id}`,
+        previousData: { status: adminCancelAndRefundBooking.status },
+        currentData: { status: 'Cancelled', refund_status: 'processed', refund_amount: finalRefundNum, refund_channel: finalChannel },
+      });
+
+      // Send Customer Email
+      await sendCustomerCancellationRefundEmail({
+        customerName: adminCancelAndRefundBooking.customer,
+        customerEmail: adminCancelAndRefundBooking.email,
+        bookingId: adminCancelAndRefundBooking.id,
+        packageName: adminCancelAndRefundBooking.package,
+        eventDate: adminCancelAndRefundBooking.date,
+        venue: adminCancelAndRefundBooking.venue,
+        refundAmount: refundAmountFormatted,
+        refundChannel: finalChannel,
+        refundReferenceNumber: finalRefundRef || undefined,
+        refundReceiptUrl: receiptUrl || undefined,
+        adminNotes: refundAdminNotes.trim() || undefined,
+        isPayMongoRefund: finalChannel.toLowerCase().includes('paymongo'),
+        isDirectAdminCancel: true,
+      });
+
+      setRescheduleToast(`Booking #${adminCancelAndRefundBooking.id} cancelled & refund processed (${refundAmountFormatted})! Customer notified via email.`);
+      setTimeout(() => setRescheduleToast(null), 6000);
+      setAdminCancelAndRefundBooking(null);
+      await loadBookings();
+    } catch (err: any) {
+      console.error('Error directly cancelling and refunding booking:', err);
+      alert(`Failed to cancel and refund booking: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsProcessingRefund(false);
+    }
+  };
 
   const handleSaveBalanceSettlement = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -785,6 +1278,16 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
+            onClick={() => go('admin-cancellation-policy')}
+            className="inline-flex items-center gap-1.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold px-4 py-2.5 rounded-full hover:bg-rose-100 transition-colors shadow-2xs cursor-pointer"
+            title="Configure Tiered Cancellation & Refund Policy"
+          >
+            <IconShield className="w-3.5 h-3.5" />
+            <span>Policy Rules</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => go('admin-reports')}
             className="inline-flex items-center gap-1.5 bg-[var(--mist)] border border-[#24252c]/10 text-[var(--ink)] text-xs font-semibold px-4 py-2.5 rounded-full hover:bg-gray-200 transition-colors shadow-2xs cursor-pointer"
             title="Open Financial Ledger & Reports"
@@ -927,12 +1430,17 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                           </div>
                         </td>
 
-                        {/* Col 3: Event Date & Reschedule Alert */}
+                        {/* Col 3: Event Date & Reschedule / Cancellation Alert */}
                         <td className="py-4 px-4 whitespace-nowrap">
                           <div className="font-semibold text-[var(--ink)] flex items-center gap-1.5">
                             <IconCalendar className="w-3.5 h-3.5 text-[#1090F8] shrink-0" />
                             <span>{row.date}</span>
                           </div>
+                          {row.cancellationStatus === 'requested' && (
+                            <div className="mt-1.5 inline-flex items-center gap-1 bg-rose-600 text-white font-extrabold text-[9px] px-2.5 py-0.5 rounded-full shadow-2xs animate-pulse">
+                              <span>Cancel Req</span>
+                            </div>
+                          )}
                           {row.rescheduleStatus === 'pending' && (
                             <div className="mt-1.5 inline-flex items-center gap-1 bg-amber-500 text-white font-extrabold text-[9px] px-2.5 py-0.5 rounded-full shadow-2xs">
                               <span>Reschedule Requested</span>
@@ -986,9 +1494,21 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                           </span>
                         </td>
 
-                        {/* Col 7: Payment Status (Only 50% deposit or fully paid) */}
+                        {/* Col 7: Payment Status */}
                         <td className="py-4 px-4 whitespace-nowrap">
-                          {row.isFullyPaid ? (
+                          {row.rawStatus === 'cancelled' ? (
+                            row.refundStatus === 'processed' ? (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 text-rose-800 border border-rose-300 text-xs font-bold shadow-2xs">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-600" />
+                                Refunded (₱{row.refundAmount ? Number(row.refundAmount).toLocaleString() : (row.isFullyPaid ? row.total : row.deposit)})
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold shadow-2xs">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                Cancelled
+                              </span>
+                            )
+                          ) : row.isFullyPaid ? (
                             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold shadow-2xs">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                               Fully Paid
@@ -1005,7 +1525,17 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                         <td className="py-4 px-4 text-right whitespace-nowrap">
                           <div className="inline-flex items-center justify-end gap-1.5">
                             {/* 1. Contextual Primary Action Button */}
-                            {row.rescheduleStatus === 'pending' ? (
+                            {row.cancellationStatus === 'requested' ? (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenReviewCancellation(row)}
+                                className="bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-full transition-colors shadow-2xs cursor-pointer shrink-0 flex items-center gap-1 animate-pulse"
+                                title="Review customer cancellation & refund request"
+                              >
+                                <IconX className="w-3.5 h-3.5" />
+                                <span>Review Cancel</span>
+                              </button>
+                            ) : row.rescheduleStatus === 'pending' ? (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1031,11 +1561,11 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                             ) : row.rawStatus === 'cancelled' ? (
                               <button
                                 type="button"
-                                onClick={() => setRefundModalBooking(row)}
-                                className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 text-[11px] font-bold px-3 py-1.5 rounded-full transition-colors shadow-2xs cursor-pointer shrink-0"
-                                title="Process / View Refund"
+                                onClick={() => handleOpenViewRefund(row)}
+                                className="bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 text-[11px] font-bold px-3 py-1.5 rounded-full transition-colors shadow-2xs cursor-pointer shrink-0"
+                                title="View Refund Details & Proof"
                               >
-                                Refund
+                                Refund Details
                               </button>
                             ) : !row.isFullyPaid ? (
                               <button
@@ -1078,6 +1608,28 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                                   <div className="px-3.5 py-1 text-[10px] font-bold text-[#24252c]/40 uppercase tracking-wider">
                                     Booking Actions
                                   </div>
+
+                                  {/* Review Cancellation Request if pending */}
+                                  {row.cancellationStatus === 'requested' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenActionMenuId(null);
+                                        handleOpenReviewCancellation(row);
+                                      }}
+                                      className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                                    >
+                                      <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                                        <IconX className="w-3 h-3" />
+                                      </span>
+                                      <div className="flex flex-col min-w-0">
+                                        <span className="truncate">Review Cancellation</span>
+                                        <span className="text-[10px] font-normal text-rose-600 truncate">
+                                          Customer refund pending
+                                        </span>
+                                      </div>
+                                    </button>
+                                  )}
 
                                   {/* Settle / Payment Details */}
                                   {row.rawStatus !== 'cancelled' && (
@@ -1263,29 +1815,29 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                                     </button>
                                   )}
 
-                                  {/* Refund (if cancelled) */}
+                                  {/* Refund Details (if cancelled) */}
                                   {row.rawStatus === 'cancelled' && (
                                     <button
                                       type="button"
                                       onClick={() => {
                                         setOpenActionMenuId(null);
-                                        setRefundModalBooking(row);
+                                        handleOpenViewRefund(row);
                                       }}
-                                      className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100 flex items-center gap-2.5 transition-colors cursor-pointer"
+                                      className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
                                     >
-                                      <span className="w-5 h-5 rounded-md bg-slate-200 text-slate-700 flex items-center justify-center text-[11px] font-bold shrink-0">
+                                      <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center text-[11px] font-bold shrink-0">
                                         ₱
                                       </span>
                                       <div className="flex flex-col min-w-0">
-                                        <span className="truncate">Process Refund</span>
+                                        <span className="truncate">Refund Details & Proof</span>
                                         <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                          Refund breakdown info
+                                          View disbursement breakdown
                                         </span>
                                       </div>
                                     </button>
                                   )}
 
-                                  {/* Cancel Booking (Hidden if completed, past date, or cancelled) */}
+                                  {/* Cancel Booking & Process Refund (Hidden if completed, past date, or cancelled) */}
                                   {row.rawStatus !== 'cancelled' && !row.isCompleted && !row.isPast && row.status !== 'Completed' && (
                                     <>
                                       <div className="my-1 border-t border-[#24252c]/5" />
@@ -1293,7 +1845,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                                         type="button"
                                         onClick={() => {
                                           setOpenActionMenuId(null);
-                                          setCancelBookingId(row.id);
+                                          handleOpenDirectCancel(row);
                                         }}
                                         className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
                                       >
@@ -1301,9 +1853,9 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                                           <IconX className="w-3 h-3" />
                                         </span>
                                         <div className="flex flex-col min-w-0">
-                                          <span className="truncate">Cancel Booking</span>
+                                          <span className="truncate">Cancel &amp; Refund Booking</span>
                                           <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                            Cancel this booking
+                                            Cancel reservation &amp; refund
                                           </span>
                                         </div>
                                       </button>
@@ -1404,7 +1956,16 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
 
                 {/* Mobile Actions: Clean Primary Action + Actions Dropdown */}
                 <div className="flex items-center gap-2 pt-1">
-                  {row.rescheduleStatus === 'pending' ? (
+                  {row.cancellationStatus === 'requested' ? (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenReviewCancellation(row)}
+                      className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs py-2 rounded-full shadow-sm text-center cursor-pointer flex items-center justify-center gap-1.5 animate-pulse"
+                    >
+                      <IconX className="w-3.5 h-3.5" />
+                      <span>Review Cancellation</span>
+                    </button>
+                  ) : row.rescheduleStatus === 'pending' ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -1428,10 +1989,10 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                   ) : row.rawStatus === 'cancelled' ? (
                     <button
                       type="button"
-                      onClick={() => setRefundModalBooking(row)}
-                      className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 text-xs font-bold py-2 rounded-full transition-colors cursor-pointer shadow-2xs"
+                      onClick={() => handleOpenViewRefund(row)}
+                      className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 text-xs font-bold py-2 rounded-full transition-colors cursor-pointer shadow-2xs"
                     >
-                      Process Refund
+                      Refund Details
                     </button>
                   ) : !row.isFullyPaid ? (
                     <button
@@ -1445,12 +2006,12 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                   ) : null}
 
                   {/* Mobile Actions Dropdown */}
-                  <div className={`relative inline-block text-left booking-action-menu ${row.isFullyPaid && !row.rescheduleStatus && !row.status.includes('Pending') && row.rawStatus !== 'cancelled' ? 'w-full' : ''}`}>
+                  <div className={`relative inline-block text-left booking-action-menu ${row.isFullyPaid && !row.rescheduleStatus && row.cancellationStatus !== 'requested' && !row.status.includes('Pending') && row.rawStatus !== 'cancelled' ? 'w-full' : ''}`}>
                     <button
                       type="button"
                       onClick={() => setOpenActionMenuId(openActionMenuId === row.dbId ? null : row.dbId)}
                       className={`inline-flex items-center justify-center gap-1 px-3 py-2 rounded-full border text-xs font-bold transition-all cursor-pointer ${
-                        row.isFullyPaid && !row.rescheduleStatus && !row.status.includes('Pending') && row.rawStatus !== 'cancelled' ? 'w-full' : ''
+                        row.isFullyPaid && !row.rescheduleStatus && row.cancellationStatus !== 'requested' && !row.status.includes('Pending') && row.rawStatus !== 'cancelled' ? 'w-full' : ''
                       } ${
                         openActionMenuId === row.dbId
                           ? 'bg-[var(--ink)] text-white border-[var(--ink)]'
@@ -1474,6 +2035,28 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                         <div className="px-3.5 py-1 text-[10px] font-bold text-[#24252c]/40 uppercase tracking-wider">
                           Booking Actions
                         </div>
+
+                        {/* Review Cancellation Request */}
+                        {row.cancellationStatus === 'requested' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenActionMenuId(null);
+                              handleOpenReviewCancellation(row);
+                            }}
+                            className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                          >
+                            <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                              <IconX className="w-3 h-3" />
+                            </span>
+                            <div className="flex flex-col min-w-0">
+                              <span className="truncate">Review Cancellation</span>
+                              <span className="text-[10px] font-normal text-rose-600 truncate">
+                                Customer refund pending
+                              </span>
+                            </div>
+                          </button>
+                        )}
 
                         {/* Settle / Payment Details */}
                         {row.rawStatus !== 'cancelled' && (
@@ -1614,7 +2197,29 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                           </button>
                         )}
 
-                        {/* Cancel Booking (Hidden if completed, past date, or cancelled) */}
+                        {/* Refund Details & Proof (if cancelled) */}
+                        {row.rawStatus === 'cancelled' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenActionMenuId(null);
+                              handleOpenViewRefund(row);
+                            }}
+                            className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                          >
+                            <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center text-[11px] font-bold shrink-0">
+                              ₱
+                            </span>
+                            <div className="flex flex-col min-w-0">
+                              <span className="truncate">Refund Details & Proof</span>
+                              <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
+                                View disbursement breakdown
+                              </span>
+                            </div>
+                          </button>
+                        )}
+
+                        {/* Cancel Booking & Process Refund (Hidden if completed, past date, or cancelled) */}
                         {row.rawStatus !== 'cancelled' && !row.isCompleted && !row.isPast && row.status !== 'Completed' && (
                           <>
                             <div className="my-1 border-t border-[#24252c]/5" />
@@ -1622,7 +2227,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                               type="button"
                               onClick={() => {
                                 setOpenActionMenuId(null);
-                                setCancelBookingId(row.id);
+                                handleOpenDirectCancel(row);
                               }}
                               className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
                             >
@@ -1630,9 +2235,9 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                                 <IconX className="w-3 h-3" />
                               </span>
                               <div className="flex flex-col min-w-0">
-                                <span className="truncate">Cancel Booking</span>
+                                <span className="truncate">Cancel &amp; Refund Booking</span>
                                 <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                  Cancel this booking
+                                  Cancel reservation &amp; refund
                                 </span>
                               </div>
                             </button>
@@ -2547,13 +3152,672 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         onAssigned={() => loadBookings()}
       />
 
-      {/* ── Modal: Processing Refund (Informational Preview Only) ── */}
-      <ModalOverlay isOpen={Boolean(refundModalBooking)} onClose={() => setRefundModalBooking(null)}>
-        {refundModalBooking && (
+      {/* ── Modal 3: Review Customer Cancellation & Refund Request ── */}
+      <ModalOverlay isOpen={Boolean(reviewCancellationBooking)} onClose={() => setReviewCancellationBooking(null)}>
+        {reviewCancellationBooking && (
+          <div className="bg-white rounded-[2.5rem] max-w-xl w-full max-h-[85vh] shadow-2xl border border-[#24252c]/10 relative p-1.5 sm:p-2.5 overflow-hidden flex flex-col">
+            <button
+              type="button"
+              onClick={() => setReviewCancellationBooking(null)}
+              className="absolute top-6 right-6 z-20 text-[#24252c]/50 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors bg-white/90 backdrop-blur-md shadow-sm border border-[#24252c]/10 cursor-pointer"
+            >
+              <IconX className="w-5 h-5" />
+            </button>
+
+            <div className="flex-1 overflow-y-auto p-5 sm:p-7 space-y-4 modal-scroll pr-4 sm:pr-6 text-xs">
+              <div className="mb-2 pb-3 border-b border-[#24252c]/[0.06]">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="p-1.5 rounded-lg bg-rose-500/10 text-rose-600">
+                    <IconX className="w-4 h-4" />
+                  </span>
+                  <h3 className="text-xl font-extrabold text-[var(--ink)]">
+                    Review Cancellation &amp; Refund Request
+                  </h3>
+                </div>
+                <p className="text-xs text-[#24252c]/60">
+                  Customer requested to cancel Booking #{reviewCancellationBooking.id}. Review request details, select refund method, and confirm disbursement.
+                </p>
+              </div>
+
+              {/* Customer & Booking Header */}
+              <div className="p-3.5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.06] flex items-center justify-between">
+                <div>
+                  <div className="font-extrabold text-sm text-[var(--ink)]">{reviewCancellationBooking.customer}</div>
+                  <div className="text-[11px] text-[#24252c]/60">{reviewCancellationBooking.email} · {reviewCancellationBooking.phone || 'No phone'}</div>
+                </div>
+                <div className="text-right">
+                  <span className="font-bold text-xs text-[var(--ink)] block">{reviewCancellationBooking.package}</span>
+                  <span className="text-[10px] font-mono text-[#1090F8]">Ref #{reviewCancellationBooking.id}</span>
+                </div>
+              </div>
+
+              {/* Refundable Amount Summary & Dynamic Policy Calc */}
+              {(() => {
+                const policyCalc = calculateCancellationRefund({
+                  eventDateStr: reviewCancellationBooking.rawDate,
+                  bookingCreatedAt: reviewCancellationBooking.createdAt,
+                  amountPaid: reviewCancellationBooking.isFullyPaid
+                    ? reviewCancellationBooking.totalNum
+                    : reviewCancellationBooking.depositNum,
+                  totalCost: reviewCancellationBooking.totalNum,
+                  policy: adminPolicyConfig,
+                });
+
+                return (
+                  <div className="p-4 rounded-2xl bg-rose-50/70 border border-rose-200/80 space-y-3">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-rose-900/70 font-semibold">Scheduled Event Date:</span>
+                      <span className="font-bold text-rose-950">{reviewCancellationBooking.date}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-rose-900/70 font-semibold">Total Event Cost:</span>
+                      <span className="font-extrabold text-[var(--ink)]">{reviewCancellationBooking.total}</span>
+                    </div>
+
+                    {/* Policy Tier Recommendation Card */}
+                    <div className="p-3 rounded-xl bg-white border border-rose-200/90 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-[#24252c]/70 font-bold">Policy Recommendation:</span>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
+                          policyCalc.refundPercentage === 100
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                            : policyCalc.refundPercentage > 0
+                            ? 'bg-blue-50 text-blue-800 border-blue-300'
+                            : 'bg-rose-50 text-rose-800 border-rose-300'
+                        }`}>
+                          {policyCalc.isGracePeriodApplied ? 'Grace Period (100%)' : `${policyCalc.refundPercentage}% Refund Tier`}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-[#24252c]/70 leading-relaxed bg-[var(--mist)] p-2 rounded-lg">
+                        {policyCalc.summaryExplanation}
+                      </div>
+                      <div className="flex justify-between items-center pt-1 border-t border-[#24252c]/5">
+                        <span className="text-xs font-bold text-rose-900">Policy Net Refund:</span>
+                        <span className="font-mono font-black text-rose-700 text-sm">
+                          ₱{policyCalc.netRefundable.toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Editable Refund Disbursement Amount */}
+                    {(() => {
+                      const maxPaid = reviewCancellationBooking.isFullyPaid
+                        ? reviewCancellationBooking.totalNum
+                        : reviewCancellationBooking.depositNum;
+                      const numVal = typeof refundAmountInput === 'number' ? refundAmountInput : Number(refundAmountInput) || 0;
+                      const isExceeded = numVal > maxPaid;
+
+                      return (
+                        <div className={`p-3.5 rounded-xl bg-white border space-y-2 transition-colors ${
+                          isExceeded ? 'border-rose-500 bg-rose-50/30' : 'border-rose-200/90'
+                        }`}>
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold text-[var(--ink)] block">
+                              Refund Disbursement Amount (₱) <span className="text-rose-500">*</span>
+                            </label>
+                            <span className="text-[10px] text-rose-700 font-bold bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                              Policy: ₱{policyCalc.netRefundable.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-[var(--ink)]">₱</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max={maxPaid}
+                              value={refundAmountInput}
+                              onChange={(e) => {
+                                const val = e.target.value === '' ? '' : Number(e.target.value);
+                                setRefundAmountInput(val);
+                                if (typeof val === 'number') {
+                                  setRefundAdminNotes(getCancellationApprovalEmailTemplate(reviewCancellationBooking, refundChannelInput, refundReferenceInput, val));
+                                }
+                              }}
+                              placeholder={String(policyCalc.netRefundable)}
+                              className={`w-full rounded-xl border px-3 py-2 bg-[#F8F9FA] text-[var(--ink)] font-mono font-bold text-xs focus:outline-none focus:bg-white transition-colors ${
+                                isExceeded ? 'border-rose-500 focus:border-rose-600 bg-rose-50/50' : 'border-[#24252c]/15 focus:border-rose-500'
+                              }`}
+                              required
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRefundAmountInput(policyCalc.netRefundable);
+                                setRefundAdminNotes(getCancellationApprovalEmailTemplate(reviewCancellationBooking, refundChannelInput, refundReferenceInput, policyCalc.netRefundable));
+                              }}
+                              className="text-[10px] font-bold px-2.5 py-2 rounded-xl bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/10 hover:bg-[#EAEBED] transition-colors whitespace-nowrap cursor-pointer"
+                            >
+                              Use Policy
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRefundAmountInput(maxPaid);
+                                setRefundAdminNotes(getCancellationApprovalEmailTemplate(reviewCancellationBooking, refundChannelInput, refundReferenceInput, maxPaid));
+                              }}
+                              className="text-[10px] font-bold px-2.5 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 transition-colors whitespace-nowrap cursor-pointer"
+                              title="Set to total amount customer paid"
+                            >
+                              Max Paid
+                            </button>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[10px] pt-0.5">
+                            <span className={isExceeded ? 'text-rose-600 font-extrabold' : 'text-[#24252c]/60 font-medium'}>
+                              {isExceeded
+                                ? `Validation error: Cannot exceed total paid amount (₱${maxPaid.toLocaleString()})`
+                                : `Max refundable: ₱${maxPaid.toLocaleString()} (${reviewCancellationBooking.isFullyPaid ? '100% Full Payment' : '50% Deposit Paid'})`}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              })()}
+
+              {/* Customer Cancellation Reason */}
+              <div>
+                <label className="text-[10px] font-bold uppercase text-[#24252c]/50 block mb-1">
+                  Customer's Reason for Cancellation:
+                </label>
+                <div className="p-3.5 rounded-2xl bg-[#F8F9FA] border border-[#24252c]/10 text-xs text-[var(--ink)] italic">
+                  "{reviewCancellationBooking.cancellationReason || 'No detailed reason provided.'}"
+                </div>
+              </div>
+
+              {/* Refund Disbursement Channel */}
+              <div className="space-y-3 pt-2 border-t border-[#24252c]/[0.08]">
+                <div>
+                  <label className="font-bold uppercase text-[10px] text-[#24252c]/60 block mb-1">
+                    Refund Disbursement Method <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={refundChannelInput}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setRefundChannelInput(val);
+                      const amt = typeof refundAmountInput === 'number' ? refundAmountInput : undefined;
+                      setRefundAdminNotes(getCancellationApprovalEmailTemplate(reviewCancellationBooking, val, refundReferenceInput, amt));
+                    }}
+                    className="w-full rounded-2xl border border-[#24252c]/15 px-4 py-3 bg-[#F8F9FA] text-[var(--ink)] font-bold focus:outline-none focus:border-rose-500 focus:bg-white cursor-pointer transition-colors text-xs"
+                  >
+                    <option value="PayMongo Original Payment">PayMongo Original Payment (Card / E-Wallet Return)</option>
+                    <option value="GCash E-Wallet">GCash Direct Transfer</option>
+                    <option value="Maya Wallet">Maya Direct Transfer</option>
+                    <option value="Bank Transfer (BDO/BPI)">Bank Transfer (BDO/BPI/Metrobank)</option>
+                    <option value="Cash on Hand / In Person">Cash on Hand / In Person</option>
+                    <option value="Others">Others (Custom Channel)</option>
+                  </select>
+
+                  {refundChannelInput === 'Others' && (
+                    <div className="mt-2">
+                      <input
+                        type="text"
+                        value={refundCustomChannel}
+                        onChange={(e) => setRefundCustomChannel(e.target.value)}
+                        placeholder="Specify disbursement channel..."
+                        className="w-full rounded-2xl border border-[#24252c]/15 px-4 py-2.5 bg-[#F8F9FA] text-[var(--ink)] font-bold text-xs focus:outline-none focus:border-rose-500 focus:bg-white"
+                        required
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* PayMongo reflection notice or Manual proof upload (Clean Icon, No Emoji) */}
+                {refundChannelInput.toLowerCase().includes('paymongo') ? (
+                  <div className="p-3.5 rounded-2xl bg-blue-50 border border-blue-200 text-blue-900 text-[11px] space-y-1">
+                    <div className="font-extrabold flex items-center gap-1.5 text-blue-950">
+                      <IconShield className="w-3.5 h-3.5 text-blue-700" />
+                      <span>PayMongo Gateway Refund Timeline</span>
+                    </div>
+                    <p className="text-blue-900/80 leading-relaxed">
+                      The customer's email confirmation will explicitly specify that refunds through their original PayMongo payment channel take <strong>5 to 10 business days</strong> to reflect.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 p-3.5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/10">
+                    <div>
+                      <label className="font-bold uppercase text-[10px] text-[#24252c]/60 block mb-1">
+                        Disbursement Reference / Transaction # (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={refundReferenceInput}
+                        onChange={(e) => {
+                          setRefundReferenceInput(e.target.value);
+                          const amt = typeof refundAmountInput === 'number' ? refundAmountInput : undefined;
+                          setRefundAdminNotes(getCancellationApprovalEmailTemplate(reviewCancellationBooking, refundChannelInput, e.target.value, amt));
+                        }}
+                        placeholder="e.g. GCash Ref 902194819..."
+                        className="w-full rounded-2xl border border-[#24252c]/15 px-4 py-2 bg-white text-[var(--ink)] font-bold text-xs focus:outline-none focus:border-rose-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="font-bold uppercase text-[10px] text-[#24252c]/60 block mb-1">
+                        Upload Disbursement Proof Slip / Receipt (Optional)
+                      </label>
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setRefundReceiptFile(file);
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setRefundReceiptPreview(reader.result as string);
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                        className="w-full text-xs text-[var(--ink)] font-medium file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-[11px] file:font-bold file:bg-rose-600 file:text-white hover:file:bg-rose-700 cursor-pointer"
+                      />
+                      {refundReceiptPreview && (
+                        <div className="mt-2 aspect-[16/9] rounded-xl overflow-hidden border border-[#24252c]/10 bg-white flex items-center justify-center p-2">
+                          <img src={refundReceiptPreview} alt="Proof Slip" className="w-full h-full object-contain rounded-lg" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Built-in Editable Email Notification */}
+                <div className="space-y-2 pt-2 border-t border-[#24252c]/[0.08]">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <label className="text-[11px] font-black uppercase text-[var(--ink)] block">
+                        Customer Email Notification
+                      </label>
+                      <span className="text-[10px] text-[#24252c]/60">
+                        Recipient: <strong className="text-rose-600 font-mono">{reviewCancellationBooking.email}</strong>
+                      </span>
+                    </div>
+
+                    {/* Quick Template Chips */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const amt = typeof refundAmountInput === 'number' ? refundAmountInput : undefined;
+                          setRefundAdminNotes(getCancellationApprovalEmailTemplate(reviewCancellationBooking, refundChannelInput, refundReferenceInput, amt));
+                        }}
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer"
+                      >
+                        Refund Notice
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRefundAdminNotes(getCancellationDeclineEmailTemplate(reviewCancellationBooking))}
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 transition-colors cursor-pointer"
+                      >
+                        Decline Note
+                      </button>
+                    </div>
+                  </div>
+
+                  <textarea
+                    rows={5}
+                    value={refundAdminNotes}
+                    onChange={(e) => setRefundAdminNotes(e.target.value)}
+                    placeholder="Customize the email notice to be sent to the customer..."
+                    className="w-full rounded-2xl border border-black/10 px-4 py-3 bg-[#F8F9FA] focus:bg-white text-xs font-medium text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-rose-500 transition-colors resize-none leading-relaxed"
+                    required
+                  />
+                  <div className="flex justify-between items-center text-[10px] text-[#24252c]/50 px-1">
+                    <span>Dispatched via official BINHI email with cancellation letterhead.</span>
+                    <span className="font-mono font-semibold">{refundAdminNotes.length} chars</span>
+                  </div>
+                </div>
+
+                {/* Actions: Decline / Approve */}
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#24252c]/[0.06]">
+                  <button
+                    type="button"
+                    disabled={isProcessingRefund}
+                    onClick={handleDeclineCustomerCancellation}
+                    className="px-5 py-2.5 rounded-full border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <span>{isProcessingRefund ? 'Processing...' : 'Decline & Keep Active'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      isProcessingRefund ||
+                      refundAmountInput === '' ||
+                      Number(refundAmountInput) < 0 ||
+                      (typeof refundAmountInput === 'number' &&
+                        refundAmountInput >
+                          (reviewCancellationBooking.isFullyPaid
+                            ? reviewCancellationBooking.totalNum
+                            : reviewCancellationBooking.depositNum))
+                    }
+                    onClick={handleApproveCustomerCancellation}
+                    className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-6 py-2.5 rounded-full shadow-md transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <IconCheck className="w-4 h-4" />
+                    <span>{isProcessingRefund ? 'Processing & Emailing...' : 'Approve Cancellation & Issue Refund'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </ModalOverlay>
+
+      {/* ── Modal 4: Direct Admin Cancel & Refund Modal ── */}
+      <ModalOverlay isOpen={Boolean(adminCancelAndRefundBooking)} onClose={() => setAdminCancelAndRefundBooking(null)}>
+        {adminCancelAndRefundBooking && (
+          <div className="bg-white rounded-[2.5rem] max-w-xl w-full max-h-[85vh] shadow-2xl border border-[#24252c]/10 relative p-1.5 sm:p-2.5 overflow-hidden flex flex-col">
+            <button
+              type="button"
+              onClick={() => setAdminCancelAndRefundBooking(null)}
+              className="absolute top-6 right-6 z-20 text-[#24252c]/50 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors bg-white/90 backdrop-blur-md shadow-sm border border-[#24252c]/10 cursor-pointer"
+            >
+              <IconX className="w-5 h-5" />
+            </button>
+
+            <div className="flex-1 overflow-y-auto p-5 sm:p-7 space-y-4 modal-scroll pr-4 sm:pr-6 text-xs">
+              <div className="mb-2 pb-3 border-b border-[#24252c]/[0.06]">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="p-1.5 rounded-lg bg-rose-500/10 text-rose-600">
+                    <IconX className="w-4 h-4" />
+                  </span>
+                  <h3 className="text-xl font-extrabold text-[var(--ink)]">
+                    Cancel Booking &amp; Issue Refund (Admin)
+                  </h3>
+                </div>
+                <p className="text-xs text-[#24252c]/60">
+                  Cancel reservation #{adminCancelAndRefundBooking.id} and disburse refundable payment back to customer.
+                </p>
+              </div>
+
+              <form onSubmit={handleDirectAdminCancelAndRefund} className="space-y-4 text-xs">
+                {/* Summary & Dynamic Policy Calc */}
+                {(() => {
+                  const policyCalc = calculateCancellationRefund({
+                    eventDateStr: adminCancelAndRefundBooking.rawDate,
+                    bookingCreatedAt: adminCancelAndRefundBooking.createdAt,
+                    amountPaid: adminCancelAndRefundBooking.isFullyPaid
+                      ? adminCancelAndRefundBooking.totalNum
+                      : adminCancelAndRefundBooking.depositNum,
+                    totalCost: adminCancelAndRefundBooking.totalNum,
+                    policy: adminPolicyConfig,
+                  });
+
+                  return (
+                    <div className="p-4 rounded-2xl bg-rose-50/70 border border-rose-200/80 space-y-3">
+                      <div className="flex justify-between items-center text-xs">
+                        <div>
+                          <div className="font-extrabold text-sm text-[var(--ink)]">{adminCancelAndRefundBooking.customer}</div>
+                          <div className="text-[11px] text-[#24252c]/60">{adminCancelAndRefundBooking.email}</div>
+                        </div>
+                        <span className="font-mono font-bold text-rose-700 bg-white px-2.5 py-1 rounded-full border border-rose-200">
+                          Ref #{adminCancelAndRefundBooking.id}
+                        </span>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-white border border-rose-200/90 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-[#24252c]/70 font-bold">Policy Recommendation:</span>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
+                            policyCalc.refundPercentage === 100
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                              : policyCalc.refundPercentage > 0
+                              ? 'bg-blue-50 text-blue-800 border-blue-300'
+                              : 'bg-rose-50 text-rose-800 border-rose-300'
+                          }`}>
+                            {policyCalc.isGracePeriodApplied ? 'Grace Period (100%)' : `${policyCalc.refundPercentage}% Refund Tier`}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-[#24252c]/70 leading-relaxed bg-[var(--mist)] p-2 rounded-lg">
+                          {policyCalc.summaryExplanation}
+                        </div>
+                        <div className="flex justify-between items-center pt-1 border-t border-[#24252c]/5">
+                          <span className="text-xs font-bold text-rose-900">Policy Recommended Net Refund:</span>
+                          <span className="font-mono font-black text-rose-700 text-sm">
+                            ₱{policyCalc.netRefundable.toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Editable Refund Disbursement Amount */}
+                      {(() => {
+                        const maxPaid = adminCancelAndRefundBooking.isFullyPaid
+                          ? adminCancelAndRefundBooking.totalNum
+                          : adminCancelAndRefundBooking.depositNum;
+                        const numVal = typeof refundAmountInput === 'number' ? refundAmountInput : Number(refundAmountInput) || 0;
+                        const isExceeded = numVal > maxPaid;
+
+                        return (
+                          <div className={`p-3.5 rounded-xl bg-white border space-y-2 transition-colors ${
+                            isExceeded ? 'border-rose-500 bg-rose-50/30' : 'border-rose-200/90'
+                          }`}>
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-[var(--ink)] block">
+                                Refund Disbursement Amount (₱) <span className="text-rose-500">*</span>
+                              </label>
+                              <span className="text-[10px] text-rose-700 font-bold bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                                Policy: ₱{policyCalc.netRefundable.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-[var(--ink)]">₱</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max={maxPaid}
+                                value={refundAmountInput}
+                                onChange={(e) => {
+                                  const val = e.target.value === '' ? '' : Number(e.target.value);
+                                  setRefundAmountInput(val);
+                                  if (typeof val === 'number') {
+                                    setRefundAdminNotes(getDirectCancellationEmailTemplate(adminCancelAndRefundBooking, refundChannelInput, refundReferenceInput, val));
+                                  }
+                                }}
+                                placeholder={String(policyCalc.netRefundable)}
+                                className={`w-full rounded-xl border px-3 py-2 bg-[#F8F9FA] text-[var(--ink)] font-mono font-bold text-xs focus:outline-none focus:bg-white transition-colors ${
+                                  isExceeded ? 'border-rose-500 focus:border-rose-600 bg-rose-50/50' : 'border-[#24252c]/15 focus:border-rose-500'
+                                }`}
+                                required
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRefundAmountInput(policyCalc.netRefundable);
+                                  setRefundAdminNotes(getDirectCancellationEmailTemplate(adminCancelAndRefundBooking, refundChannelInput, refundReferenceInput, policyCalc.netRefundable));
+                                }}
+                                className="text-[10px] font-bold px-2.5 py-2 rounded-xl bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/10 hover:bg-[#EAEBED] transition-colors whitespace-nowrap cursor-pointer"
+                              >
+                                Use Policy
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRefundAmountInput(maxPaid);
+                                  setRefundAdminNotes(getDirectCancellationEmailTemplate(adminCancelAndRefundBooking, refundChannelInput, refundReferenceInput, maxPaid));
+                                }}
+                                className="text-[10px] font-bold px-2.5 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 transition-colors whitespace-nowrap cursor-pointer"
+                                title="Set to total amount customer paid"
+                              >
+                                Max Paid
+                              </button>
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] pt-0.5">
+                              <span className={isExceeded ? 'text-rose-600 font-extrabold' : 'text-[#24252c]/60 font-medium'}>
+                                {isExceeded
+                                  ? `Validation error: Cannot exceed total paid amount (₱${maxPaid.toLocaleString()})`
+                                  : `Max refundable: ₱${maxPaid.toLocaleString()} (${adminCancelAndRefundBooking.isFullyPaid ? '100% Full Payment' : '50% Deposit Paid'})`}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })()}
+
+                {/* Refund Method */}
+                <div>
+                  <label className="font-bold uppercase text-[10px] text-[#24252c]/60 block mb-1">
+                    Refund Disbursement Method <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={refundChannelInput}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setRefundChannelInput(val);
+                      const amt = typeof refundAmountInput === 'number' ? refundAmountInput : undefined;
+                      setRefundAdminNotes(getDirectCancellationEmailTemplate(adminCancelAndRefundBooking, val, refundReferenceInput, amt));
+                    }}
+                    className="w-full rounded-2xl border border-[#24252c]/15 px-4 py-3 bg-[#F8F9FA] text-[var(--ink)] font-bold focus:outline-none focus:border-rose-500 focus:bg-white cursor-pointer transition-colors text-xs"
+                  >
+                    <option value="PayMongo Original Payment">PayMongo Original Payment (Card / E-Wallet Return)</option>
+                    <option value="GCash E-Wallet">GCash Direct Transfer</option>
+                    <option value="Maya Wallet">Maya Direct Transfer</option>
+                    <option value="Bank Transfer (BDO/BPI)">Bank Transfer (BDO/BPI/Metrobank)</option>
+                    <option value="Cash on Hand / In Person">Cash on Hand / In Person</option>
+                    <option value="Others">Others (Custom Channel)</option>
+                  </select>
+
+                  {refundChannelInput === 'Others' && (
+                    <div className="mt-2">
+                      <input
+                        type="text"
+                        value={refundCustomChannel}
+                        onChange={(e) => setRefundCustomChannel(e.target.value)}
+                        placeholder="Specify disbursement channel..."
+                        className="w-full rounded-2xl border border-[#24252c]/15 px-4 py-2.5 bg-[#F8F9FA] text-[var(--ink)] font-bold text-xs focus:outline-none focus:border-rose-500 focus:bg-white"
+                        required
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {refundChannelInput.toLowerCase().includes('paymongo') ? (
+                  <div className="p-3.5 rounded-2xl bg-blue-50 border border-blue-200 text-blue-900 text-[11px] space-y-1">
+                    <div className="font-extrabold flex items-center gap-1.5 text-blue-950">
+                      <IconShield className="w-3.5 h-3.5 text-blue-700" />
+                      <span>PayMongo Gateway Refund Notice</span>
+                    </div>
+                    <p className="text-blue-900/80 leading-relaxed">
+                      Customer notification email will state that the credit requires <strong>5 to 10 business days</strong> to reflect in their original payment account.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 p-3.5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/10">
+                    <div>
+                      <label className="font-bold uppercase text-[10px] text-[#24252c]/60 block mb-1">
+                        Disbursement Reference / Transaction # (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={refundReferenceInput}
+                        onChange={(e) => {
+                          setRefundReferenceInput(e.target.value);
+                          setRefundAdminNotes(getDirectCancellationEmailTemplate(adminCancelAndRefundBooking, refundChannelInput, e.target.value));
+                        }}
+                        placeholder="e.g. GCash Ref 902194819..."
+                        className="w-full rounded-2xl border border-[#24252c]/15 px-4 py-2 bg-white text-[var(--ink)] font-bold text-xs focus:outline-none focus:border-rose-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="font-bold uppercase text-[10px] text-[#24252c]/60 block mb-1">
+                        Upload Disbursement Proof Slip / Receipt (Optional)
+                      </label>
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setRefundReceiptFile(file);
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setRefundReceiptPreview(reader.result as string);
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                        className="w-full text-xs text-[var(--ink)] font-medium file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-[11px] file:font-bold file:bg-rose-600 file:text-white hover:file:bg-rose-700 cursor-pointer"
+                      />
+                      {refundReceiptPreview && (
+                        <div className="mt-2 aspect-[16/9] rounded-xl overflow-hidden border border-[#24252c]/10 bg-white flex items-center justify-center p-2">
+                          <img src={refundReceiptPreview} alt="Proof Slip" className="w-full h-full object-contain rounded-lg" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Built-in Customizable Email Box */}
+                <div className="space-y-2 pt-2 border-t border-[#24252c]/[0.08]">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <label className="text-[11px] font-black uppercase text-[var(--ink)] block">
+                        Customer Email Notification
+                      </label>
+                      <span className="text-[10px] text-[#24252c]/60">
+                        Recipient: <strong className="text-rose-600 font-mono">{adminCancelAndRefundBooking.email}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  <textarea
+                    rows={5}
+                    value={refundAdminNotes}
+                    onChange={(e) => setRefundAdminNotes(e.target.value)}
+                    placeholder="Enter or customize the cancellation and refund email to the customer..."
+                    className="w-full rounded-2xl border border-black/10 px-4 py-3 bg-[#F8F9FA] focus:bg-white text-xs font-medium text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-rose-500 transition-colors resize-none leading-relaxed"
+                    required
+                  />
+                  <div className="flex justify-between items-center text-[10px] text-[#24252c]/50 px-1">
+                    <span>Sent automatically upon confirming cancellation.</span>
+                    <span className="font-mono font-semibold">{refundAdminNotes.length} chars</span>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#24252c]/[0.06]">
+                  <button
+                    type="button"
+                    onClick={() => setAdminCancelAndRefundBooking(null)}
+                    className="px-5 py-2.5 rounded-full border border-black/10 text-xs font-semibold text-[var(--ink)] hover:bg-[#F0F0F0] transition-colors cursor-pointer"
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={
+                      isProcessingRefund ||
+                      refundAmountInput === '' ||
+                      Number(refundAmountInput) < 0 ||
+                      (typeof refundAmountInput === 'number' &&
+                        refundAmountInput >
+                          (adminCancelAndRefundBooking.isFullyPaid
+                            ? adminCancelAndRefundBooking.totalNum
+                            : adminCancelAndRefundBooking.depositNum))
+                    }
+                    className="bg-rose-600 hover:bg-rose-700 text-white font-semibold px-6 py-2.5 rounded-full transition-colors cursor-pointer text-xs shadow-md flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isProcessingRefund ? 'Processing Cancellation...' : 'Confirm Cancellation & Issue Refund'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </ModalOverlay>
+
+      {/* ── Modal 5: View Refund Details & Proof Modal ── */}
+      <ModalOverlay isOpen={Boolean(viewRefundDetailsBooking)} onClose={() => setViewRefundDetailsBooking(null)}>
+        {viewRefundDetailsBooking && (
           <div className="bg-white rounded-[2.5rem] p-6 sm:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative animate-blur-in text-xs">
             <button
               type="button"
-              onClick={() => setRefundModalBooking(null)}
+              onClick={() => setViewRefundDetailsBooking(null)}
               className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors cursor-pointer"
             >
               <IconX className="w-5 h-5" />
@@ -2561,65 +3825,96 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
 
             {/* Header */}
             <div className="flex items-center gap-2.5 mb-3">
-              <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center font-bold border border-slate-200 shrink-0 text-base">
+              <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center font-bold border border-rose-200 shrink-0 text-base">
                 ₱
               </div>
               <div>
-                <span className="text-[10px] font-bold text-[#1090F8] uppercase tracking-wider block">
-                  Disbursement Preview
+                <span className="text-[10px] font-bold text-rose-600 uppercase tracking-wider block">
+                  Refund Settlement Audit
                 </span>
                 <h3 className="text-lg font-extrabold text-[var(--ink)] -mt-0.5">
-                  Process Customer Refund
+                  Refund Details &amp; Proof
                 </h3>
               </div>
             </div>
 
             <p className="text-xs text-[#24252c]/60 mb-4 leading-relaxed">
-              Disbursement details for cancelled booking <strong className="text-[var(--ink)]">#{refundModalBooking.id}</strong>.
+              Disbursement record for cancelled reservation <strong className="text-[var(--ink)] font-mono">#{viewRefundDetailsBooking.id}</strong>.
             </p>
 
             {/* Summary Details Card */}
-            <div className="bg-[var(--mist)]/70 rounded-2xl p-4 border border-[#24252c]/[0.06] space-y-2 mb-4">
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-[#24252c]/50">Booking Reference:</span>
-                <span className="font-bold text-[#1090F8]">#{refundModalBooking.id}</span>
-              </div>
+            <div className="bg-[var(--mist)]/70 rounded-2xl p-4 border border-[#24252c]/[0.06] space-y-2.5 mb-4">
               <div className="flex justify-between items-center text-xs">
                 <span className="text-[#24252c]/50">Customer:</span>
-                <span className="font-bold text-[var(--ink)]">{refundModalBooking.customer}</span>
+                <span className="font-bold text-[var(--ink)]">{viewRefundDetailsBooking.customer}</span>
               </div>
               <div className="flex justify-between items-center text-xs">
-                <span className="text-[#24252c]/50">Package:</span>
-                <span className="font-medium text-[var(--ink)]">{refundModalBooking.package}</span>
+                <span className="text-[#24252c]/50">Package &amp; Date:</span>
+                <span className="font-medium text-[var(--ink)]">{viewRefundDetailsBooking.package} ({viewRefundDetailsBooking.date})</span>
               </div>
               <div className="flex justify-between items-center text-xs pt-1.5 border-t border-[#24252c]/[0.06]">
-                <span className="text-[#24252c]/50">Payment Channel:</span>
-                <span className="font-semibold text-[var(--ink)]">{refundModalBooking.paymentChannel}</span>
+                <span className="text-[#24252c]/50">Refund Method:</span>
+                <span className="font-bold text-rose-700">{viewRefundDetailsBooking.refundChannel || 'PayMongo Original Payment'}</span>
               </div>
+              {viewRefundDetailsBooking.refundReferenceNumber && (
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-[#24252c]/50">Reference #:</span>
+                  <span className="font-mono font-bold text-[var(--ink)]">{viewRefundDetailsBooking.refundReferenceNumber}</span>
+                </div>
+              )}
+              {viewRefundDetailsBooking.refundedAt && (
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-[#24252c]/50">Refund Date:</span>
+                  <span className="font-semibold text-[var(--ink)]">
+                    {new Date(viewRefundDetailsBooking.refundedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between items-center text-xs pt-1.5 border-t border-[#24252c]/[0.06]">
-                <span className="font-bold text-[var(--ink)]">Refundable Amount:</span>
-                <span className="font-black text-[var(--ink)] text-sm">
-                  {refundModalBooking.isFullyPaid ? refundModalBooking.total : refundModalBooking.deposit}
+                <span className="font-bold text-[var(--ink)]">Total Amount Refunded:</span>
+                <span className="font-black text-rose-700 text-sm">
+                  ₱{(viewRefundDetailsBooking.refundAmount || (viewRefundDetailsBooking.isFullyPaid ? viewRefundDetailsBooking.totalNum : viewRefundDetailsBooking.depositNum))?.toLocaleString()}
                 </span>
               </div>
             </div>
 
-            {/* Info Notice */}
-            <div className="p-3.5 rounded-2xl bg-blue-50/80 border border-blue-200/80 text-blue-900 text-[11px] flex items-start gap-2.5 mb-4">
-              <span className="w-2 h-2 rounded-full bg-[#1090F8] shrink-0 mt-1" />
-              <span>Refund gateway integration is in preview mode. No disbursement transactions or status changes are executed.</span>
-            </div>
+            {/* Attached Proof Slip */}
+            {viewRefundDetailsBooking.refundReceiptUrl ? (
+              <div className="rounded-2xl bg-white border border-[#24252c]/15 overflow-hidden p-3 shadow-2xs mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold text-[#24252c]/70">Disbursement Proof Slip:</span>
+                  <a
+                    href={viewRefundDetailsBooking.refundReceiptUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] font-bold text-[#1090F8] hover:underline"
+                  >
+                    View Full Image ↗
+                  </a>
+                </div>
+                <div className="aspect-[16/9] rounded-xl overflow-hidden bg-[var(--mist)] flex items-center justify-center border border-[#24252c]/10">
+                  <img
+                    src={viewRefundDetailsBooking.refundReceiptUrl}
+                    alt="Refund Proof Slip"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+              </div>
+            ) : viewRefundDetailsBooking.refundChannel?.toLowerCase().includes('paymongo') ? (
+              <div className="p-3.5 rounded-2xl bg-blue-50 border border-blue-200 text-blue-900 text-[11px] flex items-center gap-2 mb-4">
+                <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />
+                <span>Processed via PayMongo checkout return (5–10 business days reflection).</span>
+              </div>
+            ) : null}
 
-            {/* Dismiss Button */}
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={() => setRefundModalBooking(null)}
-                className="w-full py-3 rounded-full bg-[var(--ink)] hover:bg-[var(--ink-soft)] text-white font-semibold text-xs transition-colors cursor-pointer shadow-sm"
-              >
-                Close Preview
-              </button>
-            </div>
+            {/* Close Button */}
+            <button
+              type="button"
+              onClick={() => setViewRefundDetailsBooking(null)}
+              className="w-full py-3 rounded-full bg-[var(--ink)] hover:bg-[var(--ink-soft)] text-white font-semibold text-xs transition-colors cursor-pointer shadow-sm"
+            >
+              Close Refund View
+            </button>
           </div>
         )}
       </ModalOverlay>

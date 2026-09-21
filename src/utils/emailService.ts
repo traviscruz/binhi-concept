@@ -5,11 +5,17 @@ import {
   getAdminRescheduleRequestAlertHtml,
   getCustomerRescheduleApprovedHtml,
   getCustomerRescheduleRejectedHtml,
+  getAdminCancellationRequestAlertHtml,
+  getCustomerCancellationRefundHtml,
+  getCustomerCancellationRejectedHtml,
   type InquiryEmailData,
   type InquiryReplyEmailData,
   type RescheduleRequestEmailData,
   type RescheduleApprovalEmailData,
   type RescheduleRejectionEmailData,
+  type CancellationRequestEmailData,
+  type CancellationRefundEmailData,
+  type CancellationRejectionEmailData,
 } from './emailTemplates';
 import { supabase } from '../lib/supabase';
 
@@ -192,6 +198,92 @@ export async function sendCustomerRescheduleRejection(
 ): Promise<SendEmailResponse> {
   const html = getCustomerRescheduleRejectedHtml(data);
   const subject = `Regarding your Reschedule Request for #${data.bookingId} - BINHI Concept`;
+
+  return await sendEmail({
+    to: data.customerEmail,
+    subject,
+    html,
+    replyTo: getAdminEmail(),
+  });
+}
+
+/**
+ * Sends an alert email to ALL system admins found in the database when a customer requests a booking cancellation & refund.
+ */
+export async function sendAdminCancellationAlert(
+  data: CancellationRequestEmailData
+): Promise<{ success: boolean; sentCount: number; recipientCount: number }> {
+  const defaultAdmin = getAdminEmail();
+  const recipientEmails = new Set<string>();
+  if (defaultAdmin) recipientEmails.add(defaultAdmin);
+
+  try {
+    const { data: adminProfiles } = await supabase
+      .from('profiles')
+      .select('email, role')
+      .eq('role', 'admin');
+
+    if (adminProfiles && adminProfiles.length > 0) {
+      adminProfiles.forEach((p) => {
+        if (p.email && p.email.includes('@')) {
+          recipientEmails.add(p.email.trim());
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('[emailService] Could not query admin profiles from DB, using fallback admin email:', err);
+  }
+
+  const html = getAdminCancellationRequestAlertHtml(data);
+  const subject = `[Cancellation & Refund Request] ${data.customerName} - Ref #${data.bookingId} (${data.eventDate})`;
+  let sentCount = 0;
+
+  for (const toEmail of recipientEmails) {
+    try {
+      const res = await sendEmail({
+        to: toEmail,
+        subject,
+        html,
+        replyTo: data.customerEmail,
+      });
+      if (res.success) sentCount++;
+    } catch (e) {
+      console.error(`[emailService] Failed to send cancellation alert to ${toEmail}:`, e);
+    }
+  }
+
+  return {
+    success: sentCount > 0,
+    sentCount,
+    recipientCount: recipientEmails.size,
+  };
+}
+
+/**
+ * Sends an email to the customer when their booking is cancelled & refund is processed (PayMongo or Manual).
+ */
+export async function sendCustomerCancellationRefundEmail(
+  data: CancellationRefundEmailData
+): Promise<SendEmailResponse> {
+  const html = getCustomerCancellationRefundHtml(data);
+  const subject = `Booking Cancelled & Refund Processed - BINHI Concept (#${data.bookingId})`;
+
+  return await sendEmail({
+    to: data.customerEmail,
+    subject,
+    html,
+    replyTo: getAdminEmail(),
+  });
+}
+
+/**
+ * Sends an email to the customer when their cancellation request is declined.
+ */
+export async function sendCustomerCancellationRejectionEmail(
+  data: CancellationRejectionEmailData
+): Promise<SendEmailResponse> {
+  const html = getCustomerCancellationRejectedHtml(data);
+  const subject = `Regarding your Cancellation Request for #${data.bookingId} - BINHI Concept`;
 
   return await sendEmail({
     to: data.customerEmail,

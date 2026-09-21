@@ -227,3 +227,107 @@ export async function retrievePaymongoCheckoutSession(sessionId: string): Promis
 
   return null;
 }
+
+export interface PaymongoRefundParams {
+  paymentId?: string;
+  checkoutSessionId?: string;
+  amount: number; // in PHP Pesos
+  reason?: 'requested_by_customer' | 'duplicate' | 'fraudulent' | 'others';
+  notes?: string;
+}
+
+export interface PaymongoRefundResult {
+  success: boolean;
+  refundId?: string;
+  status?: string;
+  amount?: number;
+  error?: string;
+}
+
+/**
+ * Initiates an official refund via PayMongo Refunds API (POST /v1/refunds).
+ * Once called, the refund immediately reflects on the PayMongo Merchant Dashboard and initiates bank/e-wallet return.
+ */
+export async function createPaymongoRefund(
+  params: PaymongoRefundParams
+): Promise<PaymongoRefundResult> {
+  const secretKey = (import.meta.env.VITE_PAYMONGO_SECRET_KEY || '').trim();
+  if (!secretKey) {
+    return { success: false, error: 'PayMongo secret key is not configured in environment.' };
+  }
+
+  let paymentId = params.paymentId;
+
+  // If paymentId not provided directly, try to resolve it from the checkout session
+  if (!paymentId && params.checkoutSessionId) {
+    try {
+      const session = await retrievePaymongoCheckoutSession(params.checkoutSessionId);
+      if (session?.payments && session.payments.length > 0) {
+        paymentId = session.payments[0]?.id;
+      }
+    } catch (e) {
+      console.warn('Failed to retrieve payment ID from checkout session:', e);
+    }
+  }
+
+  if (!paymentId) {
+    return {
+      success: false,
+      error: 'No PayMongo Payment ID found for this checkout session. The payment may have been processed manually or the session ID is missing.',
+    };
+  }
+
+  const basicAuthToken = btoa(`${secretKey}:`);
+  const amountInCentavos = Math.round(Number(params.amount) * 100);
+
+  const endpoint = import.meta.env.DEV
+    ? '/paymongo-api/v1/refunds'
+    : 'https://api.paymongo.com/v1/refunds';
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Basic ${basicAuthToken}`,
+      },
+      body: JSON.stringify({
+        data: {
+          attributes: {
+            amount: amountInCentavos,
+            payment_id: paymentId,
+            reason: params.reason || 'requested_by_customer',
+            notes: params.notes || 'BINHI Concept Booking Refund',
+          },
+        },
+      }),
+    });
+
+    const data = await res.json();
+
+    if (res.ok && data?.data?.id) {
+      return {
+        success: true,
+        refundId: data.data.id,
+        status: data.data.attributes?.status || 'succeeded',
+        amount: (data.data.attributes?.amount || 0) / 100,
+      };
+    }
+
+    const errorDetail =
+      data?.errors?.[0]?.detail ||
+      data?.errors?.[0]?.description ||
+      'Failed to process PayMongo refund.';
+
+    return {
+      success: false,
+      error: errorDetail,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'Network error communicating with PayMongo API.',
+    };
+  }
+}
+

@@ -1,14 +1,20 @@
 import { useState, useEffect } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconTicket, IconCalendar, IconPin, IconX, IconPrinter, IconCheck } from '../../components/shared/icons';
+import { IconTicket, IconCalendar, IconPin, IconX, IconPrinter, IconCheck, IconShield, IconClock, IconAlertTriangle } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { BookingRescheduleCalendar } from '../../components/shared/BookingRescheduleCalendar';
 import { supabase } from '../../lib/supabase';
 import { formatDisplayDate } from '../../utils/bookingService';
-import { sendAdminRescheduleAlert } from '../../utils/emailService';
+import { sendAdminRescheduleAlert, sendAdminCancellationAlert } from '../../utils/emailService';
 import { createPaymongoCheckoutSession } from '../../utils/paymongoPayment';
+import {
+  type CancellationPolicyConfig,
+  DEFAULT_CANCELLATION_POLICY,
+  loadCancellationPolicy,
+  calculateCancellationRefund,
+} from '../../utils/cancellationPolicy';
 
 export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
   const [historyItems, setHistoryItems] = useState<any[]>([]);
@@ -26,6 +32,18 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
   const [submittingReschedule, setSubmittingReschedule] = useState(false);
   const [rescheduleSuccessToast, setRescheduleSuccessToast] = useState(false);
   const [rescheduleError, setRescheduleError] = useState('');
+
+  // Cancellation & Refund Modal States
+  const [cancellationTargetItem, setCancellationTargetItem] = useState<any | null>(null);
+  const [cancellationReason, setCancellationReason] = useState('');
+  const [submittingCancellation, setSubmittingCancellation] = useState(false);
+  const [cancellationSuccessToast, setCancellationSuccessToast] = useState(false);
+  const [cancellationError, setCancellationError] = useState('');
+  const [cancellationPolicy, setCancellationPolicy] = useState<CancellationPolicyConfig>(DEFAULT_CANCELLATION_POLICY);
+
+  useEffect(() => {
+    loadCancellationPolicy().then(setCancellationPolicy).catch(() => {});
+  }, []);
 
   const fetchHistory = async () => {
     setLoading(true);
@@ -91,13 +109,25 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
               balancePaidAt: b.balance_paid_at ? new Date(b.balance_paid_at).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
               balancePaymentMethod: b.balance_payment_method || 'Cash on Site / Event Day',
               createdAt: b.created_at ? new Date(b.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '',
+              rawCreatedAt: b.created_at || '',
               isCompleted: (b.status || b.payment_status || '').toLowerCase() === 'completed',
-              status: (b.status || b.payment_status || '').toLowerCase() === 'completed' ? 'Completed' : b.payment_status === 'paid' ? 'Confirmed & Secured' : b.payment_status === 'pending' ? 'Pending Payment' : b.payment_status === 'cancelled' ? 'Cancelled' : 'Confirmed',
-              statusColor: (b.status || b.payment_status || '').toLowerCase() === 'completed' ? 'bg-[#1090F8]/10 text-[#1090F8] border-[#1090F8]/20' : b.payment_status === 'paid' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' : b.payment_status === 'pending' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' : 'bg-rose-500/10 text-rose-600 border-rose-500/20',
+              rawStatus: (b.status || b.payment_status || '').toLowerCase(),
+              status: (b.status || b.payment_status || '').toLowerCase() === 'completed' ? 'Completed' : (b.status || b.payment_status || '').toLowerCase() === 'cancelled' ? 'Cancelled' : b.payment_status === 'paid' ? 'Confirmed & Secured' : b.payment_status === 'pending' ? 'Pending Payment' : 'Confirmed',
+              statusColor: (b.status || b.payment_status || '').toLowerCase() === 'completed' ? 'bg-[#1090F8]/10 text-[#1090F8] border-[#1090F8]/20' : (b.status || b.payment_status || '').toLowerCase() === 'cancelled' ? 'bg-rose-500/10 text-rose-600 border-rose-500/20' : b.payment_status === 'paid' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' : b.payment_status === 'pending' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' : 'bg-rose-500/10 text-rose-600 border-rose-500/20',
               paymentChannel: b.payment_channel || 'PayMongo',
               rescheduleStatus: b.reschedule_status || null,
               rescheduleRequestedDate: b.reschedule_requested_date || null,
               rescheduleReason: b.reschedule_reason || null,
+              cancellationStatus: (b.cancellation_data?.status || b.cancellation_status) || null,
+              cancellationReason: (b.cancellation_data?.reason || b.cancellation_reason) || null,
+              cancellationRequestedAt: (b.cancellation_data?.requested_at || b.cancellation_requested_at) || null,
+              cancellationAdminNotes: (b.cancellation_data?.admin_notes || b.cancellation_admin_notes) || null,
+              refundStatus: (b.cancellation_data?.refund_status || b.refund_status) || null,
+              refundAmount: b.cancellation_data?.refund_amount ? Number(b.cancellation_data.refund_amount) : (b.refund_amount ? Number(b.refund_amount) : null),
+              refundChannel: (b.cancellation_data?.refund_channel || b.refund_channel) || null,
+              refundReferenceNumber: (b.cancellation_data?.refund_reference_number || b.refund_reference_number) || null,
+              refundReceiptUrl: (b.cancellation_data?.refund_receipt_url || b.refund_receipt_url) || null,
+              refundedAt: (b.cancellation_data?.refunded_at || b.refunded_at) || null,
             };
           })
         );
@@ -194,6 +224,92 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
       setRescheduleError(err.message || 'Failed to submit reschedule request. Please try again.');
     } finally {
       setSubmittingReschedule(false);
+    }
+  };
+
+  const handleOpenCancellationModal = (item: any) => {
+    setCancellationTargetItem(item);
+    setCancellationReason('');
+    setCancellationError('');
+  };
+
+  const handleSubmitCancellation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cancellationTargetItem) return;
+
+    if (!cancellationReason.trim()) {
+      setCancellationError('Please provide a reason for cancelling your booking.');
+      return;
+    }
+
+    setSubmittingCancellation(true);
+    setCancellationError('');
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      const refundableAmount = cancellationTargetItem.isFullyPaid
+        ? (cancellationTargetItem.rawTotal || 0)
+        : (cancellationTargetItem.rawDeposit || 0);
+
+      // Calculate transparent policy refund
+      const refundCalc = calculateCancellationRefund({
+        eventDateStr: cancellationTargetItem.rawDate,
+        bookingCreatedAt: cancellationTargetItem.rawCreatedAt,
+        amountPaid: refundableAmount,
+        totalCost: cancellationTargetItem.rawTotal,
+        policy: cancellationPolicy,
+      });
+
+      // 1. Update booking in database using single compact cancellation_data JSONB
+      const { error: dbError } = await supabase
+        .from('bookings')
+        .update({
+          cancellation_data: {
+            status: 'requested',
+            reason: cancellationReason.trim(),
+            requested_at: new Date().toISOString(),
+            refund_status: 'pending',
+            refundable_amount: refundableAmount,
+            refund_percentage: refundCalc.refundPercentage,
+            gross_refund: refundCalc.grossRefundable,
+            processing_fee: refundCalc.feeDeducted,
+            net_refund: refundCalc.netRefundable,
+            tier_applied: refundCalc.tierLabel,
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', cancellationTargetItem.dbId);
+
+      if (dbError) throw dbError;
+
+      // 2. Email ALL system admins with exact Policy Net Refund recommendation
+      await sendAdminCancellationAlert({
+        bookingId: cancellationTargetItem.id,
+        customerName: cancellationTargetItem.customerName || user?.user_metadata?.full_name || 'Valued Customer',
+        customerEmail: cancellationTargetItem.customerEmail || user?.email || '',
+        customerPhone: cancellationTargetItem.customerPhone || '',
+        packageName: cancellationTargetItem.package,
+        eventDate: cancellationTargetItem.date,
+        totalCost: cancellationTargetItem.total,
+        depositPaid: cancellationTargetItem.deposit,
+        paidAmount: `₱${refundableAmount.toLocaleString()}`,
+        policyNetRefund: `₱${refundCalc.netRefundable.toLocaleString()}`,
+        tierApplied: refundCalc.tierLabel,
+        reason: cancellationReason.trim(),
+        venue: cancellationTargetItem.venue,
+      });
+
+      setCancellationTargetItem(null);
+      setCancellationSuccessToast(true);
+      setTimeout(() => setCancellationSuccessToast(false), 8000);
+
+      fetchHistory();
+    } catch (err: any) {
+      console.error('Failed to submit cancellation request:', err);
+      setCancellationError(err.message || 'Failed to submit cancellation request. Please try again.');
+    } finally {
+      setSubmittingCancellation(false);
     }
   };
 
@@ -299,7 +415,7 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
           </div>
         )}
 
-        {/* Success Toast */}
+        {/* Reschedule Success Toast */}
         {rescheduleSuccessToast && (
           <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 shadow-sm flex items-center justify-between gap-3 animate-fade-in text-xs">
             <div className="flex items-center gap-2.5">
@@ -315,6 +431,28 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
               type="button"
               onClick={() => setRescheduleSuccessToast(false)}
               className="text-emerald-700 hover:text-emerald-950 font-bold p-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Cancellation Success Toast */}
+        {cancellationSuccessToast && (
+          <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-rose-900 shadow-sm flex items-center justify-between gap-3 animate-fade-in text-xs">
+            <div className="flex items-center gap-2.5">
+              <span className="w-6 h-6 rounded-full bg-rose-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                ✓
+              </span>
+              <div>
+                <strong className="font-extrabold text-sm block">Cancellation &amp; Refund Request Submitted</strong>
+                <span>Our production management team has received your cancellation and will process your refund according to our policy.</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCancellationSuccessToast(false)}
+              className="text-rose-700 hover:text-rose-950 font-bold p-1 cursor-pointer"
             >
               ✕
             </button>
@@ -345,9 +483,10 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
             {historyItems.map((item) => (
               <div
                 key={item.id}
-                className="bg-white rounded-2xl p-5 border border-[#24252c]/[0.08] shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4"
+                className="bg-white rounded-2xl p-5 border border-[#24252c]/[0.08] shadow-sm hover:border-[#1090F8]/30 transition-all space-y-3.5"
               >
-                <div className="space-y-1.5 min-w-0 flex-1">
+                {/* Header Row: Ref #, Badges & Payment Method */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#24252c]/[0.06]">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono font-bold text-xs text-[#1090F8]">{item.id}</span>
                     <span
@@ -355,94 +494,167 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                     >
                       {item.status}
                     </span>
+                    {item.cancellationStatus === 'requested' && (
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-rose-600 text-white uppercase tracking-wider shadow-2xs animate-pulse">
+                        Cancellation Requested
+                      </span>
+                    )}
+                    {item.cancellationStatus === 'rejected' && (
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-300 uppercase tracking-wider">
+                        Cancellation Declined (Active)
+                      </span>
+                    )}
+                    {item.rawStatus === 'cancelled' && item.refundStatus === 'processed' && (
+                      <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300 uppercase tracking-wider">
+                        Refunded ₱{item.refundAmount?.toLocaleString() || item.deposit} ({item.refundChannel || 'PayMongo'})
+                      </span>
+                    )}
                     {item.rescheduleStatus === 'pending' && (
                       <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500 text-white uppercase tracking-wider shadow-2xs">
                         Reschedule Pending: {formatDisplayDate(item.rescheduleRequestedDate)}
                       </span>
                     )}
-                    {item.isFullyPaid ? (
-                      <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-500 text-white uppercase tracking-wider shadow-2xs">
-                        Fully Paid (100%) ✓
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20 uppercase tracking-wider">
-                        50% Deposit Paid (Balance: {item.remaining})
-                      </span>
+                    {item.rawStatus !== 'cancelled' && (
+                      item.isFullyPaid ? (
+                        <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-500 text-white uppercase tracking-wider shadow-2xs">
+                          Fully Paid (100%) ✓
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20 uppercase tracking-wider">
+                          50% Deposit Paid (Balance: {item.remaining})
+                        </span>
+                      )
                     )}
-                    <span className="text-[10px] font-semibold text-[#24252c]/50">
-                      Via {item.paymentChannel}
-                    </span>
                   </div>
-                  <h3 className="font-bold text-base text-[var(--ink)]">{item.package}</h3>
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#24252c]/60">
-                    <span className="inline-flex items-center gap-1">
-                      <IconCalendar className="w-3.5 h-3.5 text-[#24252c]/40" />
-                      {item.date}
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <IconPin className="w-3.5 h-3.5 text-[#24252c]/40" />
-                      {item.venue}
-                    </span>
-                    <span>Total: <strong className="text-[var(--ink)]">{item.total}</strong></span>
-                    <span>Deposit Paid: <strong className="text-emerald-600">{item.deposit}</strong></span>
+
+                  <div className="text-[10px] font-semibold text-[#24252c]/50">
+                    Via {item.paymentChannel}
                   </div>
-                  {item.rescheduleStatus === 'pending' && item.rescheduleReason && (
-                    <div className="text-[11px] text-amber-800 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 mt-1 inline-block">
-                      <strong>Reschedule Note:</strong> "{item.rescheduleReason}"
-                    </div>
-                  )}
                 </div>
 
-                <div className="flex flex-col gap-2 w-full sm:w-56 shrink-0 pt-3 sm:pt-0 sm:pl-4 sm:border-l border-[#24252c]/[0.08]">
-                  {!item.isCompleted && item.status !== 'Cancelled' && (
+                {/* Content & Horizontal Actions Toolbar */}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  {/* Left: Package details & pricing stats */}
+                  <div className="space-y-1.5 min-w-0">
+                    <h3 className="font-bold text-base text-[var(--ink)] leading-snug">{item.package}</h3>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#24252c]/60">
+                      <span className="inline-flex items-center gap-1 font-medium text-[var(--ink)]">
+                        <IconCalendar className="w-3.5 h-3.5 text-[#1090F8]" />
+                        {item.date}
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[#24252c]/70 truncate max-w-[220px]">
+                        <IconPin className="w-3.5 h-3.5 text-[#24252c]/40 shrink-0" />
+                        {item.venue}
+                      </span>
+                      <span>Total: <strong className="text-[var(--ink)] font-bold">{item.total}</strong></span>
+                      <span>Paid: <strong className="text-emerald-700 font-bold">{item.isFullyPaid ? item.total : item.deposit}</strong></span>
+                      {!item.isFullyPaid && item.rawRemaining > 0 && item.rawStatus !== 'cancelled' && item.cancellationStatus !== 'requested' && (
+                        <span>Bal: <strong className="text-amber-700 font-bold">{item.remaining}</strong></span>
+                      )}
+                    </div>
+
+                    {item.cancellationStatus === 'requested' && item.cancellationReason && (
+                      <div className="text-[11px] text-rose-800 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200 mt-1 inline-block">
+                        <strong>Cancellation Requested:</strong> "{item.cancellationReason}"
+                      </div>
+                    )}
+                    {item.cancellationStatus === 'rejected' && item.cancellationAdminNotes && (
+                      <div className="text-[11px] text-slate-800 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 mt-1 inline-block">
+                        <strong>Admin Note:</strong> {item.cancellationAdminNotes}
+                      </div>
+                    )}
+                    {item.rescheduleStatus === 'pending' && item.rescheduleReason && (
+                      <div className="text-[11px] text-amber-800 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 mt-1 inline-block">
+                        <strong>Reschedule Note:</strong> "{item.rescheduleReason}"
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right: Streamlined Action Buttons */}
+                  <div className="flex items-center gap-2 flex-wrap lg:justify-end shrink-0 pt-2 lg:pt-0">
+                    {/* If cancellation is requested, hide interfering buttons and show clear review status */}
+                    {item.cancellationStatus === 'requested' ? (
+                      <div className="text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5 shadow-2xs">
+                        <IconAlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                        <span>Cancellation Under Review</span>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Pay Remaining Balance (High-priority action) */}
+                        {!item.isCompleted && item.rawStatus !== 'cancelled' && !item.isFullyPaid && item.rawRemaining > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handlePayRemainingBalance(item)}
+                            disabled={payingBalanceId === item.dbId}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-1.5 rounded-full transition-all shadow-2xs cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-60"
+                          >
+                            <IconCheck className="w-3.5 h-3.5" />
+                            <span>{payingBalanceId === item.dbId ? 'Connecting...' : `Pay Bal (${item.remaining})`}</span>
+                          </button>
+                        )}
+
+                        {/* Track Live Setup */}
+                        {!item.isCompleted && item.rawStatus !== 'cancelled' && (
+                          <button
+                            onClick={() => {
+                              localStorage.setItem('binhi_selected_active_booking_id', item.dbId);
+                              go('booking-tracker');
+                            }}
+                            className="bg-[#1090F8] text-white text-xs font-bold px-3.5 py-1.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-2xs cursor-pointer inline-flex items-center gap-1"
+                          >
+                            <span>Track Live</span>
+                            <span className="font-bold">→</span>
+                          </button>
+                        )}
+
+                        {/* Reschedule Button */}
+                        {!item.isCompleted && item.rawStatus !== 'cancelled' && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenRescheduleModal(item)}
+                            className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors cursor-pointer inline-flex items-center gap-1"
+                            title="Reschedule event date"
+                          >
+                            <IconCalendar className="w-3.5 h-3.5 text-amber-600" />
+                            <span>{item.rescheduleStatus === 'pending' ? 'Reschedule Pending' : 'Reschedule'}</span>
+                          </button>
+                        )}
+
+                        {/* Cancel & Refund Button */}
+                        {!item.isCompleted && item.rawStatus !== 'cancelled' && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenCancellationModal(item)}
+                            className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors cursor-pointer inline-flex items-center gap-1"
+                            title="Cancel reservation & request refund"
+                          >
+                            <IconX className="w-3.5 h-3.5 text-rose-600" />
+                            <span>Cancel</span>
+                          </button>
+                        )}
+                      </>
+                    )}
+
+                    {/* View & Print Official Receipt (Always available) */}
                     <button
-                      onClick={() => {
-                        localStorage.setItem('binhi_selected_active_booking_id', item.dbId);
-                        go('booking-tracker');
-                      }}
-                      className="w-full bg-[#1090F8] text-white text-xs font-bold px-4 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm cursor-pointer inline-flex items-center justify-center gap-1.5"
+                      onClick={() => setDownloadModalItem(item)}
+                      className="bg-white text-[var(--ink)] border border-[#24252c]/15 text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-[var(--mist)] transition-colors cursor-pointer inline-flex items-center gap-1 shadow-2xs"
+                      title="View & Print Official Receipt"
                     >
-                      <span>Track Live Setup</span>
-                      <span className="font-bold">→</span>
+                      <IconPrinter className="w-3.5 h-3.5 text-[#1090F8]" />
+                      <span>Receipt</span>
                     </button>
-                  )}
-                  {/* Pay Remaining Balance Button (ONLY if NOT fully paid and NOT cancelled) */}
-                  {!item.isCompleted && item.status !== 'Cancelled' && !item.isFullyPaid && item.rawRemaining > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => handlePayRemainingBalance(item)}
-                      disabled={payingBalanceId === item.dbId}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-full transition-all shadow-2xs cursor-pointer inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
-                    >
-                      <IconCheck className="w-3.5 h-3.5" />
-                      <span>{payingBalanceId === item.dbId ? 'Connecting...' : `Pay Balance (${item.remaining})`}</span>
-                    </button>
-                  )}
-                  {!item.isCompleted && item.status !== 'Cancelled' && (
-                    <button
-                      type="button"
-                      onClick={() => handleOpenRescheduleModal(item)}
-                      className="w-full bg-amber-500/10 hover:bg-amber-500 hover:text-white text-amber-800 border border-amber-500/25 text-xs font-bold px-4 py-2 rounded-full transition-all shadow-2xs cursor-pointer inline-flex items-center justify-center gap-1.5 group"
-                    >
-                      <IconCalendar className="w-3.5 h-3.5 text-amber-600 group-hover:text-white transition-colors" />
-                      <span>{item.rescheduleStatus === 'pending' ? 'Update Reschedule' : 'Reschedule'}</span>
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setDownloadModalItem(item)}
-                    className="w-full bg-white text-[var(--ink)] border border-[#24252c]/15 text-xs font-semibold px-4 py-2 rounded-full hover:bg-[var(--mist)] transition-colors shadow-2xs cursor-pointer inline-flex items-center justify-center gap-1.5"
-                  >
-                    <IconPrinter className="w-3.5 h-3.5 text-[#1090F8]" />
-                    <span>View &amp; Print Official Receipt</span>
-                  </button>
-                  {item.isCompleted && (
-                    <button
-                      onClick={() => go('review-submit')}
-                      className="w-full bg-[var(--ink)] text-white text-xs font-semibold px-4 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-sm cursor-pointer inline-flex items-center justify-center"
-                    >
-                      Leave Review
-                    </button>
-                  )}
+
+                    {/* Leave Review (Completed bookings) */}
+                    {item.isCompleted && (
+                      <button
+                        onClick={() => go('review-submit')}
+                        className="bg-[var(--ink)] text-white text-xs font-semibold px-4 py-1.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors shadow-2xs cursor-pointer inline-flex items-center"
+                      >
+                        Leave Review
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -813,6 +1025,201 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
               </div>
             </div>
           )}
+        </ModalOverlay>
+
+        {/* ── Customer Cancellation & Refund Request Modal ── */}
+        <ModalOverlay isOpen={!!cancellationTargetItem} onClose={() => setCancellationTargetItem(null)}>
+          {cancellationTargetItem && (() => {
+            const refundCalc = calculateCancellationRefund({
+              eventDateStr: cancellationTargetItem.rawDate,
+              bookingCreatedAt: cancellationTargetItem.rawCreatedAt,
+              amountPaid: cancellationTargetItem.isFullyPaid
+                ? cancellationTargetItem.rawTotal
+                : cancellationTargetItem.rawDeposit,
+              totalCost: cancellationTargetItem.rawTotal,
+              policy: cancellationPolicy,
+            });
+
+            return (
+            <div className="bg-white rounded-[2.5rem] max-w-xl w-full max-h-[85vh] shadow-2xl border border-[#24252c]/10 relative p-1.5 sm:p-2.5 overflow-hidden flex flex-col">
+              <button
+                type="button"
+                onClick={() => setCancellationTargetItem(null)}
+                className="absolute top-6 right-6 z-20 text-[#24252c]/50 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors bg-white/90 backdrop-blur-md shadow-sm border border-[#24252c]/10 cursor-pointer"
+              >
+                <IconX className="w-5 h-5" />
+              </button>
+
+              <div className="flex-1 overflow-y-auto p-5 sm:p-7 space-y-4 modal-scroll pr-4 sm:pr-6">
+                <div className="mb-2 pb-3 border-b border-[#24252c]/[0.06]">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="p-1.5 rounded-lg bg-rose-500/10 text-rose-600">
+                      <IconX className="w-4 h-4" />
+                    </span>
+                    <h3 className="text-xl font-extrabold text-[var(--ink)]">
+                      Cancel Booking &amp; Request Refund
+                    </h3>
+                  </div>
+                  <p className="text-xs text-[#24252c]/60">
+                    Submit your cancellation request. Production administrators will review and disburse your refund based on our cancellation policy.
+                  </p>
+                </div>
+
+                <form onSubmit={handleSubmitCancellation} className="space-y-4 text-xs">
+                  {/* Booking & Refundable Amount Summary */}
+                  <div className="p-4 rounded-2xl bg-rose-50/50 border border-rose-200/70 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase font-bold text-rose-900/60 block">Event Package</span>
+                      <span className="text-[11px] font-mono font-bold text-rose-700 bg-white px-2.5 py-0.5 rounded-full border border-rose-200">
+                        Ref #{cancellationTargetItem.id}
+                      </span>
+                    </div>
+                    <div className="font-extrabold text-sm text-[var(--ink)]">
+                      {cancellationTargetItem.package} • {cancellationTargetItem.date}
+                    </div>
+
+                    {/* Policy Matched Tier Banner */}
+                    <div className="p-3 rounded-xl bg-white border border-rose-200/80 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-[#24252c]/60 font-medium">Policy Tier:</span>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
+                          refundCalc.refundPercentage === 100
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                            : refundCalc.refundPercentage > 0
+                            ? 'bg-blue-50 text-blue-800 border-blue-300'
+                            : 'bg-rose-50 text-rose-800 border-rose-300'
+                        }`}>
+                          {refundCalc.isGracePeriodApplied
+                            ? 'Grace Period (100% Refund)'
+                            : `${refundCalc.refundPercentage}% Refund Schedule`}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-[#24252c]/5">
+                        <div>
+                          <span className="text-[#24252c]/50 block text-[10px]">Paid Amount</span>
+                          <strong className="text-[var(--ink)]">
+                            ₱{(cancellationTargetItem.isFullyPaid ? cancellationTargetItem.rawTotal : cancellationTargetItem.rawDeposit)?.toLocaleString()}
+                          </strong>
+                        </div>
+                        <div>
+                          <span className="text-[#24252c]/50 block text-[10px]">Calculated Refund</span>
+                          <strong className="text-emerald-700 text-sm">
+                            ₱{refundCalc.netRefundable.toLocaleString()}
+                          </strong>
+                        </div>
+                      </div>
+
+                      <div className="text-[10px] text-[#24252c]/70 leading-relaxed bg-[var(--mist)] p-2 rounded-lg">
+                        {refundCalc.summaryExplanation}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Refund Policy Notice (Clean Icon, No Emoji) */}
+                  <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200/80 text-amber-900 text-[11px] space-y-1">
+                    <div className="font-extrabold flex items-center gap-1.5 text-amber-950">
+                      <IconShield className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Refund Policy &amp; Timelines</span>
+                    </div>
+                    <p className="text-amber-900/80 leading-relaxed">
+                      Approved refunds via the original PayMongo payment method will automatically reflect in your bank account or e-wallet within <strong>5 to 10 business days</strong>. Manual refunds will be coordinated directly.
+                    </p>
+                  </div>
+
+                  {/* Reason & Templates */}
+                  <div className="space-y-2 pt-2 border-t border-[#24252c]/[0.08]">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div>
+                        <label className="text-[11px] font-black uppercase text-[var(--ink)] block">
+                          Reason for Cancellation <span className="text-rose-500">*</span>
+                        </label>
+                        <span className="text-[10px] text-[#24252c]/60">
+                          Please let us know the reason for cancellation
+                        </span>
+                      </div>
+
+                      {/* Quick Reason Templates */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCancellationReason(
+                              'Due to unforeseen circumstances, our event has been officially cancelled.'
+                            )
+                          }
+                          className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer"
+                        >
+                          Event Cancelled
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCancellationReason(
+                              'Due to unexpected schedule conflicts and personal emergency, we are unable to proceed.'
+                            )
+                          }
+                          className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors cursor-pointer"
+                        >
+                          Emergency
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCancellationReason(
+                              'Due to venue booking cancellation and client budget changes, we request to cancel.'
+                            )
+                          }
+                          className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors cursor-pointer"
+                        >
+                          Venue/Budget Change
+                        </button>
+                      </div>
+                    </div>
+
+                    <textarea
+                      rows={4}
+                      value={cancellationReason}
+                      onChange={(e) => setCancellationReason(e.target.value)}
+                      placeholder="Please explain why you need to cancel this reservation..."
+                      className="w-full rounded-2xl border border-black/10 px-4 py-3 bg-[#F8F9FA] focus:bg-white text-xs font-medium text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-rose-500 transition-colors resize-none leading-relaxed"
+                      required
+                    />
+                    <div className="flex justify-between items-center text-[10px] text-[#24252c]/50 px-1">
+                      <span>Our administration will review and confirm your refund.</span>
+                      <span className="font-mono font-semibold">{cancellationReason.length} chars</span>
+                    </div>
+                  </div>
+
+                  {/* Error banner if any */}
+                  {cancellationError && (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">
+                      {cancellationError}
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#24252c]/[0.06]">
+                    <button
+                      type="button"
+                      onClick={() => setCancellationTargetItem(null)}
+                      className="px-5 py-2.5 rounded-full border border-black/10 text-xs font-semibold text-[var(--ink)] hover:bg-[#F0F0F0] transition-colors cursor-pointer"
+                    >
+                      Go Back
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={submittingCancellation || !cancellationReason.trim()}
+                      className="bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-full transition-colors cursor-pointer text-xs shadow-md flex items-center gap-1.5"
+                    >
+                      {submittingCancellation ? 'Submitting Cancellation...' : 'Confirm Cancellation & Refund Request'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+            );
+          })()}
         </ModalOverlay>
       </div>
     </section>

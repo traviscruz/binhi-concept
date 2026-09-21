@@ -43,6 +43,7 @@ import AdminBookingsPage from './pages/admin/AdminBookingsPage';
 import AdminManualBookingPage from './pages/admin/AdminManualBookingPage';
 import AdminPackagesPage from './pages/admin/AdminPackagesPage';
 import AdminTransportPage from './pages/admin/AdminTransportPage';
+import AdminCancellationPolicyPage from './pages/admin/AdminCancellationPolicyPage';
 import AdminStaffPage from './pages/admin/AdminStaffPage';
 import AdminCalendarPage from './pages/admin/AdminCalendarPage';
 import AdminReportsPage from './pages/admin/AdminReportsPage';
@@ -296,29 +297,8 @@ export default function App() {
     go('checkout');
   };
 
-  const isInventoryPage =
-    page === 'inventory-dashboard' ||
-    page === 'inventory-items' ||
-    page === 'inventory-units' ||
-    page === 'inventory-alerts' ||
-    page === 'inventory-reports' ||
-    page === 'inventory-profile';
-
-  const isAdminPage =
-    page === 'admin-dashboard' ||
-    page === 'admin-bookings' ||
-    page === 'admin-manual-booking' ||
-    page === 'admin-packages' ||
-    page === 'admin-transport' ||
-    page === 'admin-staff' ||
-    page === 'admin-calendar' ||
-    page === 'admin-reports' ||
-    page === 'admin-inquiries' ||
-    page === 'admin-vouchers' ||
-    page === 'admin-loyalty' ||
-    page === 'admin-reviews' ||
-    page === 'admin-audit-logs' ||
-    page === 'admin-profile';
+  const isInventoryPage = page.startsWith('inventory-');
+  const isAdminPage = page.startsWith('admin-');
 
   const isCrewPage = page.startsWith('crew-');
 
@@ -354,6 +334,7 @@ export default function App() {
         {page === 'admin-manual-booking' && <AdminManualBookingPage go={go} />}
         {page === 'admin-packages' && <AdminPackagesPage go={go} />}
         {page === 'admin-transport' && <AdminTransportPage go={go} />}
+        {page === 'admin-cancellation-policy' && <AdminCancellationPolicyPage go={go} />}
         {page === 'admin-staff' && <AdminStaffPage go={go} />}
         {page === 'admin-calendar' && <AdminCalendarPage go={go} />}
         {page === 'admin-reports' && <AdminReportsPage go={go} />}

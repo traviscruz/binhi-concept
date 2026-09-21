@@ -6,6 +6,7 @@ import { IconCheck, IconX, IconPin, IconSearch, IconArrow } from '../../shared/i
 import {
   fetchLogisticsConfig,
   calculateDistanceKm,
+  computeTransportFee,
   type LogisticsConfig,
   DEFAULT_LOGISTICS_CONFIG,
 } from '../../../utils/logistics';
@@ -352,7 +353,7 @@ export function ManualBookingStep2({
         >
           {transportRules.map((r) => (
             <option key={r.id} value={r.id}>
-              {r.region} — +₱{r.baseFee.toLocaleString()}
+              {r.region}
             </option>
           ))}
         </select>
@@ -475,7 +476,7 @@ export function ManualBookingStep2({
         </div>
       </div>
 
-      {/* Warehouse Proximity & Free Transport Alert Banner */}
+      {/* Warehouse Proximity & Free Transport / Per-KM Rate Alert Banner */}
       {distanceFromWarehouse !== null && (
         <div
           className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all ${
@@ -498,6 +499,8 @@ export function ManualBookingStep2({
               <div className="font-extrabold text-sm flex items-center gap-2">
                 {logistics.isFreeRadiusEnabled && distanceFromWarehouse <= logistics.freeRadiusKm ? (
                   <span>Free Transport Waiver Applied</span>
+                ) : logistics.pricingMode === 'per_km' ? (
+                  <span>Distance Transport Rate: {distanceFromWarehouse} km</span>
                 ) : (
                   <span>Delivery Distance: {distanceFromWarehouse} km</span>
                 )}
@@ -505,6 +508,8 @@ export function ManualBookingStep2({
               <p className="text-[11px] opacity-85 mt-0.5 leading-relaxed">
                 {logistics.isFreeRadiusEnabled && distanceFromWarehouse <= logistics.freeRadiusKm
                   ? `Venue is within ${logistics.freeRadiusKm} km of our central warehouse (${distanceFromWarehouse} km away). Transport fee is waived (₱0.00).`
+                  : logistics.pricingMode === 'per_km'
+                  ? `Calculated at ₱${logistics.costPerKm || 80}/km based on ${distanceFromWarehouse} km distance from warehouse to venue.`
                   : `Venue is ${distanceFromWarehouse} km away (outside the ${logistics.freeRadiusKm} km free local zone).`}
               </p>
             </div>
@@ -520,6 +525,8 @@ export function ManualBookingStep2({
             >
               {logistics.isFreeRadiusEnabled && distanceFromWarehouse <= logistics.freeRadiusKm
                 ? '₱0.00 WAIVED'
+                : logistics.pricingMode === 'per_km'
+                ? `+₱${transportFee.toLocaleString()} (${distanceFromWarehouse}km × ₱${logistics.costPerKm || 80})`
                 : 'STANDARD REGION FEE'}
             </span>
           </div>
@@ -533,7 +540,12 @@ export function ManualBookingStep2({
           <span className="font-bold text-[var(--ink)]">₱{packageAndAddonPrice.toLocaleString()}</span>
         </div>
         <div className="flex justify-between text-[#24252c]/60">
-          <span>Transport & Logistics Charge ({locationRegionName})</span>
+          <span>
+            Transport & Logistics Charge{' '}
+            {logistics.pricingMode === 'per_km'
+              ? `(${distanceFromWarehouse !== null ? `${distanceFromWarehouse} km @ ₱${logistics.costPerKm || 80}/km` : `₱${logistics.costPerKm || 80}/km`})`
+              : `(${locationRegionName})`}
+          </span>
           {transportFee === 0 ? (
             <span className="font-extrabold text-emerald-600">₱0.00 (Waived Local Zone)</span>
           ) : (

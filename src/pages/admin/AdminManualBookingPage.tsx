@@ -4,6 +4,12 @@ import { supabase } from '../../lib/supabase';
 import { FEATURED_PACKAGES, type PackageData } from '../../data/packages';
 import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
 import { validateVoucherCode, recordVoucherUsage } from '../../utils/voucherService';
+import {
+  fetchLogisticsConfig,
+  computeTransportFee,
+  type LogisticsConfig,
+  DEFAULT_LOGISTICS_CONFIG,
+} from '../../utils/logistics';
 import { logAuditEvent } from '../../utils/auditLogger';
 
 import type {
@@ -73,6 +79,21 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
   const [step3Error, setStep3Error] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [successBookingData, setSuccessBookingData] = useState<ManualBookingSuccessData | null>(null);
+
+  // ── Logistics & Proximity State ──────────────────────────────────────────
+  const [logistics, setLogistics] = useState<LogisticsConfig>(DEFAULT_LOGISTICS_CONFIG);
+
+  useEffect(() => {
+    async function loadLogistics() {
+      try {
+        const cfg = await fetchLogisticsConfig();
+        setLogistics(cfg);
+      } catch (err) {
+        console.warn('Could not load logistics config:', err);
+      }
+    }
+    loadLogistics();
+  }, []);
 
   // Load Bookings for conflict checking
   useEffect(() => {
@@ -236,7 +257,9 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
   const packageAndAddonPrice = currentPkgPrice + addonsCost;
 
   const currentSelectedRule = transportRules.find((r) => r.id === selectedRuleId) || transportRules[0];
-  const transportFee = currentSelectedRule ? currentSelectedRule.baseFee : 1500;
+  const standardRegionalFee = currentSelectedRule ? currentSelectedRule.baseFee : 1500;
+  const transportCalc = computeTransportFee(null, standardRegionalFee, logistics);
+  const transportFee = transportCalc.fee;
   const locationRegionName = currentSelectedRule ? currentSelectedRule.region : 'Selected Location';
 
   const subtotalBeforeDiscount = packageAndAddonPrice + transportFee;

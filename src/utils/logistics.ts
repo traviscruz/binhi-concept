@@ -7,6 +7,9 @@ export interface LogisticsConfig {
   warehouseLng: number;
   freeRadiusKm: number;
   isFreeRadiusEnabled: boolean;
+  pricingMode: 'fixed' | 'per_km';
+  costPerKm: number;
+  minTransportFee: number;
 }
 
 export const DEFAULT_LOGISTICS_CONFIG: LogisticsConfig = {
@@ -16,6 +19,9 @@ export const DEFAULT_LOGISTICS_CONFIG: LogisticsConfig = {
   warehouseLng: 121.0456,
   freeRadiusKm: 2.0,
   isFreeRadiusEnabled: true,
+  pricingMode: 'fixed',
+  costPerKm: 80,
+  minTransportFee: 0,
 };
 
 const STORAGE_KEY = 'binhi_logistics_config';
@@ -45,6 +51,52 @@ export function calculateDistanceKm(
 }
 
 /**
+ * Helper to compute transport fee according to the active pricing mode & warehouse proximity
+ */
+export function computeTransportFee(
+  distanceKm: number | null,
+  regionalBaseFee: number,
+  config: LogisticsConfig
+): {
+  fee: number;
+  isFree: boolean;
+  breakdown: string;
+} {
+  // Check Free Proximity Waiver
+  if (
+    config.isFreeRadiusEnabled &&
+    distanceKm !== null &&
+    distanceKm <= config.freeRadiusKm
+  ) {
+    return {
+      fee: 0,
+      isFree: true,
+      breakdown: `Free Proximity Waiver (≤ ${config.freeRadiusKm} km from warehouse)`,
+    };
+  }
+
+  // Check Per-Kilometer Distance Mode
+  if (config.pricingMode === 'per_km') {
+    const dist = distanceKm !== null && distanceKm > 0 ? distanceKm : 1;
+    const rate = config.costPerKm || 80;
+    const rawCost = Math.round(dist * rate);
+    const fee = Math.max(config.minTransportFee || 0, rawCost);
+    return {
+      fee,
+      isFree: false,
+      breakdown: `${dist} km × ₱${rate}/km = ₱${fee.toLocaleString()}`,
+    };
+  }
+
+  // Default: Fixed Regional Zone Flat Fee
+  return {
+    fee: regionalBaseFee,
+    isFree: false,
+    breakdown: `Regional Base Fee (₱${regionalBaseFee.toLocaleString()})`,
+  };
+}
+
+/**
  * Fetches logistics warehouse & proximity waiver configuration
  */
 export async function fetchLogisticsConfig(): Promise<LogisticsConfig> {
@@ -63,6 +115,9 @@ export async function fetchLogisticsConfig(): Promise<LogisticsConfig> {
         warehouseLng: Number(data.warehouse_lng) || DEFAULT_LOGISTICS_CONFIG.warehouseLng,
         freeRadiusKm: Number(data.free_radius_km ?? DEFAULT_LOGISTICS_CONFIG.freeRadiusKm),
         isFreeRadiusEnabled: data.is_free_radius_enabled !== false,
+        pricingMode: data.pricing_mode === 'per_km' ? 'per_km' : 'fixed',
+        costPerKm: Number(data.cost_per_km ?? DEFAULT_LOGISTICS_CONFIG.costPerKm),
+        minTransportFee: Number(data.min_transport_fee ?? DEFAULT_LOGISTICS_CONFIG.minTransportFee),
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
       return config;
@@ -89,11 +144,22 @@ export async function saveLogisticsConfig(
   config: Partial<LogisticsConfig>
 ): Promise<LogisticsConfig> {
   const merged: LogisticsConfig = {
-    ...DEFAULT_LOGISTICS_CONFIG,
-    ...config,
+    warehouseName: String(config.warehouseName || DEFAULT_LOGISTICS_CONFIG.warehouseName),
+    warehouseAddress: String(config.warehouseAddress || DEFAULT_LOGISTICS_CONFIG.warehouseAddress),
+    warehouseLat: Number(config.warehouseLat ?? DEFAULT_LOGISTICS_CONFIG.warehouseLat),
+    warehouseLng: Number(config.warehouseLng ?? DEFAULT_LOGISTICS_CONFIG.warehouseLng),
+    freeRadiusKm: Number(config.freeRadiusKm ?? DEFAULT_LOGISTICS_CONFIG.freeRadiusKm),
+    isFreeRadiusEnabled: config.isFreeRadiusEnabled !== false,
+    pricingMode: config.pricingMode === 'per_km' ? 'per_km' : 'fixed',
+    costPerKm: Number(config.costPerKm ?? DEFAULT_LOGISTICS_CONFIG.costPerKm),
+    minTransportFee: Number(config.minTransportFee ?? DEFAULT_LOGISTICS_CONFIG.minTransportFee),
   };
 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+  } catch (lsErr) {
+    console.warn('LocalStorage save error:', lsErr);
+  }
 
   try {
     await supabase.from('logistics_settings').upsert({
@@ -104,6 +170,9 @@ export async function saveLogisticsConfig(
       warehouse_lng: merged.warehouseLng,
       free_radius_km: merged.freeRadiusKm,
       is_free_radius_enabled: merged.isFreeRadiusEnabled,
+      pricing_mode: merged.pricingMode,
+      cost_per_km: merged.costPerKm,
+      min_transport_fee: merged.minTransportFee,
       updated_at: new Date().toISOString(),
     });
   } catch (err) {

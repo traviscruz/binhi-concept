@@ -33,6 +33,7 @@ export type Page =
   | 'admin-manual-booking'
   | 'admin-packages'
   | 'admin-transport'
+  | 'admin-cancellation-policy'
   | 'admin-staff'
   | 'admin-calendar'
   | 'admin-reports'
