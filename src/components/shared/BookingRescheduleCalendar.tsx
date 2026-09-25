@@ -1,5 +1,13 @@
 import { useState, useEffect } from 'react';
-import { fetchDbBookedDates, normalizeDateToIso, isPastDate as checkIsPastDate } from '../../utils/bookingService';
+import { fetchDbBookedDates, normalizeDateToIso, isPastDate as checkIsPastDate, type DBBooking } from '../../utils/bookingService';
+import {
+  fetchBookingSettings,
+  fetchScheduleOverrides,
+  getDayAvailabilityStatus,
+  DEFAULT_BOOKING_SETTINGS,
+  type BookingSettings,
+  type ScheduleOverride,
+} from '../../utils/bookingEngine';
 import { supabase } from '../../lib/supabase';
 
 interface BookingRescheduleCalendarProps {
@@ -7,7 +15,7 @@ interface BookingRescheduleCalendarProps {
   selectedDate: string; // 'YYYY-MM-DD'
   onSelectDate: (dateStr: string) => void;
   excludeBookingId?: string; // Exclude current booking ID so its own date doesn't block
-  minDateOffsetDays?: number; // Minimum days from now (e.g. 1)
+  minDateOffsetDays?: number; // Minimum days from now (e.g. 0 allows same-day)
   className?: string;
 }
 
@@ -39,15 +47,25 @@ export function BookingRescheduleCalendar({
   const [calYear, setCalYear] = useState(initDate.getFullYear());
   const [calMonth, setCalMonth] = useState(initDate.getMonth());
 
-  const [dbBookings, setDbBookings] = useState<Array<{ event_date: string; id?: string; paymongo_reference_number?: string }>>([]);
+  const [dbBookings, setDbBookings] = useState<DBBooking[]>([]);
+  const [bookingSettings, setBookingSettings] = useState<BookingSettings>(DEFAULT_BOOKING_SETTINGS);
+  const [scheduleOverrides, setScheduleOverrides] = useState<ScheduleOverride[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
 
-  // Fetch booked dates from database to disable already reserved slots
+  // Fetch booked dates and engine settings from database
   useEffect(() => {
     async function loadBookedDates() {
       setLoadingBookings(true);
       try {
-        const data = await fetchDbBookedDates();
+        const [data, settings, overrides] = await Promise.all([
+          fetchDbBookedDates(),
+          fetchBookingSettings(),
+          fetchScheduleOverrides(),
+        ]);
+
+        if (settings) setBookingSettings(settings);
+        if (overrides) setScheduleOverrides(overrides);
+
         if (data && Array.isArray(data)) {
           // Exclude the active booking being rescheduled
           const filtered = data.filter((b: any) => {
@@ -55,13 +73,7 @@ export function BookingRescheduleCalendar({
             return b.id !== excludeBookingId && b.paymongo_reference_number !== excludeBookingId;
           });
 
-          setDbBookings(
-            filtered.map((b: any) => ({
-              id: b.id,
-              paymongo_reference_number: b.paymongo_reference_number,
-              event_date: normalizeDateToIso(b.event_date),
-            }))
-          );
+          setDbBookings(filtered);
         }
       } catch (err) {
         console.error('Failed to load booked dates for reschedule calendar:', err);
@@ -180,10 +192,14 @@ export function BookingRescheduleCalendar({
           const day = i + 1;
           const formattedIso = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
           const isPast = isPastDate(formattedIso);
-          const isBooked = dbBookings.some((b) => b.event_date === formattedIso);
           const isOriginal = formattedIso === cleanOriginalDate;
           const isSelected = formattedIso === cleanSelectedDate;
           const isToday = formattedIso === todayIso;
+
+          const dayStatus = getDayAvailabilityStatus(formattedIso, dbBookings, bookingSettings, scheduleOverrides);
+          const isClosed = dayStatus.status === 'closed';
+          const isFullyBooked = dayStatus.status === 'fully_booked';
+          const hasSlotsAvailable = dayStatus.status === 'slots_available';
 
           let cellClass =
             'bg-white text-[#24252c]/80 font-semibold cursor-pointer hover:bg-[#1090F8]/15 hover:text-[#1090F8] shadow-2xs';
@@ -200,17 +216,24 @@ export function BookingRescheduleCalendar({
           } else if (isPast) {
             cellClass = 'bg-black/[0.03] text-gray-300 font-medium cursor-not-allowed opacity-40 select-none';
             badgeText = 'Past';
-          } else if (isBooked) {
+          } else if (isClosed) {
+            cellClass = 'bg-zinc-100 text-zinc-400 font-medium cursor-not-allowed opacity-60 select-none';
+            badgeText = 'Closed';
+          } else if (isFullyBooked) {
             cellClass = 'bg-[var(--ink)] text-white font-semibold shadow-2xs cursor-not-allowed opacity-85 select-none';
-            badgeText = 'Booked';
+            badgeText = isToday ? 'No Slots' : 'Booked';
           } else if (isToday) {
             cellClass =
-              'text-[#1090F8] font-bold bg-[#1090F8]/15 cursor-pointer hover:bg-[#1090F8]/25 shadow-2xs';
+              'text-[#1090F8] font-bold bg-[#1090F8]/15 cursor-pointer hover:bg-[#1090F8]/25 shadow-2xs border border-[#1090F8]/30';
             badgeText = 'Today';
+          } else if (hasSlotsAvailable) {
+            cellClass =
+              'bg-amber-500/10 text-amber-900 font-bold cursor-pointer hover:bg-amber-500/20 shadow-2xs border border-amber-500/20';
+            badgeText = `${dayStatus.bookingCount} Booked`;
           }
 
           const handleClick = () => {
-            if (isPast || isBooked || isOriginal) return;
+            if (isPast || isClosed || isFullyBooked || isOriginal) return;
             onSelectDate(formattedIso);
           };
 
@@ -225,8 +248,12 @@ export function BookingRescheduleCalendar({
                   ? `Original Date (${formattedIso}) - Cannot reschedule to the exact same date`
                   : isPast
                   ? 'Past Date - Cannot be selected'
-                  : isBooked
-                  ? 'Date Already Booked / Unavailable'
+                  : isClosed
+                  ? 'Closed for bookings on this date'
+                  : isFullyBooked
+                  ? isToday ? 'No time slots left today' : 'Date Fully Booked / Unavailable'
+                  : hasSlotsAvailable
+                  ? `${dayStatus.bookingCount} existing booking(s) - Time slots still available!`
                   : `Select ${formattedIso}`
               }
               className={`aspect-square rounded-xl text-xs flex flex-col items-center justify-center relative transition-all ${cellClass}`}
@@ -258,8 +285,11 @@ export function BookingRescheduleCalendar({
         <span className="flex items-center gap-1.5 font-bold text-[#1090F8]">
           <span className="w-2.5 h-2.5 rounded-md bg-[#1090F8]" /> Selected New Date
         </span>
+        <span className="flex items-center gap-1.5 font-bold text-amber-800">
+          <span className="w-2.5 h-2.5 rounded-md bg-amber-500/20 border border-amber-500/40" /> Slots Open
+        </span>
         <span className="flex items-center gap-1.5 text-[#24252c]/60">
-          <span className="w-2.5 h-2.5 rounded-md bg-white shadow-2xs" /> Open Date
+          <span className="w-2.5 h-2.5 rounded-md bg-white shadow-2xs" /> Open / Available
         </span>
       </div>
     </div>

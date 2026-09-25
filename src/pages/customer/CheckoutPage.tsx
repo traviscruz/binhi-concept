@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -6,7 +6,20 @@ import type { Page } from '../../types';
 import { FEATURED_PACKAGES, type PackageData } from '../../data/packages';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { OtpInput } from '../../components/shared/OtpInput';
-import { IconShield, IconX, IconCheck, IconPin, IconSearch, IconArrow, IconTicket, IconChevronDown, IconChevronUp } from '../../components/shared/icons';
+import { IconShield, IconX, IconCheck, IconPin, IconSearch, IconArrow, IconTicket, IconChevronDown, IconChevronUp, IconAlertTriangle, IconBan } from '../../components/shared/icons';
+import {
+  fetchBookingSettings,
+  fetchScheduleOverrides,
+  evaluateSlotFeasibility,
+  getDayAvailabilityStatus,
+  formatTimeAmPm,
+  timeToMinutes,
+  minutesToTime,
+  getOperatingWindowForDate,
+  type BookingSettings,
+  type ScheduleOverride,
+  DEFAULT_BOOKING_SETTINGS,
+} from '../../utils/bookingEngine';
 import { supabase } from '../../lib/supabase';
 import { createPaymongoCheckoutSession } from '../../utils/paymongoPayment';
 import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
@@ -84,16 +97,77 @@ export default function CheckoutPage({
     const saved = localStorage.getItem('binhi_selected_event_date');
     return saved ? formatIsoDate(saved) : formatIsoDate(initialDate);
   });
+  const [startTime, setStartTime] = useState(() => localStorage.getItem('binhi_selected_start_time') || '14:00');
+  const [endTime, setEndTime] = useState(() => localStorage.getItem('binhi_selected_end_time') || '19:00');
+  const [venueCoords, setVenueCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [bookingSettings, setBookingSettings] = useState<BookingSettings>(DEFAULT_BOOKING_SETTINGS);
+  const [scheduleOverrides, setScheduleOverrides] = useState<ScheduleOverride[]>([]);
   const [eventDescription, setEventDescription] = useState('');
   const [dbBookings, setDbBookings] = useState<DBBooking[]>([]);
 
   useEffect(() => {
-    async function loadBookings() {
-      const data = await fetchDbBookedDates();
-      setDbBookings(data);
+    async function loadEngineData() {
+      // 1. Fetch live operating hours and rules from public.booking_settings
+      try {
+        const settings = await fetchBookingSettings();
+        if (settings) {
+          setBookingSettings(settings);
+        }
+      } catch (err) {
+        console.warn('Failed loading booking_settings:', err);
+      }
+
+      // 2. Fetch bookings and schedule overrides
+      try {
+        const [data, overrides] = await Promise.all([
+          fetchDbBookedDates(),
+          fetchScheduleOverrides(),
+        ]);
+        setDbBookings(data);
+        setScheduleOverrides(overrides);
+      } catch (e) {
+        console.warn('Failed loading engine data:', e);
+      }
     }
-    loadBookings();
+    loadEngineData();
   }, []);
+
+  // ── Operating Hours Resolution & Auto-Constraint ──────────────────────────
+  const opWindow = useMemo(() => {
+    const res = getOperatingWindowForDate(eventDate, bookingSettings, scheduleOverrides);
+    const openTime = res.openTime || '08:00';
+    const closeTime = res.closeTime === '00:00' && res.isOpen ? '23:59' : (res.closeTime || '23:00');
+    return {
+      ...res,
+      openTime,
+      closeTime,
+    };
+  }, [eventDate, bookingSettings, scheduleOverrides]);
+
+  // Synchronize start and end times to stay strictly within allowed operating hours
+  useEffect(() => {
+    if (!opWindow.isOpen) return;
+    const oMin = timeToMinutes(opWindow.openTime);
+    const cMin = timeToMinutes(opWindow.closeTime);
+
+    let curStartMin = timeToMinutes(startTime);
+    let updatedStart = startTime;
+
+    if (curStartMin < oMin || curStartMin > cMin) {
+      updatedStart = opWindow.openTime;
+      setStartTime(updatedStart);
+      localStorage.setItem('binhi_selected_start_time', updatedStart);
+      curStartMin = oMin;
+    }
+
+    const curEndMin = timeToMinutes(endTime);
+    if (curEndMin > cMin || curEndMin <= curStartMin) {
+      const idealEndMin = Math.min(curStartMin + 240, cMin);
+      const updatedEnd = minutesToTime(idealEndMin);
+      setEndTime(updatedEnd);
+      localStorage.setItem('binhi_selected_end_time', updatedEnd);
+    }
+  }, [opWindow]);
 
   // ── Logistics & Warehouse State ───────────────────────────────────────────
   const [transportRules, setTransportRules] = useState<TransportRuleOption[]>([]);
@@ -176,6 +250,38 @@ export default function CheckoutPage({
   const [step3Error, setStep3Error] = useState('');
   const [bookingSuccessModal, setBookingSuccessModal] = useState(false);
 
+  // Re-fetch fresh bookings when eventDate changes to guarantee real-time availability
+  useEffect(() => {
+    if (!eventDate) return;
+    fetchDbBookedDates().then((data) => {
+      if (data && data.length) setDbBookings(data);
+    }).catch(() => {});
+  }, [eventDate]);
+
+  // Real-time slot feasibility evaluation right after selecting date & time
+  const slotFeasibility = useMemo(() => {
+    if (!eventDate || !startTime || !endTime) return null;
+    if (isPastDate(eventDate)) return null;
+
+    return evaluateSlotFeasibility({
+      targetDate: eventDate,
+      startTime,
+      endTime,
+      venueAddress: venueAddress || 'Metro Manila',
+      venueCoords,
+      existingBookings: dbBookings,
+      settings: bookingSettings,
+      overrides: scheduleOverrides,
+    });
+  }, [eventDate, startTime, endTime, venueAddress, venueCoords, dbBookings, bookingSettings, scheduleOverrides]);
+
+  // Clear stale conflict errors if current selection becomes available
+  useEffect(() => {
+    if (slotFeasibility?.isAvailable && step1Error.startsWith('Schedule Conflict:')) {
+      setStep1Error('');
+    }
+  }, [slotFeasibility, step1Error]);
+
   const [profileLoading, setProfileLoading] = useState(true);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -247,6 +353,7 @@ export default function CheckoutPage({
 
   // Helper to update distance from warehouse and draw polyline
   const updateDistanceAndLine = (lat: number, lng: number) => {
+    setVenueCoords({ lat, lng });
     const dist = calculateDistanceKm(lat, lng, logistics.warehouseLat, logistics.warehouseLng);
     setDistanceFromWarehouse(dist);
 
@@ -658,14 +765,37 @@ export default function CheckoutPage({
   };
 
   // ── Real-time Live Availability Check Helper ────────────────────────────────
-  const checkLiveAvailability = async (targetDate: string): Promise<boolean> => {
+  const checkLiveAvailability = async (
+    targetDate: string,
+    start: string,
+    end: string,
+    addr: string,
+    coords: { lat: number; lng: number } | null
+  ): Promise<{ available: boolean; conflictMessage?: string }> => {
     try {
       const freshBookings = await fetchDbBookedDates();
       setDbBookings(freshBookings);
-      const isTaken = freshBookings.some((b) => b.event_date === targetDate);
-      return !isTaken;
+
+      const res = evaluateSlotFeasibility({
+        targetDate,
+        startTime: start,
+        endTime: end,
+        venueAddress: addr,
+        venueCoords: coords,
+        existingBookings: freshBookings,
+        settings: bookingSettings,
+        overrides: scheduleOverrides,
+      });
+
+      if (!res.isAvailable) {
+        return {
+          available: false,
+          conflictMessage: res.conflicts.map((c) => c.message).join(' | '),
+        };
+      }
+      return { available: true };
     } catch (e) {
-      return true;
+      return { available: true };
     }
   };
 
@@ -697,11 +827,52 @@ export default function CheckoutPage({
       setStep1Error('The selected event date is in the past. Please choose a future date.');
       return;
     }
+    if (!startTime || !endTime) {
+      setStep1Error('Please select both event start time and end time.');
+      return;
+    }
+    if (!opWindow.isOpen) {
+      setStep1Error(`System is closed for bookings on this date: ${opWindow.reason || 'Closed'}`);
+      return;
+    }
+    if (timeToMinutes(startTime) < timeToMinutes(opWindow.openTime)) {
+      setStep1Error(`Event cannot start before opening hours (${formatTimeAmPm(opWindow.openTime)}).`);
+      return;
+    }
+    if (timeToMinutes(startTime) >= timeToMinutes(opWindow.closeTime)) {
+      setStep1Error(`Event cannot start at or past closing hours (${formatTimeAmPm(opWindow.closeTime)}).`);
+      return;
+    }
+    if (timeToMinutes(endTime) > timeToMinutes(opWindow.closeTime)) {
+      setStep1Error(`Event cannot extend past closing hours (${formatTimeAmPm(opWindow.closeTime)}).`);
+      return;
+    }
+    if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+      setStep1Error('Event end time must be later than event start time.');
+      return;
+    }
+    if (timeToMinutes(endTime) - timeToMinutes(startTime) < 60) {
+      setStep1Error('Minimum event duration is 1 hour.');
+      return;
+    }
 
-    // Real-time live database double check
-    const isAvailable = await checkLiveAvailability(eventDate);
-    if (!isAvailable) {
-      setStep1Error(`Conflict: Another customer just completed a booking for ${eventDate}. Please choose a different available date.`);
+    // Immediate real-time check confirmation
+    if (slotFeasibility && !slotFeasibility.isAvailable) {
+      setStep1Error(`Schedule Conflict: ${slotFeasibility.conflicts.map((c) => c.message).join(' | ')}`);
+      return;
+    }
+
+    // Real-time slot & operating hours check
+    const checkResult = await checkLiveAvailability(
+      eventDate,
+      startTime,
+      endTime,
+      venueAddress || 'Metro Manila',
+      venueCoords
+    );
+
+    if (!checkResult.available) {
+      setStep1Error(`Schedule Conflict: ${checkResult.conflictMessage}`);
       return;
     }
 
@@ -724,10 +895,17 @@ export default function CheckoutPage({
     const isValid = validateAddressAgainstRegion(venueAddress, selectedRuleId);
     if (!isValid) return;
 
-    // Real-time live database double check
-    const isAvailable = await checkLiveAvailability(eventDate);
-    if (!isAvailable) {
-      setStep2Error(`Conflict: Another customer just completed a booking for ${eventDate} while you were entering logistics. Please choose another date.`);
+    // Real-time location-aware transit & turnaround check
+    const checkResult = await checkLiveAvailability(
+      eventDate,
+      startTime,
+      endTime,
+      venueAddress,
+      venueCoords
+    );
+
+    if (!checkResult.available) {
+      setStep2Error(`Schedule Conflict: ${checkResult.conflictMessage}`);
       return;
     }
 
@@ -742,9 +920,15 @@ export default function CheckoutPage({
     setPaymongoLoading(true);
 
     // Real-time live database double check before launching PayMongo Checkout
-    const isAvailable = await checkLiveAvailability(eventDate);
-    if (!isAvailable) {
-      setStep3Error(`Conflict: Another customer just completed a booking for ${eventDate} right before checkout. Payment halted. Please select another date.`);
+    const checkResult = await checkLiveAvailability(
+      eventDate,
+      startTime,
+      endTime,
+      venueAddress,
+      venueCoords
+    );
+    if (!checkResult.available) {
+      setStep3Error(`Conflict: ${checkResult.conflictMessage || 'This time slot is no longer available. Please select another time slot or date.'}`);
       setPaymongoLoading(false);
       return;
     }
@@ -815,6 +999,10 @@ export default function CheckoutPage({
           addons_cost: currentAddonsCost,
           event_type: eventType,
           event_date: eventDate,
+          start_time: startTime,
+          end_time: endTime,
+          venue_lat: venueCoords?.lat || null,
+          venue_lng: venueCoords?.lng || null,
           event_description: appliedPromo
             ? `${eventDescription}\n[Promo Code: ${appliedPromo.code} (-₱${currentDiscount.toLocaleString()})]`
             : eventDescription,
@@ -1182,9 +1370,19 @@ export default function CheckoutPage({
                 </select>
               </div>
               <div>
-                <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-1">
-                  Event Date <span className="text-rose-500">*</span>
-                </label>
+                <div className="flex items-center justify-between ml-1 mb-1">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50">
+                    Event Date <span className="text-rose-500">*</span>
+                  </label>
+                  {eventDate && !isPastDate(eventDate) && (() => {
+                    const dayStatus = getDayAvailabilityStatus(eventDate, dbBookings, bookingSettings, scheduleOverrides);
+                    return (
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${dayStatus.badgeClass}`}>
+                        {dayStatus.label}
+                      </span>
+                    );
+                  })()}
+                </div>
                 <input
                   type="date"
                   value={eventDate}
@@ -1194,21 +1392,307 @@ export default function CheckoutPage({
                     localStorage.setItem('binhi_selected_event_date', e.target.value);
                   }}
                   className={`w-full rounded-full border px-4 py-3 text-sm font-semibold focus:outline-none ${
-                    isPastDate(eventDate) || dbBookings.some((b) => b.event_date === eventDate)
+                    isPastDate(eventDate) || getDayAvailabilityStatus(eventDate, dbBookings, bookingSettings, scheduleOverrides).status === 'fully_booked'
                       ? 'border-rose-400 bg-rose-50/50 text-rose-800'
                       : 'border-transparent bg-[var(--mist)] text-[var(--ink)] focus:border-[#1090F8]'
                   }`}
                   required
                 />
-                {(isPastDate(eventDate) || dbBookings.some((b) => b.event_date === eventDate)) && (
+                {isPastDate(eventDate) ? (
                   <p className="text-[11px] font-bold text-rose-600 mt-1 ml-2">
-                    {isPastDate(eventDate)
-                      ? 'Past Date: Please choose a future event date.'
-                      : 'Reserved Date: This date is already booked in database. Please select an available date.'}
+                    Past Date: Please choose a future event date.
                   </p>
-                )}
+                ) : getDayAvailabilityStatus(eventDate, dbBookings, bookingSettings, scheduleOverrides).status === 'fully_booked' ? (
+                  <p className="text-[11px] font-bold text-rose-600 mt-1 ml-2">
+                    Fully Booked: All operational windows for this day are reserved. Please select another date.
+                  </p>
+                ) : getDayAvailabilityStatus(eventDate, dbBookings, bookingSettings, scheduleOverrides).status === 'closed' ? (
+                  <p className="text-[11px] font-bold text-zinc-600 mt-1 ml-2">
+                    Closed: System does not accept bookings on this date.
+                  </p>
+                ) : null}
               </div>
             </div>
+
+            {/* Event Time Slot Selection (Operating Hours & Feasibility aware) */}
+            {(() => {
+              const hasSlotConflict = Boolean(slotFeasibility && !slotFeasibility.isAvailable);
+
+              const isStartBeforeOpen = opWindow.isOpen && Boolean(startTime) && timeToMinutes(startTime) < timeToMinutes(opWindow.openTime);
+              const isStartAfterClose = opWindow.isOpen && Boolean(startTime) && timeToMinutes(startTime) >= timeToMinutes(opWindow.closeTime);
+              const isStartOutOfRange = isStartBeforeOpen || isStartAfterClose;
+
+              const isEndAfterClose = opWindow.isOpen && Boolean(endTime) && timeToMinutes(endTime) > timeToMinutes(opWindow.closeTime);
+              const isEndBeforeStart = Boolean(startTime && endTime) && timeToMinutes(endTime) <= timeToMinutes(startTime);
+              const isEndOutOfRange = isEndAfterClose || isEndBeforeStart;
+
+              const isStartInputError = isStartOutOfRange || hasSlotConflict;
+              const isEndInputError = isEndOutOfRange || hasSlotConflict;
+
+              const quickPresetSlots = ['09:00', '13:00', '15:00', '18:00'].filter((t) => {
+                if (!opWindow.isOpen) return false;
+                const m = timeToMinutes(t);
+                return m >= timeToMinutes(opWindow.openTime) && m <= timeToMinutes(opWindow.closeTime) - 60;
+              });
+
+              return (
+                <div className="bg-[var(--mist)] rounded-2xl p-4 border border-[#24252c]/[0.06] space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-[#24252c]/[0.08] pb-2.5">
+                    <div>
+                      <h4 className="text-xs font-extrabold uppercase tracking-wider text-[var(--ink)]">Event Schedule Window</h4>
+                      <p className="text-[11px] text-[#24252c]/60">Times outside operating hours are restricted and blocked.</p>
+                    </div>
+                    {opWindow.isOpen ? (
+                      <span className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 px-2.5 py-1 rounded-full self-start sm:self-auto">
+                        Daily Operating Hours: {formatTimeAmPm(opWindow.openTime)} – {formatTimeAmPm(opWindow.closeTime)}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-2.5 py-1 rounded-full self-start sm:self-auto">
+                        Closed for Bookings
+                      </span>
+                    )}
+                  </div>
+
+                  {!opWindow.isOpen && (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
+                      <IconBan className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>{opWindow.reason || 'Bookings are not accepted on this date.'} Please select another event date above.</span>
+                    </div>
+                  )}
+
+                  {/* Quick Preset Start Times (filtered to allowed operating window) */}
+                  {opWindow.isOpen && quickPresetSlots.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 mr-1">
+                        Quick Slots:
+                      </span>
+                      {quickPresetSlots.map((slot) => {
+                        const isSelected = startTime === slot;
+                        return (
+                          <button
+                            key={slot}
+                            type="button"
+                            onClick={() => {
+                              setStartTime(slot);
+                              localStorage.setItem('binhi_selected_start_time', slot);
+                              const endMin = Math.min(timeToMinutes(slot) + 240, timeToMinutes(opWindow.closeTime));
+                              const endStr = minutesToTime(endMin);
+                              setEndTime(endStr);
+                              localStorage.setItem('binhi_selected_end_time', endStr);
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all border ${
+                              isSelected
+                                ? 'bg-[#1090F8] text-white border-[#1090F8] shadow-xs'
+                                : 'bg-white text-[var(--ink)] border-[#24252c]/10 hover:border-[#1090F8] hover:text-[#1090F8]'
+                            }`}
+                          >
+                            {formatTimeAmPm(slot)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <div className="flex items-center justify-between ml-1 mb-1">
+                        <label className="text-[11px] font-bold uppercase tracking-wider text-[#24252c]/60">
+                          Event Start Time <span className="text-rose-500">*</span>
+                        </label>
+                        {opWindow.isOpen && (
+                          <span className="text-[10px] text-[#24252c]/50 font-semibold">
+                            Min: {formatTimeAmPm(opWindow.openTime)}
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        type="time"
+                        value={startTime}
+                        min={opWindow.openTime}
+                        max={opWindow.closeTime}
+                        disabled={!opWindow.isOpen}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setStartTime(val);
+                          localStorage.setItem('binhi_selected_start_time', val);
+                        }}
+                        onBlur={() => {
+                          if (!startTime || !opWindow.isOpen) return;
+                          const sMin = timeToMinutes(startTime);
+                          const oMin = timeToMinutes(opWindow.openTime);
+                          const cMin = timeToMinutes(opWindow.closeTime);
+                          if (sMin < oMin) {
+                            setStartTime(opWindow.openTime);
+                            localStorage.setItem('binhi_selected_start_time', opWindow.openTime);
+                          } else if (sMin > cMin) {
+                            setStartTime(opWindow.closeTime);
+                            localStorage.setItem('binhi_selected_start_time', opWindow.closeTime);
+                          }
+                        }}
+                        className={`w-full rounded-xl border px-4 py-2.5 text-sm font-bold shadow-2xs focus:outline-none transition-colors ${
+                          isStartInputError
+                            ? 'border-rose-400 bg-rose-50/70 text-rose-800 focus:border-rose-500'
+                            : 'border-white bg-white text-[var(--ink)] focus:border-[#1090F8]'
+                        } ${!opWindow.isOpen ? 'opacity-50 cursor-not-allowed bg-zinc-100' : ''}`}
+                        required
+                      />
+
+                      {isStartBeforeOpen && (
+                        <p className="text-[11px] font-bold text-rose-600 mt-1 ml-1 flex items-center gap-1.5">
+                          <IconBan className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>Blocked: Cannot start before open time ({formatTimeAmPm(opWindow.openTime)})</span>
+                        </p>
+                      )}
+                      {isStartAfterClose && (
+                        <p className="text-[11px] font-bold text-rose-600 mt-1 ml-1 flex items-center gap-1.5">
+                          <IconBan className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>Blocked: Cannot start at or after close time ({formatTimeAmPm(opWindow.closeTime)})</span>
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between ml-1 mb-1">
+                        <label className="text-[11px] font-bold uppercase tracking-wider text-[#24252c]/60">
+                          Event End / Pack-up Time <span className="text-rose-500">*</span>
+                        </label>
+                        {opWindow.isOpen && (
+                          <span className="text-[10px] text-[#24252c]/50 font-semibold">
+                            Max: {formatTimeAmPm(opWindow.closeTime)}
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        type="time"
+                        value={endTime}
+                        min={startTime && timeToMinutes(startTime) >= timeToMinutes(opWindow.openTime) ? startTime : opWindow.openTime}
+                        max={opWindow.closeTime}
+                        disabled={!opWindow.isOpen}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEndTime(val);
+                          localStorage.setItem('binhi_selected_end_time', val);
+                        }}
+                        onBlur={() => {
+                          if (!endTime || !opWindow.isOpen) return;
+                          const eMin = timeToMinutes(endTime);
+                          const sMin = timeToMinutes(startTime);
+                          const cMin = timeToMinutes(opWindow.closeTime);
+                          if (eMin > cMin) {
+                            setEndTime(opWindow.closeTime);
+                            localStorage.setItem('binhi_selected_end_time', opWindow.closeTime);
+                          } else if (sMin && eMin <= sMin) {
+                            const fixedEnd = Math.min(sMin + 60, cMin);
+                            const val = minutesToTime(fixedEnd);
+                            setEndTime(val);
+                            localStorage.setItem('binhi_selected_end_time', val);
+                          }
+                        }}
+                        className={`w-full rounded-xl border px-4 py-2.5 text-sm font-bold shadow-2xs focus:outline-none transition-colors ${
+                          isEndInputError
+                            ? 'border-rose-400 bg-rose-50/70 text-rose-800 focus:border-rose-500'
+                            : 'border-white bg-white text-[var(--ink)] focus:border-[#1090F8]'
+                        } ${!opWindow.isOpen ? 'opacity-50 cursor-not-allowed bg-zinc-100' : ''}`}
+                        required
+                      />
+
+                      {isEndAfterClose && (
+                        <p className="text-[11px] font-bold text-rose-600 mt-1 ml-1 flex items-center gap-1.5">
+                          <IconBan className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>Blocked: Cannot extend past close time ({formatTimeAmPm(opWindow.closeTime)})</span>
+                        </p>
+                      )}
+                      {isEndBeforeStart && (
+                        <p className="text-[11px] font-bold text-rose-600 mt-1 ml-1 flex items-center gap-1.5">
+                          <IconBan className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>Blocked: End time must be later than start time</span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Real-time Feasibility & Conflict Check Alert (shows immediately right after date/time selected) */}
+                  {slotFeasibility && !slotFeasibility.isAvailable && (
+                    <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 space-y-2 animate-fadeIn">
+                      <div className="flex items-start gap-2.5">
+                        <IconAlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <h5 className="text-xs font-bold text-rose-950 uppercase tracking-wide">
+                            Schedule Conflict on Selected Date
+                          </h5>
+                          <div className="space-y-1 mt-1">
+                            {slotFeasibility.conflicts.map((c, i) => (
+                              <div key={i} className="text-xs font-medium text-rose-800 leading-snug">
+                                <p>{c.message}</p>
+                                {c.suggestedAvailableTime && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (c.type === 'insufficient_turnaround' && c.conflictingBooking) {
+                                        const existEndStr = (c.conflictingBooking.end_time || '18:00').slice(0, 5);
+                                        if (timeToMinutes(startTime) >= timeToMinutes(existEndStr)) {
+                                          setStartTime(c.suggestedAvailableTime!);
+                                          localStorage.setItem('binhi_selected_start_time', c.suggestedAvailableTime!);
+                                          const dur = Math.max(60, timeToMinutes(endTime) - timeToMinutes(startTime));
+                                          const newEnd = minutesToTime(Math.min(timeToMinutes(c.suggestedAvailableTime!) + dur, timeToMinutes(opWindow.closeTime)));
+                                          setEndTime(newEnd);
+                                          localStorage.setItem('binhi_selected_end_time', newEnd);
+                                        } else {
+                                          setEndTime(c.suggestedAvailableTime!);
+                                          localStorage.setItem('binhi_selected_end_time', c.suggestedAvailableTime!);
+                                        }
+                                      }
+                                    }}
+                                    className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-rose-300 rounded-lg text-[11px] font-bold text-rose-900 hover:bg-rose-100/50 cursor-pointer shadow-2xs transition-colors"
+                                  >
+                                    <IconArrow className="w-3.5 h-3.5 text-rose-700" />
+                                    <span>Auto-adjust time to {formatTimeAmPm(c.suggestedAvailableTime)}</span>
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {slotFeasibility && slotFeasibility.isAvailable && opWindow.isOpen && !isStartOutOfRange && !isEndOutOfRange && (
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs animate-fadeIn">
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 rounded-full bg-emerald-200 flex items-center justify-center text-emerald-800 shrink-0">
+                          <IconCheck className="w-2.5 h-2.5 stroke-[3]" />
+                        </span>
+                        <span className="font-bold text-emerald-950">
+                          Selected Time Slot is Available!
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-semibold text-emerald-700">
+                        Meets required {bookingSettings.default_turnaround_hours}h rest &amp; turnaround gap
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Dynamic Duration and Turnaround Buffer Note */}
+                  <div className="flex flex-wrap items-center justify-between text-[11px] text-[#24252c]/70 pt-1">
+                    <span>
+                      Estimated Event Duration:{' '}
+                      <strong className={isStartOutOfRange || isEndOutOfRange ? 'text-rose-600' : 'text-[var(--ink)]'}>
+                        {isStartOutOfRange || isEndOutOfRange
+                          ? 'Invalid range (outside operating hours)'
+                          : timeToMinutes(endTime) > timeToMinutes(startTime)
+                          ? `${((timeToMinutes(endTime) - timeToMinutes(startTime)) / 60).toFixed(1)} Hours`
+                          : 'Invalid range'}
+                      </strong>
+                    </span>
+                    <span className="text-emerald-700 font-semibold inline-flex items-center gap-1">
+                      <IconCheck className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Constrained to operational window ({formatTimeAmPm(opWindow.openTime)} – {formatTimeAmPm(opWindow.closeTime)})</span>
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Tell Me About Your Event (Required Textarea) */}
             <div>

@@ -7,6 +7,14 @@ import { IconArrow, IconCalendar, IconTicket } from '../../components/shared/ico
 import { TestimonialsSection } from '../../components/shared/TestimonialsSection';
 import { ImageWithSkeleton } from '../../components/shared/ImageWithSkeleton';
 import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
+import {
+  fetchBookingSettings,
+  fetchScheduleOverrides,
+  getDayAvailabilityStatus,
+  type BookingSettings,
+  type ScheduleOverride,
+  DEFAULT_BOOKING_SETTINGS,
+} from '../../utils/bookingEngine';
 
 export default function LandingPage({
   go,
@@ -24,13 +32,25 @@ export default function LandingPage({
   const [calYear, setCalYear] = useState(() => today.getFullYear());
   const [calMonth, setCalMonth] = useState(() => today.getMonth());
   const [dbBookings, setDbBookings] = useState<DBBooking[]>([]);
+  const [bookingSettings, setBookingSettings] = useState<BookingSettings>(DEFAULT_BOOKING_SETTINGS);
+  const [scheduleOverrides, setScheduleOverrides] = useState<ScheduleOverride[]>([]);
 
   useEffect(() => {
-    async function loadBookings() {
-      const data = await fetchDbBookedDates();
-      setDbBookings(data);
+    async function loadCalendarData() {
+      try {
+        const [bookings, settings, overrides] = await Promise.all([
+          fetchDbBookedDates(),
+          fetchBookingSettings(),
+          fetchScheduleOverrides(),
+        ]);
+        setDbBookings(bookings);
+        setBookingSettings(settings);
+        setScheduleOverrides(overrides);
+      } catch (e) {
+        console.warn('Failed loading calendar data:', e);
+      }
     }
-    loadBookings();
+    loadCalendarData();
   }, []);
 
   const handlePrevMonth = () => {
@@ -142,7 +162,7 @@ export default function LandingPage({
                   const day = i + 1;
                   const formattedIso = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                   const isPast = isPastDate(formattedIso);
-                  const isBooked = dbBookings.some((b) => b.event_date === formattedIso);
+                  const dayStatus = getDayAvailabilityStatus(formattedIso, dbBookings, bookingSettings, scheduleOverrides);
                   const now = new Date();
                   const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
                   const isToday = formattedIso === todayIso;
@@ -151,14 +171,18 @@ export default function LandingPage({
 
                   if (isPast) {
                     cellClass = 'bg-gray-100 text-gray-400 font-medium cursor-not-allowed opacity-40';
-                  } else if (isBooked) {
-                    cellClass = 'bg-[var(--ink)] text-white font-bold shadow-xs cursor-not-allowed';
+                  } else if (dayStatus.status === 'fully_booked' || dayStatus.status === 'closed') {
+                    cellClass = 'bg-[var(--ink)] text-white font-bold shadow-xs cursor-not-allowed opacity-80';
+                  } else if (dayStatus.status === 'slots_available') {
+                    cellClass = 'bg-amber-50 border border-amber-300 text-amber-900 font-bold hover:bg-amber-100 cursor-pointer shadow-2xs';
                   } else if (isToday) {
                     cellClass = 'border-2 border-[#1090F8] text-[#1090F8] font-extrabold bg-[#1090F8]/10 cursor-pointer hover:bg-[#1090F8]/20 shadow-xs';
                   }
 
+                  const isBlocked = isPast || dayStatus.status === 'fully_booked' || dayStatus.status === 'closed';
+
                   const handleClick = () => {
-                    if (isPast || isBooked) return;
+                    if (isBlocked) return;
                     localStorage.setItem('binhi_selected_event_date', formattedIso);
                     go('packages');
                   };
@@ -167,12 +191,25 @@ export default function LandingPage({
                     <div
                       key={day}
                       onClick={handleClick}
-                      title={isPast ? 'Past Date' : isBooked ? 'Booked Date' : isToday ? 'Today' : `Click to select ${formattedIso}`}
+                      title={
+                        isPast
+                          ? 'Past Date'
+                          : dayStatus.status === 'fully_booked'
+                          ? 'Fully Booked: No operational slots remaining'
+                          : dayStatus.status === 'slots_available'
+                          ? `${dayStatus.bookingCount} Booking(s) • Additional time slots available!`
+                          : isToday
+                          ? 'Today (Available)'
+                          : `Available ${formattedIso}`
+                      }
                       className={`aspect-square rounded-lg text-[11px] flex flex-col items-center justify-center relative transition-all group ${cellClass}`}
                     >
                       <span>{day}</span>
-                      {isBooked && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#1090F8] absolute bottom-1" />
+                      {dayStatus.status === 'slots_available' && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 absolute bottom-1 animate-pulse" />
+                      )}
+                      {dayStatus.status === 'fully_booked' && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500 absolute bottom-1" />
                       )}
                     </div>
                   );

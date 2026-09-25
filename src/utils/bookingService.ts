@@ -4,6 +4,10 @@ export interface DBBooking {
   id: string;
   user_id?: string;
   event_date: string; // YYYY-MM-DD
+  start_time?: string; // HH:MM:SS or HH:MM
+  end_time?: string;   // HH:MM:SS or HH:MM
+  venue_lat?: number;
+  venue_lng?: number;
   package_name?: string;
   event_type?: string;
   venue_address?: string;
@@ -49,6 +53,10 @@ export async function fetchDbBookedDates(): Promise<DBBooking[]> {
         id: b.id,
         user_id: b.user_id || undefined,
         event_date: normalizeDateToIso(b.event_date) || (typeof b.event_date === 'string' ? b.event_date.split('T')[0] : b.event_date),
+        start_time: b.start_time ? String(b.start_time).slice(0, 5) : '13:00',
+        end_time: b.end_time ? String(b.end_time).slice(0, 5) : '18:00',
+        venue_lat: b.venue_lat != null ? Number(b.venue_lat) : undefined,
+        venue_lng: b.venue_lng != null ? Number(b.venue_lng) : undefined,
         package_name: b.package_name || 'Booked Event',
         event_type: b.event_type || 'Event Production',
         venue_address: b.venue_address || 'Private Location',

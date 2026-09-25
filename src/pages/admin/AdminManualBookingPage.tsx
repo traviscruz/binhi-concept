@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { Page } from '../../types';
 import { supabase } from '../../lib/supabase';
 import { FEATURED_PACKAGES, type PackageData } from '../../data/packages';
-import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
+import { fetchDbBookedDates, isPastDate, normalizeDateToIso, type DBBooking } from '../../utils/bookingService';
 import { validateVoucherCode, recordVoucherUsage } from '../../utils/voucherService';
 import {
   fetchLogisticsConfig,
@@ -11,6 +11,17 @@ import {
   DEFAULT_LOGISTICS_CONFIG,
 } from '../../utils/logistics';
 import { logAuditEvent } from '../../utils/auditLogger';
+import {
+  fetchBookingSettings,
+  fetchScheduleOverrides,
+  evaluateSlotFeasibility,
+  timeToMinutes,
+  minutesToTime,
+  formatTimeAmPm,
+  DEFAULT_BOOKING_SETTINGS,
+  type BookingSettings,
+  type ScheduleOverride,
+} from '../../utils/bookingEngine';
 
 import type {
   TransportRuleOption,
@@ -43,6 +54,10 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
   // ── Event Info State ──────────────────────────────────────────────────────
   const [eventType, setEventType] = useState('Birthday / Debut Celebration');
   const [eventDate, setEventDate] = useState('');
+  const [startTime, setStartTime] = useState('13:00');
+  const [endTime, setEndTime] = useState('18:00');
+  const [bookingSettings, setBookingSettings] = useState<BookingSettings>(DEFAULT_BOOKING_SETTINGS);
+  const [scheduleOverrides, setScheduleOverrides] = useState<ScheduleOverride[]>([]);
   const [eventDescription, setEventDescription] = useState('');
   const [dbBookings, setDbBookings] = useState<DBBooking[]>([]);
 
@@ -95,14 +110,38 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
     loadLogistics();
   }, []);
 
-  // Load Bookings for conflict checking
+  // Load Engine Data & Bookings for conflict checking
   useEffect(() => {
-    async function loadBookings() {
-      const data = await fetchDbBookedDates();
-      setDbBookings(data);
+    async function loadEngineData() {
+      try {
+        const [settings, overrides, data] = await Promise.all([
+          fetchBookingSettings(),
+          fetchScheduleOverrides(),
+          fetchDbBookedDates(),
+        ]);
+        if (settings) setBookingSettings(settings);
+        setScheduleOverrides(overrides);
+        setDbBookings(data);
+      } catch (err) {
+        console.warn('Failed loading booking engine data:', err);
+      }
     }
-    loadBookings();
+    loadEngineData();
   }, []);
+
+  // Real-time slot feasibility evaluation right after selecting date & time
+  const slotFeasibility = useMemo(() => {
+    if (!eventDate || !startTime || !endTime || isPastDate(eventDate)) return null;
+    return evaluateSlotFeasibility({
+      targetDate: eventDate,
+      startTime,
+      endTime,
+      venueAddress: venueAddress || 'Metro Manila',
+      existingBookings: dbBookings,
+      settings: bookingSettings,
+      overrides: scheduleOverrides,
+    });
+  }, [eventDate, startTime, endTime, venueAddress, dbBookings, bookingSettings, scheduleOverrides]);
 
   // Load Packages
   useEffect(() => {
@@ -281,14 +320,41 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
   const remainingBalanceAmount = isFullPayment ? 0 : balanceDueOnEventDate;
 
   // ── Availability & Validation ─────────────────────────────────────────────
-  const checkLiveAvailability = async (targetDate: string): Promise<boolean> => {
+  const checkLiveAvailability = async (
+    targetDate: string,
+    sTime: string = startTime,
+    eTime: string = endTime,
+    vAddr: string = venueAddress
+  ): Promise<{ available: boolean; reason?: string }> => {
     try {
-      const freshBookings = await fetchDbBookedDates();
+      const [freshBookings, freshSettings, freshOverrides] = await Promise.all([
+        fetchDbBookedDates(),
+        fetchBookingSettings(),
+        fetchScheduleOverrides(),
+      ]);
       setDbBookings(freshBookings);
-      const isTaken = freshBookings.some((b) => b.event_date === targetDate);
-      return !isTaken;
+      if (freshSettings) setBookingSettings(freshSettings);
+      setScheduleOverrides(freshOverrides);
+
+      const feasibility = evaluateSlotFeasibility({
+        targetDate,
+        startTime: sTime,
+        endTime: eTime,
+        venueAddress: vAddr || 'Metro Manila',
+        existingBookings: freshBookings,
+        settings: freshSettings || bookingSettings,
+        overrides: freshOverrides,
+      });
+
+      if (!feasibility.isAvailable) {
+        return {
+          available: false,
+          reason: feasibility.conflicts.map((c) => c.message).join(' | '),
+        };
+      }
+      return { available: true };
     } catch (e) {
-      return true;
+      return { available: true };
     }
   };
 
@@ -357,9 +423,41 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
       return;
     }
 
-    const isAvailable = await checkLiveAvailability(eventDate);
-    if (!isAvailable) {
-      setStep1Error(`Date Conflict: The date ${eventDate} is already booked. Please select an available date.`);
+    if (!startTime || !endTime) {
+      setStep1Error('Please select both event start time and end time.');
+      return;
+    }
+    if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+      setStep1Error('Event end time must be later than event start time.');
+      return;
+    }
+
+    // Validate same-day start time has not already passed
+    const todayIso = normalizeDateToIso(new Date());
+    if (eventDate === todayIso) {
+      const now = new Date();
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      if (timeToMinutes(startTime) <= currentMinutes) {
+        setStep1Error(
+          `Event start time (${formatTimeAmPm(startTime)}) has already passed today. Please select a time slot after ${formatTimeAmPm(minutesToTime(currentMinutes))}.`
+        );
+        return;
+      }
+    }
+
+    // Real-time slot feasibility & turnaround gap check
+    const feasibilityResult = evaluateSlotFeasibility({
+      targetDate: eventDate,
+      startTime,
+      endTime,
+      venueAddress: venueAddress || 'Metro Manila',
+      existingBookings: dbBookings,
+      settings: bookingSettings,
+      overrides: scheduleOverrides,
+    });
+
+    if (!feasibilityResult.isAvailable) {
+      setStep1Error(`Schedule Conflict: ${feasibilityResult.conflicts.map((c) => c.message).join(' | ')}`);
       return;
     }
 
@@ -382,9 +480,9 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
     const isValid = validateAddressAgainstRegion(venueAddress, selectedRuleId);
     if (!isValid) return;
 
-    const isAvailable = await checkLiveAvailability(eventDate);
-    if (!isAvailable) {
-      setStep2Error(`Date Conflict: The date ${eventDate} was just reserved. Please pick another date.`);
+    const availability = await checkLiveAvailability(eventDate, startTime, endTime, venueAddress);
+    if (!availability.available) {
+      setStep2Error(`Schedule Conflict: ${availability.reason || `The selected time slot on ${eventDate} is no longer available.`}`);
       return;
     }
 
@@ -426,9 +524,9 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
     setSubmitting(true);
 
     try {
-      const isAvailable = await checkLiveAvailability(eventDate);
-      if (!isAvailable) {
-        setStep3Error(`Date Conflict: ${eventDate} is already reserved in the database.`);
+      const availability = await checkLiveAvailability(eventDate, startTime, endTime, venueAddress);
+      if (!availability.available) {
+        setStep3Error(`Schedule Conflict: ${availability.reason || `${eventDate} is already reserved for this time slot.`}`);
         setSubmitting(false);
         return;
       }
@@ -475,6 +573,8 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
         addons_cost: addonsCost,
         event_type: eventType,
         event_date: eventDate,
+        start_time: startTime,
+        end_time: endTime,
         event_description: finalDescription,
         venue_address: venueAddress,
         region_rule_id: selectedRuleId,
@@ -706,9 +806,27 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
           setEventType={setEventType}
           eventDate={eventDate}
           setEventDate={setEventDate}
+          startTime={startTime}
+          setStartTime={setStartTime}
+          endTime={endTime}
+          setEndTime={setEndTime}
           eventDescription={eventDescription}
           setEventDescription={setEventDescription}
           dbBookings={dbBookings}
+          bookingSettings={bookingSettings}
+          scheduleOverrides={scheduleOverrides}
+          slotFeasibility={(() => {
+            if (!eventDate || !startTime || !endTime || isPastDate(eventDate)) return null;
+            return evaluateSlotFeasibility({
+              targetDate: eventDate,
+              startTime,
+              endTime,
+              venueAddress: venueAddress || 'Metro Manila',
+              existingBookings: dbBookings,
+              settings: bookingSettings,
+              overrides: scheduleOverrides,
+            });
+          })()}
           currentPkgPrice={currentPkgPrice}
           packageAndAddonPrice={packageAndAddonPrice}
           selectedPkg={selectedPkg}

@@ -8,6 +8,14 @@ import { IconArrow, IconCheck, IconTicket, IconHeart, IconX } from '../../compon
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { supabase } from '../../lib/supabase';
 import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
+import {
+  fetchBookingSettings,
+  fetchScheduleOverrides,
+  getDayAvailabilityStatus,
+  type BookingSettings,
+  type ScheduleOverride,
+  DEFAULT_BOOKING_SETTINGS,
+} from '../../utils/bookingEngine';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -114,13 +122,25 @@ export default function PackageDetailPage({
   const [guestCount, setGuestCount] = useState(100);
   const [addonSelections, setAddonSelections] = useState<AddonSelection>({});
   const [dbBookings, setDbBookings] = useState<DBBooking[]>([]);
+  const [bookingSettings, setBookingSettings] = useState<BookingSettings>(DEFAULT_BOOKING_SETTINGS);
+  const [scheduleOverrides, setScheduleOverrides] = useState<ScheduleOverride[]>([]);
 
   useEffect(() => {
-    async function loadBookings() {
-      const data = await fetchDbBookedDates();
-      setDbBookings(data);
+    async function loadEngineData() {
+      try {
+        const [bookings, settings, overrides] = await Promise.all([
+          fetchDbBookedDates(),
+          fetchBookingSettings(),
+          fetchScheduleOverrides(),
+        ]);
+        setDbBookings(bookings);
+        setBookingSettings(settings);
+        setScheduleOverrides(overrides);
+      } catch (e) {
+        console.warn('Failed loading engine data in PackageDetailPage:', e);
+      }
     }
-    loadBookings();
+    loadEngineData();
   }, []);
 
   // Live inventory add-ons state
@@ -369,9 +389,19 @@ export default function PackageDetailPage({
               <h3 className="text-lg font-bold mb-4">Pick Your Date & Customize</h3>
 
               <div className="mb-4">
-                <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-1">
-                  Event Date
-                </label>
+                <div className="flex items-center justify-between ml-1 mb-1">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50">
+                    Event Date
+                  </label>
+                  {selectedDate && !isPastDate(selectedDate) && (() => {
+                    const dayStatus = getDayAvailabilityStatus(selectedDate, dbBookings, bookingSettings, scheduleOverrides);
+                    return (
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${dayStatus.badgeClass}`}>
+                        {dayStatus.label}
+                      </span>
+                    );
+                  })()}
+                </div>
                 <input
                   type="date"
                   value={selectedDate}
@@ -381,18 +411,24 @@ export default function PackageDetailPage({
                     localStorage.setItem('binhi_selected_event_date', e.target.value);
                   }}
                   className={`w-full rounded-full border px-4 py-3 text-sm focus:outline-none ${
-                    isPastDate(selectedDate) || dbBookings.some((b) => b.event_date === selectedDate)
+                    isPastDate(selectedDate) || getDayAvailabilityStatus(selectedDate, dbBookings, bookingSettings, scheduleOverrides).status === 'fully_booked'
                       ? 'border-rose-400 bg-rose-50 text-rose-800 font-bold'
                       : 'border-transparent bg-white text-[var(--ink)] focus:border-[#1090F8]'
                   }`}
                 />
-                {(isPastDate(selectedDate) || dbBookings.some((b) => b.event_date === selectedDate)) && (
+                {isPastDate(selectedDate) ? (
                   <p className="text-[11px] font-bold text-rose-600 mt-1 ml-2">
-                    {isPastDate(selectedDate)
-                      ? 'Past Date: Please choose a future event date.'
-                      : 'Reserved Date: This date is already booked in database.'}
+                    Past Date: Please choose a future event date.
                   </p>
-                )}
+                ) : getDayAvailabilityStatus(selectedDate, dbBookings, bookingSettings, scheduleOverrides).status === 'fully_booked' ? (
+                  <p className="text-[11px] font-bold text-rose-600 mt-1 ml-2">
+                    Reserved Date: All available operational windows are booked.
+                  </p>
+                ) : getDayAvailabilityStatus(selectedDate, dbBookings, bookingSettings, scheduleOverrides).status === 'slots_available' ? (
+                  <p className="text-[11px] font-bold text-amber-700 mt-1 ml-2">
+                    ✓ Multiple slots available! Exact timings validated during checkout.
+                  </p>
+                ) : null}
               </div>
 
               <div className="mb-5">

@@ -1,14 +1,36 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconTicket, IconCalendar, IconPin, IconUser, IconCheck, IconX } from '../../components/shared/icons';
+import {
+  IconTicket,
+  IconCalendar,
+  IconPin,
+  IconUser,
+  IconCheck,
+  IconX,
+  IconAlertTriangle,
+  IconBan,
+  IconArrow,
+} from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { BookingRescheduleCalendar } from '../../components/shared/BookingRescheduleCalendar';
 import { supabase } from '../../lib/supabase';
-import { formatDisplayDate } from '../../utils/bookingService';
+import { formatDisplayDate, fetchDbBookedDates, normalizeDateToIso, type DBBooking } from '../../utils/bookingService';
 import { sendAdminRescheduleAlert } from '../../utils/emailService';
 import { createPaymongoCheckoutSession } from '../../utils/paymongoPayment';
+import {
+  fetchBookingSettings,
+  fetchScheduleOverrides,
+  evaluateSlotFeasibility,
+  timeToMinutes,
+  minutesToTime,
+  formatTimeAmPm,
+  getOperatingWindowForDate,
+  DEFAULT_BOOKING_SETTINGS,
+  type BookingSettings,
+  type ScheduleOverride,
+} from '../../utils/bookingEngine';
 
 export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
   const [bookings, setBookings] = useState<any[]>([]);
@@ -26,11 +48,58 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
   // Reschedule Request Modal State
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [newRescheduleDate, setNewRescheduleDate] = useState('');
+  const [newRescheduleStartTime, setNewRescheduleStartTime] = useState('13:00');
+  const [newRescheduleEndTime, setNewRescheduleEndTime] = useState('18:00');
+  const [bookingSettings, setBookingSettings] = useState<BookingSettings>(DEFAULT_BOOKING_SETTINGS);
+  const [scheduleOverrides, setScheduleOverrides] = useState<ScheduleOverride[]>([]);
+  const [dbBookings, setDbBookings] = useState<DBBooking[]>([]);
   const [rescheduleReason, setRescheduleReason] = useState('');
   const [submittingReschedule, setSubmittingReschedule] = useState(false);
   const [rescheduleSuccessToast, setRescheduleSuccessToast] = useState(false);
   const [rescheduleError, setRescheduleError] = useState('');
   const [cancellingReschedule, setCancellingReschedule] = useState(false);
+
+  // Load booking settings and dbBookings for reschedule validation
+  useEffect(() => {
+    async function loadEngineData() {
+      try {
+        const [settings, overrides, bookedDates] = await Promise.all([
+          fetchBookingSettings(),
+          fetchScheduleOverrides(),
+          fetchDbBookedDates(),
+        ]);
+        if (settings) setBookingSettings(settings);
+        setScheduleOverrides(overrides);
+        setDbBookings(bookedDates);
+      } catch (err) {
+        console.warn('Failed loading booking engine data in status page:', err);
+      }
+    }
+    loadEngineData();
+  }, []);
+
+  // Compute operating window for reschedule target date
+  const rescheduleOpWindow = useMemo(() => {
+    const res = getOperatingWindowForDate(newRescheduleDate, bookingSettings, scheduleOverrides);
+    const openTime = res.openTime || '08:00';
+    const closeTime = res.closeTime === '00:00' && res.isOpen ? '23:59' : (res.closeTime || '23:00');
+    return { ...res, openTime, closeTime };
+  }, [newRescheduleDate, bookingSettings, scheduleOverrides]);
+
+  // Real-time slot feasibility for reschedule
+  const rescheduleSlotFeasibility = useMemo(() => {
+    if (!newRescheduleDate || !newRescheduleStartTime || !newRescheduleEndTime) return null;
+    return evaluateSlotFeasibility({
+      targetDate: newRescheduleDate,
+      startTime: newRescheduleStartTime,
+      endTime: newRescheduleEndTime,
+      venueAddress: (bookings.find((b) => b.id === selectedBookingId)?.venue_address) || 'Metro Manila',
+      existingBookings: dbBookings,
+      settings: bookingSettings,
+      overrides: scheduleOverrides,
+      excludeBookingId: selectedBookingId || undefined,
+    });
+  }, [newRescheduleDate, newRescheduleStartTime, newRescheduleEndTime, selectedBookingId, bookings, dbBookings, bookingSettings, scheduleOverrides]);
 
   const fetchActiveBookings = async () => {
     setLoading(true);
@@ -120,6 +189,8 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
 
   const handleOpenRescheduleModal = () => {
     setNewRescheduleDate('');
+    setNewRescheduleStartTime((activeBooking?.start_time || '13:00').slice(0, 5));
+    setNewRescheduleEndTime((activeBooking?.end_time || '18:00').slice(0, 5));
     setRescheduleReason('');
     setRescheduleError('');
     setShowRescheduleModal(true);
@@ -136,6 +207,32 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
       setRescheduleError('The new date cannot be the same as your currently scheduled event date.');
       return;
     }
+    if (!newRescheduleStartTime || !newRescheduleEndTime) {
+      setRescheduleError('Please select event start time and end time.');
+      return;
+    }
+    if (timeToMinutes(newRescheduleEndTime) <= timeToMinutes(newRescheduleStartTime)) {
+      setRescheduleError('Event end time must be later than event start time.');
+      return;
+    }
+
+    // Validate same-day start time has not already passed
+    const todayIso = normalizeDateToIso(new Date());
+    if (newRescheduleDate === todayIso) {
+      const now = new Date();
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      if (timeToMinutes(newRescheduleStartTime) <= currentMinutes) {
+        setRescheduleError(
+          `Event start time (${formatTimeAmPm(newRescheduleStartTime)}) has already passed today. Please select a time slot after ${formatTimeAmPm(minutesToTime(currentMinutes))}.`
+        );
+        return;
+      }
+    }
+
+    if (rescheduleSlotFeasibility && !rescheduleSlotFeasibility.isAvailable) {
+      setRescheduleError(`Schedule Conflict: ${rescheduleSlotFeasibility.conflicts.map((c) => c.message).join(' | ')}`);
+      return;
+    }
     if (!rescheduleReason.trim()) {
       setRescheduleError('Please provide a reason or note for your reschedule request.');
       return;
@@ -149,13 +246,16 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
         data: { user },
       } = await supabase.auth.getUser();
 
+      const timeTag = `[Requested Time: ${formatTimeAmPm(newRescheduleStartTime)} – ${formatTimeAmPm(newRescheduleEndTime)}]`;
+      const combinedReason = `${timeTag} ${rescheduleReason.trim()}`;
+
       // 1. Update booking in Supabase
       const { error: dbError } = await supabase
         .from('bookings')
         .update({
           reschedule_status: 'pending',
           reschedule_requested_date: newRescheduleDate,
-          reschedule_reason: rescheduleReason.trim(),
+          reschedule_reason: combinedReason,
           reschedule_requested_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
@@ -171,8 +271,8 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
         customerPhone: activeBooking.customer_phone || '',
         packageName: activeBooking.package_name,
         originalDate: formatDisplayDate(activeBooking.event_date),
-        requestedDate: formatDisplayDate(newRescheduleDate),
-        reason: rescheduleReason.trim(),
+        requestedDate: `${formatDisplayDate(newRescheduleDate)} (${formatTimeAmPm(newRescheduleStartTime)} – ${formatTimeAmPm(newRescheduleEndTime)})`,
+        reason: combinedReason,
         venue: activeBooking.venue_address,
       });
 
@@ -877,7 +977,7 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
                     setRescheduleError('');
                   }}
                   excludeBookingId={activeBooking.id}
-                  minDateOffsetDays={1}
+                  minDateOffsetDays={0}
                 />
               </div>
 
@@ -890,6 +990,246 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
                   </span>
                 </div>
               )}
+
+              {/* Event Time Slot Selection (Operating Hours & Feasibility aware) */}
+              {newRescheduleDate && (() => {
+                const openTime = rescheduleOpWindow.openTime;
+                const closeTime = rescheduleOpWindow.closeTime;
+
+                const hasSlotConflict = Boolean(rescheduleSlotFeasibility && !rescheduleSlotFeasibility.isAvailable);
+
+                const isStartBeforeOpen = rescheduleOpWindow.isOpen && Boolean(newRescheduleStartTime) && timeToMinutes(newRescheduleStartTime) < timeToMinutes(openTime);
+                const isStartAfterClose = rescheduleOpWindow.isOpen && Boolean(newRescheduleStartTime) && timeToMinutes(newRescheduleStartTime) >= timeToMinutes(closeTime);
+                const isStartOutOfRange = isStartBeforeOpen || isStartAfterClose;
+
+                const isEndAfterClose = rescheduleOpWindow.isOpen && Boolean(newRescheduleEndTime) && timeToMinutes(newRescheduleEndTime) > timeToMinutes(closeTime);
+                const isEndBeforeStart = Boolean(newRescheduleStartTime && newRescheduleEndTime) && timeToMinutes(newRescheduleEndTime) <= timeToMinutes(newRescheduleStartTime);
+                const isEndOutOfRange = isEndAfterClose || isEndBeforeStart;
+
+                const isStartInputError = isStartOutOfRange || hasSlotConflict;
+                const isEndInputError = isEndOutOfRange || hasSlotConflict;
+
+                const quickPresetSlots = ['09:00', '13:00', '15:00', '18:00'].filter((t) => {
+                  if (!rescheduleOpWindow.isOpen) return false;
+                  const m = timeToMinutes(t);
+                  return m >= timeToMinutes(openTime) && m <= timeToMinutes(closeTime) - 60;
+                });
+
+                return (
+                  <div className="bg-[var(--mist)] rounded-2xl p-4 border border-[#24252c]/[0.06] space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-[#24252c]/[0.08] pb-2.5">
+                      <div>
+                        <h4 className="text-xs font-extrabold uppercase tracking-wider text-[var(--ink)]">Event Schedule Window</h4>
+                        <p className="text-[11px] text-[#24252c]/60">Select production start and conclusion times within daily operating hours.</p>
+                      </div>
+                      {rescheduleOpWindow.isOpen ? (
+                        <span className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 px-2.5 py-1 rounded-full self-start sm:self-auto">
+                          Daily Operating Hours: {formatTimeAmPm(openTime)} – {formatTimeAmPm(closeTime)}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-2.5 py-1 rounded-full self-start sm:self-auto">
+                          Closed for Bookings
+                        </span>
+                      )}
+                    </div>
+
+                    {!rescheduleOpWindow.isOpen && (
+                      <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
+                        <IconBan className="w-4 h-4 text-rose-600 shrink-0" />
+                        <span>{rescheduleOpWindow.reason || 'Bookings are not accepted on this date.'} Please select another event date above.</span>
+                      </div>
+                    )}
+
+                    {/* Quick Preset Slots */}
+                    {rescheduleOpWindow.isOpen && quickPresetSlots.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 mr-1">
+                          Quick Slots:
+                        </span>
+                        {quickPresetSlots.map((slot) => {
+                          const isSelected = newRescheduleStartTime === slot;
+                          return (
+                            <button
+                              key={slot}
+                              type="button"
+                              onClick={() => {
+                                setNewRescheduleStartTime(slot);
+                                const endMin = Math.min(timeToMinutes(slot) + 240, timeToMinutes(closeTime));
+                                setNewRescheduleEndTime(minutesToTime(endMin));
+                              }}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all border ${
+                                isSelected
+                                  ? 'bg-[#1090F8] text-white border-[#1090F8] shadow-xs'
+                                  : 'bg-white text-[var(--ink)] border-[#24252c]/10 hover:border-[#1090F8] hover:text-[#1090F8]'
+                              }`}
+                            >
+                              {formatTimeAmPm(slot)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <div className="flex items-center justify-between ml-1 mb-1">
+                          <label className="text-[11px] font-bold uppercase tracking-wider text-[#24252c]/60">
+                            Event Start Time <span className="text-rose-500">*</span>
+                          </label>
+                          {rescheduleOpWindow.isOpen && (
+                            <span className="text-[10px] text-[#24252c]/50 font-semibold">
+                              Min: {formatTimeAmPm(openTime)}
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type="time"
+                          value={newRescheduleStartTime}
+                          min={openTime}
+                          max={closeTime}
+                          disabled={!rescheduleOpWindow.isOpen}
+                          onChange={(e) => setNewRescheduleStartTime(e.target.value)}
+                          onBlur={() => {
+                            if (!newRescheduleStartTime || !rescheduleOpWindow.isOpen) return;
+                            const sMin = timeToMinutes(newRescheduleStartTime);
+                            const oMin = timeToMinutes(openTime);
+                            const cMin = timeToMinutes(closeTime);
+                            if (sMin < oMin) setNewRescheduleStartTime(openTime);
+                            else if (sMin > cMin) setNewRescheduleStartTime(closeTime);
+                          }}
+                          className={`w-full rounded-xl border px-4 py-2.5 text-sm font-bold shadow-2xs focus:outline-none transition-colors ${
+                            isStartInputError
+                              ? 'border-rose-400 bg-rose-50/70 text-rose-800 focus:border-rose-500'
+                              : 'border-white bg-white text-[var(--ink)] focus:border-[#1090F8]'
+                          } ${!rescheduleOpWindow.isOpen ? 'opacity-50 cursor-not-allowed bg-zinc-100' : ''}`}
+                          required
+                        />
+                        {isStartBeforeOpen && (
+                          <p className="text-[11px] font-bold text-rose-600 mt-1 ml-1 flex items-center gap-1.5">
+                            <IconBan className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                            <span>Blocked: Cannot start before open time ({formatTimeAmPm(openTime)})</span>
+                          </p>
+                        )}
+                        {isStartAfterClose && (
+                          <p className="text-[11px] font-bold text-rose-600 mt-1 ml-1 flex items-center gap-1.5">
+                            <IconBan className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                            <span>Blocked: Cannot start at or after close time ({formatTimeAmPm(closeTime)})</span>
+                          </p>
+                        )}
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between ml-1 mb-1">
+                          <label className="text-[11px] font-bold uppercase tracking-wider text-[#24252c]/60">
+                            Event End / Pack-up Time <span className="text-rose-500">*</span>
+                          </label>
+                          {rescheduleOpWindow.isOpen && (
+                            <span className="text-[10px] text-[#24252c]/50 font-semibold">
+                              Max: {formatTimeAmPm(closeTime)}
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type="time"
+                          value={newRescheduleEndTime}
+                          min={newRescheduleStartTime && timeToMinutes(newRescheduleStartTime) >= timeToMinutes(openTime) ? newRescheduleStartTime : openTime}
+                          max={closeTime}
+                          disabled={!rescheduleOpWindow.isOpen}
+                          onChange={(e) => setNewRescheduleEndTime(e.target.value)}
+                          onBlur={() => {
+                            if (!newRescheduleEndTime || !rescheduleOpWindow.isOpen) return;
+                            const eMin = timeToMinutes(newRescheduleEndTime);
+                            const sMin = timeToMinutes(newRescheduleStartTime);
+                            const cMin = timeToMinutes(closeTime);
+                            if (eMin > cMin) setNewRescheduleEndTime(closeTime);
+                            else if (sMin && eMin <= sMin) {
+                              const fixedEnd = Math.min(sMin + 60, cMin);
+                              setNewRescheduleEndTime(minutesToTime(fixedEnd));
+                            }
+                          }}
+                          className={`w-full rounded-xl border px-4 py-2.5 text-sm font-bold shadow-2xs focus:outline-none transition-colors ${
+                            isEndInputError
+                              ? 'border-rose-400 bg-rose-50/70 text-rose-800 focus:border-rose-500'
+                              : 'border-white bg-white text-[var(--ink)] focus:border-[#1090F8]'
+                          } ${!rescheduleOpWindow.isOpen ? 'opacity-50 cursor-not-allowed bg-zinc-100' : ''}`}
+                          required
+                        />
+                        {isEndAfterClose && (
+                          <p className="text-[11px] font-bold text-rose-600 mt-1 ml-1 flex items-center gap-1.5">
+                            <IconBan className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                            <span>Blocked: Cannot extend past close time ({formatTimeAmPm(closeTime)})</span>
+                          </p>
+                        )}
+                        {isEndBeforeStart && (
+                          <p className="text-[11px] font-bold text-rose-600 mt-1 ml-1 flex items-center gap-1.5">
+                            <IconBan className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                            <span>Blocked: End time must be later than start time</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Real-time Feasibility & Conflict Check Alert */}
+                    {rescheduleSlotFeasibility && !rescheduleSlotFeasibility.isAvailable && (
+                      <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 space-y-2 animate-fadeIn">
+                        <div className="flex items-start gap-2.5">
+                          <IconAlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <h5 className="text-xs font-bold text-rose-950 uppercase tracking-wide">
+                              Schedule Conflict on Selected Date
+                            </h5>
+                            <div className="space-y-1 mt-1">
+                              {rescheduleSlotFeasibility.conflicts.map((c, i) => (
+                                <div key={i} className="text-xs font-medium text-rose-800 leading-snug">
+                                  <p>{c.message}</p>
+                                  {c.suggestedAvailableTime && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (c.type === 'insufficient_turnaround' && c.conflictingBooking) {
+                                          const existEndStr = (c.conflictingBooking.end_time || '18:00').slice(0, 5);
+                                          if (timeToMinutes(newRescheduleStartTime) >= timeToMinutes(existEndStr)) {
+                                            setNewRescheduleStartTime(c.suggestedAvailableTime!);
+                                            const dur = Math.max(60, timeToMinutes(newRescheduleEndTime) - timeToMinutes(newRescheduleStartTime));
+                                            const newEnd = minutesToTime(Math.min(timeToMinutes(c.suggestedAvailableTime!) + dur, timeToMinutes(closeTime)));
+                                            setNewRescheduleEndTime(newEnd);
+                                          } else {
+                                            setNewRescheduleEndTime(c.suggestedAvailableTime!);
+                                          }
+                                        }
+                                      }}
+                                      className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-rose-300 rounded-lg text-[11px] font-bold text-rose-900 hover:bg-rose-100/50 cursor-pointer shadow-2xs transition-colors"
+                                    >
+                                      <IconArrow className="w-3.5 h-3.5 text-rose-700" />
+                                      <span>Auto-adjust time to {formatTimeAmPm(c.suggestedAvailableTime)}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {rescheduleSlotFeasibility && rescheduleSlotFeasibility.isAvailable && rescheduleOpWindow.isOpen && !isStartOutOfRange && !isEndOutOfRange && (
+                      <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs animate-fadeIn">
+                        <div className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-emerald-200 flex items-center justify-center text-emerald-800 shrink-0">
+                            <IconCheck className="w-2.5 h-2.5 stroke-[3]" />
+                          </span>
+                          <span className="font-bold text-emerald-950">
+                            Selected Time Slot is Available!
+                          </span>
+                        </div>
+                        <span className="text-[11px] font-semibold text-emerald-700">
+                          Meets required {bookingSettings.default_turnaround_hours}h rest &amp; turnaround gap
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Built-in Prefilled Reason & Email Message Box */}
               <div className="space-y-2 pt-2 border-t border-[#24252c]/[0.08]">

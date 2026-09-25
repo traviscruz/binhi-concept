@@ -1,9 +1,17 @@
 import { useState, useEffect } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconArrow, IconCheck, IconTicket, IconSearch } from '../../components/shared/icons';
+import { IconArrow, IconCheck, IconTicket, IconSearch, IconX } from '../../components/shared/icons';
 import { supabase } from '../../lib/supabase';
 import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
+import {
+  fetchBookingSettings,
+  fetchScheduleOverrides,
+  getDayAvailabilityStatus,
+  type BookingSettings,
+  type ScheduleOverride,
+  DEFAULT_BOOKING_SETTINGS,
+} from '../../utils/bookingEngine';
 import { EQUIPMENT_ITEMS } from '../../data/equipment';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -124,14 +132,26 @@ export default function CustomPackagePage({
   const [searchQuery, setSearchQuery] = useState('');
   const [itemSelections, setItemSelections] = useState<ItemQuantityMap>({});
   const [dbBookings, setDbBookings] = useState<DBBooking[]>([]);
+  const [bookingSettings, setBookingSettings] = useState<BookingSettings>(DEFAULT_BOOKING_SETTINGS);
+  const [scheduleOverrides, setScheduleOverrides] = useState<ScheduleOverride[]>([]);
 
-  // Load booked dates to validate availability
+  // Load booked dates and schedule settings to validate availability
   useEffect(() => {
-    async function loadBookings() {
-      const data = await fetchDbBookedDates();
-      setDbBookings(data);
+    async function loadEngineData() {
+      try {
+        const [bookings, settings, overrides] = await Promise.all([
+          fetchDbBookedDates(),
+          fetchBookingSettings(),
+          fetchScheduleOverrides(),
+        ]);
+        setDbBookings(bookings);
+        setBookingSettings(settings);
+        setScheduleOverrides(overrides);
+      } catch (e) {
+        console.warn('Failed loading engine data in CustomPackagePage:', e);
+      }
     }
-    loadBookings();
+    loadEngineData();
   }, []);
 
   // Fetch real equipment from Supabase (with fallback to EQUIPMENT_ITEMS)
@@ -243,8 +263,11 @@ export default function CustomPackagePage({
   const requiredDeposit = Math.round(totalEquipmentCost * 0.5);
   const remainingBalance = totalEquipmentCost - requiredDeposit;
 
+  const [customPageError, setCustomPageError] = useState('');
+
   // Selected date status
-  const isDateBooked = dbBookings.some((b) => b.event_date === selectedDate);
+  const dayStatus = getDayAvailabilityStatus(selectedDate, dbBookings, bookingSettings, scheduleOverrides);
+  const isDateFullyBooked = dayStatus.status === 'fully_booked' || dayStatus.status === 'closed';
   const isDatePast = isPastDate(selectedDate);
 
   // Convert selected gear into formatted strings for CheckoutPage
@@ -253,16 +276,17 @@ export default function CustomPackagePage({
   );
 
   const handleProceedToCheckout = () => {
+    setCustomPageError('');
     if (selectedGearItems.length === 0) {
-      alert('Please select at least one piece of equipment to build your custom package.');
+      setCustomPageError('Please select at least one piece of equipment to build your custom package.');
       return;
     }
-    if (isDateBooked) {
-      alert(`The date ${selectedDate} is already booked. Please choose another event date.`);
+    if (isDateFullyBooked) {
+      setCustomPageError(`The date ${selectedDate} is fully booked. Please choose another event date.`);
       return;
     }
     if (isDatePast) {
-      alert('Please choose a future event date.');
+      setCustomPageError('Please choose a future event date.');
       return;
     }
 
@@ -475,9 +499,16 @@ export default function CustomPackagePage({
 
               {/* Event Date */}
               <div>
-                <label className="text-[10px] font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-1">
-                  Event Date
-                </label>
+                <div className="flex items-center justify-between ml-1 mb-1">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-[#24252c]/50">
+                    Event Date
+                  </label>
+                  {selectedDate && !isPastDate(selectedDate) && (
+                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${dayStatus.badgeClass}`}>
+                      {dayStatus.label}
+                    </span>
+                  )}
+                </div>
                 <input
                   type="date"
                   value={selectedDate}
@@ -487,18 +518,24 @@ export default function CustomPackagePage({
                     localStorage.setItem('binhi_selected_event_date', e.target.value);
                   }}
                   className={`w-full rounded-full border px-3.5 py-2.5 text-xs focus:outline-none ${
-                    isPastDate(selectedDate) || isDateBooked
+                    isPastDate(selectedDate) || isDateFullyBooked
                       ? 'border-rose-400 bg-rose-50 text-rose-800 font-bold'
                       : 'border-transparent bg-white text-[var(--ink)] focus:border-[#1090F8]'
                   }`}
                 />
-                {(isPastDate(selectedDate) || isDateBooked) && (
+                {isPastDate(selectedDate) ? (
                   <p className="text-[10px] font-bold text-rose-600 mt-1 ml-1.5">
-                    {isPastDate(selectedDate)
-                      ? 'Past Date: Please choose a future event date.'
-                      : 'Reserved Date: This date is already booked in database.'}
+                    Past Date: Please choose a future event date.
                   </p>
-                )}
+                ) : isDateFullyBooked ? (
+                  <p className="text-[10px] font-bold text-rose-600 mt-1 ml-1.5">
+                    Reserved Date: All operational windows on this date are booked.
+                  </p>
+                ) : dayStatus.status === 'slots_available' ? (
+                  <p className="text-[10px] font-bold text-amber-700 mt-1 ml-1.5">
+                    ✓ Slots available! Exact hours confirmed during checkout.
+                  </p>
+                ) : null}
               </div>
 
               {/* Guest Count */}
@@ -579,10 +616,27 @@ export default function CustomPackagePage({
                 )}
               </div>
 
+              {/* Validation Alert Notice */}
+              {customPageError && (
+                <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center justify-between gap-2 shadow-2xs">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                    <span>{customPageError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCustomPageError('')}
+                    className="text-rose-400 hover:text-rose-700 shrink-0 p-0.5 cursor-pointer"
+                  >
+                    <IconX className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
               {/* Primary Action Button */}
               <button
                 type="button"
-                disabled={selectedGearItems.length === 0 || isDateBooked || isPastDate(selectedDate)}
+                disabled={selectedGearItems.length === 0 || isDateFullyBooked || isPastDate(selectedDate)}
                 onClick={handleProceedToCheckout}
                 className="w-full bg-[var(--ink)] text-white text-xs font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors inline-flex items-center justify-center gap-1.5 shadow-md disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >

@@ -676,6 +676,8 @@ export interface CancellationRefundEmailData {
   refundReferenceNumber?: string;
   adminNotes?: string;
   isDirectAdminCancellation?: boolean;
+  isDirectAdminCancel?: boolean;
+  isPayMongoRefund?: boolean;
   reflectionDaysEstimate?: string;
   refundReceiptUrl?: string;
 }
@@ -814,7 +816,7 @@ export function getCustomerCancellationRefundHtml(data: CancellationRefundEmailD
     </p>
     <p class="text-muted" style="margin:0 0 20px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
       ${
-        data.isDirectAdminCancellation
+        (data.isDirectAdminCancellation || data.isDirectAdminCancel)
           ? `Your booking <strong class="text-ink" style="color:#24252C;">#${safeRef}</strong> for <strong style="color:#24252C;">${safeDate}</strong> has been cancelled by our production team, and your refund has been processed.`
           : `Your request to cancel booking <strong class="text-ink" style="color:#24252C;">#${safeRef}</strong> has been approved and your refund has been successfully processed.`
       }

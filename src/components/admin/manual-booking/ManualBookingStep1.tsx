@@ -2,8 +2,18 @@ import { useState } from 'react';
 import type { PackageData } from '../../../data/packages';
 import type { AddonModel, AddonSelection } from './types';
 import { CHANNELS } from './types';
-import { IconArrow, IconChevronDown, IconChevronUp } from '../../shared/icons';
+import { IconArrow, IconChevronDown, IconChevronUp, IconAlertTriangle, IconBan, IconCheck } from '../../shared/icons';
 import { isPastDate, type DBBooking } from '../../../utils/bookingService';
+import {
+  formatTimeAmPm,
+  timeToMinutes,
+  minutesToTime,
+  getOperatingWindowForDate,
+  getDayAvailabilityStatus,
+  type BookingSettings,
+  type ScheduleOverride,
+  type SlotFeasibilityResult,
+} from '../../../utils/bookingEngine';
 
 interface ManualBookingStep1Props {
   channel: string;
@@ -31,9 +41,16 @@ interface ManualBookingStep1Props {
   setEventType: (val: string) => void;
   eventDate: string;
   setEventDate: (val: string) => void;
+  startTime: string;
+  setStartTime: (val: string) => void;
+  endTime: string;
+  setEndTime: (val: string) => void;
   eventDescription: string;
   setEventDescription: (val: string) => void;
   dbBookings: DBBooking[];
+  bookingSettings: BookingSettings;
+  scheduleOverrides: ScheduleOverride[];
+  slotFeasibility: SlotFeasibilityResult | null;
   currentPkgPrice: number;
   packageAndAddonPrice: number;
   selectedPkg: PackageData;
@@ -67,9 +84,16 @@ export function ManualBookingStep1({
   setEventType,
   eventDate,
   setEventDate,
+  startTime,
+  setStartTime,
+  endTime,
+  setEndTime,
   eventDescription,
   setEventDescription,
   dbBookings,
+  bookingSettings,
+  scheduleOverrides,
+  slotFeasibility,
   currentPkgPrice,
   packageAndAddonPrice,
   selectedPkg,
@@ -324,30 +348,305 @@ export function ManualBookingStep1({
         </div>
 
         <div>
-          <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-1">
-            Event Date <span className="text-rose-500">*</span>
-          </label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block">
+              Event Date <span className="text-rose-500">*</span>
+            </label>
+            {eventDate && !isPastDate(eventDate) && (() => {
+              const dayStatus = getDayAvailabilityStatus(eventDate, dbBookings, bookingSettings, scheduleOverrides);
+              return (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${dayStatus.badgeClass}`}>
+                  {dayStatus.label}
+                </span>
+              );
+            })()}
+          </div>
           <input
             type="date"
             value={eventDate}
             min={new Date().toISOString().split('T')[0]}
             onChange={(e) => setEventDate(e.target.value)}
             className={`w-full rounded-full border px-4 py-3 text-sm font-semibold focus:outline-none ${
-              isPastDate(eventDate) || dbBookings.some((b) => b.event_date === eventDate)
+              isPastDate(eventDate) || (eventDate && getDayAvailabilityStatus(eventDate, dbBookings, bookingSettings, scheduleOverrides).status === 'fully_booked')
                 ? 'border-rose-400 bg-rose-50/50 text-rose-800'
                 : 'border-transparent bg-[var(--mist)] text-[var(--ink)] focus:border-[#1090F8]'
             }`}
             required
           />
-          {(isPastDate(eventDate) || dbBookings.some((b) => b.event_date === eventDate)) && (
+          {isPastDate(eventDate) ? (
             <p className="text-[11px] font-bold text-rose-600 mt-1 ml-2">
-              {isPastDate(eventDate)
-                ? 'Past Date: Please choose a future event date.'
-                : 'Reserved Date: This date is already booked in database. Please select an available date.'}
+              Past Date: Please choose a current or future event date.
             </p>
-          )}
+          ) : eventDate && getDayAvailabilityStatus(eventDate, dbBookings, bookingSettings, scheduleOverrides).status === 'fully_booked' ? (
+            <p className="text-[11px] font-bold text-rose-600 mt-1 ml-2">
+              Fully Booked: All operational windows for this day are reserved. Please select another date.
+            </p>
+          ) : eventDate && getDayAvailabilityStatus(eventDate, dbBookings, bookingSettings, scheduleOverrides).status === 'closed' ? (
+            <p className="text-[11px] font-bold text-zinc-600 mt-1 ml-2">
+              Closed: System does not accept bookings on this date.
+            </p>
+          ) : null}
         </div>
       </div>
+
+      {/* Event Time Slot Selection (Operating Hours & Feasibility aware) */}
+      {(() => {
+        const opWindow = getOperatingWindowForDate(eventDate, bookingSettings, scheduleOverrides);
+        const openTime = opWindow.openTime || '08:00';
+        const closeTime = opWindow.closeTime === '00:00' && opWindow.isOpen ? '23:59' : (opWindow.closeTime || '23:00');
+
+        const hasSlotConflict = Boolean(slotFeasibility && !slotFeasibility.isAvailable);
+
+        const isStartBeforeOpen = opWindow.isOpen && Boolean(startTime) && timeToMinutes(startTime) < timeToMinutes(openTime);
+        const isStartAfterClose = opWindow.isOpen && Boolean(startTime) && timeToMinutes(startTime) >= timeToMinutes(closeTime);
+        const isStartOutOfRange = isStartBeforeOpen || isStartAfterClose;
+
+        const isEndAfterClose = opWindow.isOpen && Boolean(endTime) && timeToMinutes(endTime) > timeToMinutes(closeTime);
+        const isEndBeforeStart = Boolean(startTime && endTime) && timeToMinutes(endTime) <= timeToMinutes(startTime);
+        const isEndOutOfRange = isEndAfterClose || isEndBeforeStart;
+
+        const isStartInputError = isStartOutOfRange || hasSlotConflict;
+        const isEndInputError = isEndOutOfRange || hasSlotConflict;
+
+        const quickPresetSlots = ['09:00', '13:00', '15:00', '18:00'].filter((t) => {
+          if (!opWindow.isOpen) return false;
+          const m = timeToMinutes(t);
+          return m >= timeToMinutes(openTime) && m <= timeToMinutes(closeTime) - 60;
+        });
+
+        return (
+          <div className="bg-[var(--mist)] rounded-2xl p-4 border border-[#24252c]/[0.06] space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-[#24252c]/[0.08] pb-2.5">
+              <div>
+                <h4 className="text-xs font-extrabold uppercase tracking-wider text-[var(--ink)]">Event Schedule Window</h4>
+                <p className="text-[11px] text-[#24252c]/60">Select production start and conclusion times within daily operating hours.</p>
+              </div>
+              {opWindow.isOpen ? (
+                <span className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 px-2.5 py-1 rounded-full self-start sm:self-auto">
+                  Daily Operating Hours: {formatTimeAmPm(openTime)} – {formatTimeAmPm(closeTime)}
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-2.5 py-1 rounded-full self-start sm:self-auto">
+                  Closed for Bookings
+                </span>
+              )}
+            </div>
+
+            {!opWindow.isOpen && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
+                <IconBan className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{opWindow.reason || 'Bookings are not accepted on this date.'} Please select another event date above.</span>
+              </div>
+            )}
+
+            {/* Quick Preset Slots */}
+            {opWindow.isOpen && quickPresetSlots.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 mr-1">
+                  Quick Slots:
+                </span>
+                {quickPresetSlots.map((slot) => {
+                  const isSelected = startTime === slot;
+                  return (
+                    <button
+                      key={slot}
+                      type="button"
+                      onClick={() => {
+                        setStartTime(slot);
+                        const endMin = Math.min(timeToMinutes(slot) + 240, timeToMinutes(closeTime));
+                        setEndTime(minutesToTime(endMin));
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all border ${
+                        isSelected
+                          ? 'bg-[#1090F8] text-white border-[#1090F8] shadow-xs'
+                          : 'bg-white text-[var(--ink)] border-[#24252c]/10 hover:border-[#1090F8] hover:text-[#1090F8]'
+                      }`}
+                    >
+                      {formatTimeAmPm(slot)}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <div className="flex items-center justify-between ml-1 mb-1">
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-[#24252c]/60">
+                    Event Start Time <span className="text-rose-500">*</span>
+                  </label>
+                  {opWindow.isOpen && (
+                    <span className="text-[10px] text-[#24252c]/50 font-semibold">
+                      Min: {formatTimeAmPm(openTime)}
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="time"
+                  value={startTime}
+                  min={openTime}
+                  max={closeTime}
+                  disabled={!opWindow.isOpen}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  onBlur={() => {
+                    if (!startTime || !opWindow.isOpen) return;
+                    const sMin = timeToMinutes(startTime);
+                    const oMin = timeToMinutes(openTime);
+                    const cMin = timeToMinutes(closeTime);
+                    if (sMin < oMin) setStartTime(openTime);
+                    else if (sMin > cMin) setStartTime(closeTime);
+                  }}
+                  className={`w-full rounded-xl border px-4 py-2.5 text-sm font-bold shadow-2xs focus:outline-none transition-colors ${
+                    isStartInputError
+                      ? 'border-rose-400 bg-rose-50/70 text-rose-800 focus:border-rose-500'
+                      : 'border-white bg-white text-[var(--ink)] focus:border-[#1090F8]'
+                  } ${!opWindow.isOpen ? 'opacity-50 cursor-not-allowed bg-zinc-100' : ''}`}
+                  required
+                />
+                {isStartBeforeOpen && (
+                  <p className="text-[11px] font-bold text-rose-600 mt-1 ml-1 flex items-center gap-1.5">
+                    <IconBan className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    <span>Blocked: Cannot start before open time ({formatTimeAmPm(openTime)})</span>
+                  </p>
+                )}
+                {isStartAfterClose && (
+                  <p className="text-[11px] font-bold text-rose-600 mt-1 ml-1 flex items-center gap-1.5">
+                    <IconBan className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    <span>Blocked: Cannot start at or after close time ({formatTimeAmPm(closeTime)})</span>
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between ml-1 mb-1">
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-[#24252c]/60">
+                    Event End / Pack-up Time <span className="text-rose-500">*</span>
+                  </label>
+                  {opWindow.isOpen && (
+                    <span className="text-[10px] text-[#24252c]/50 font-semibold">
+                      Max: {formatTimeAmPm(closeTime)}
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="time"
+                  value={endTime}
+                  min={startTime && timeToMinutes(startTime) >= timeToMinutes(openTime) ? startTime : openTime}
+                  max={closeTime}
+                  disabled={!opWindow.isOpen}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  onBlur={() => {
+                    if (!endTime || !opWindow.isOpen) return;
+                    const eMin = timeToMinutes(endTime);
+                    const sMin = timeToMinutes(startTime);
+                    const cMin = timeToMinutes(closeTime);
+                    if (eMin > cMin) setEndTime(closeTime);
+                    else if (sMin && eMin <= sMin) {
+                      const fixedEnd = Math.min(sMin + 60, cMin);
+                      setEndTime(minutesToTime(fixedEnd));
+                    }
+                  }}
+                  className={`w-full rounded-xl border px-4 py-2.5 text-sm font-bold shadow-2xs focus:outline-none transition-colors ${
+                    isEndInputError
+                      ? 'border-rose-400 bg-rose-50/70 text-rose-800 focus:border-rose-500'
+                      : 'border-white bg-white text-[var(--ink)] focus:border-[#1090F8]'
+                  } ${!opWindow.isOpen ? 'opacity-50 cursor-not-allowed bg-zinc-100' : ''}`}
+                  required
+                />
+                {isEndAfterClose && (
+                  <p className="text-[11px] font-bold text-rose-600 mt-1 ml-1 flex items-center gap-1.5">
+                    <IconBan className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    <span>Blocked: Cannot extend past close time ({formatTimeAmPm(closeTime)})</span>
+                  </p>
+                )}
+                {isEndBeforeStart && (
+                  <p className="text-[11px] font-bold text-rose-600 mt-1 ml-1 flex items-center gap-1.5">
+                    <IconBan className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    <span>Blocked: End time must be later than start time</span>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Real-time Feasibility & Conflict Check Alert */}
+            {slotFeasibility && !slotFeasibility.isAvailable && (
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 space-y-2 animate-fadeIn">
+                <div className="flex items-start gap-2.5">
+                  <IconAlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <h5 className="text-xs font-bold text-rose-950 uppercase tracking-wide">
+                      Schedule Conflict on Selected Date
+                    </h5>
+                    <div className="space-y-1 mt-1">
+                      {slotFeasibility.conflicts.map((c, i) => (
+                        <div key={i} className="text-xs font-medium text-rose-800 leading-snug">
+                          <p>{c.message}</p>
+                          {c.suggestedAvailableTime && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (c.type === 'insufficient_turnaround' && c.conflictingBooking) {
+                                  const existEndStr = (c.conflictingBooking.end_time || '18:00').slice(0, 5);
+                                  if (timeToMinutes(startTime) >= timeToMinutes(existEndStr)) {
+                                    setStartTime(c.suggestedAvailableTime!);
+                                    const dur = Math.max(60, timeToMinutes(endTime) - timeToMinutes(startTime));
+                                    const newEnd = minutesToTime(Math.min(timeToMinutes(c.suggestedAvailableTime!) + dur, timeToMinutes(closeTime)));
+                                    setEndTime(newEnd);
+                                  } else {
+                                    setEndTime(c.suggestedAvailableTime!);
+                                  }
+                                }
+                              }}
+                              className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-rose-300 rounded-lg text-[11px] font-bold text-rose-900 hover:bg-rose-100/50 cursor-pointer shadow-2xs transition-colors"
+                            >
+                              <IconArrow className="w-3.5 h-3.5 text-rose-700" />
+                              <span>Auto-adjust time to {formatTimeAmPm(c.suggestedAvailableTime)}</span>
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {slotFeasibility && slotFeasibility.isAvailable && opWindow.isOpen && !isStartOutOfRange && !isEndOutOfRange && (
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs animate-fadeIn">
+                <div className="flex items-center gap-2">
+                  <span className="w-4 h-4 rounded-full bg-emerald-200 flex items-center justify-center text-emerald-800 shrink-0">
+                    <IconCheck className="w-2.5 h-2.5 stroke-[3]" />
+                  </span>
+                  <span className="font-bold text-emerald-950">
+                    Selected Time Slot is Available!
+                  </span>
+                </div>
+                <span className="text-[11px] font-semibold text-emerald-700">
+                  Meets required {bookingSettings.default_turnaround_hours}h rest &amp; turnaround gap
+                </span>
+              </div>
+            )}
+
+            {/* Dynamic Duration and Turnaround Buffer Note */}
+            <div className="flex flex-wrap items-center justify-between text-[11px] text-[#24252c]/70 pt-1">
+              <span>
+                Estimated Event Duration:{' '}
+                <strong className={isStartOutOfRange || isEndOutOfRange ? 'text-rose-600' : 'text-[var(--ink)]'}>
+                  {isStartOutOfRange || isEndOutOfRange
+                    ? 'Invalid range (outside operating hours)'
+                    : timeToMinutes(endTime) > timeToMinutes(startTime)
+                    ? `${((timeToMinutes(endTime) - timeToMinutes(startTime)) / 60).toFixed(1)} Hours`
+                    : 'Invalid range'}
+                </strong>
+              </span>
+              <span className="text-emerald-700 font-semibold inline-flex items-center gap-1">
+                <IconCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Constrained to operational window ({formatTimeAmPm(openTime)} – {formatTimeAmPm(closeTime)})</span>
+              </span>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Tell Me About Your Event */}
       <div>

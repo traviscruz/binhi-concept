@@ -14,6 +14,8 @@ import {
   IconShield,
   IconClock,
   IconAlertTriangle,
+  IconBan,
+  IconArrow,
 } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
@@ -22,7 +24,20 @@ import { BookingRescheduleCalendar } from '../../components/shared/BookingResche
 import { supabase } from '../../lib/supabase';
 import { logAuditEvent } from '../../utils/auditLogger';
 import { AssignCrewModal } from '../../components/admin/AssignCrewModal';
-import { formatDisplayDate } from '../../utils/bookingService';
+import { formatDisplayDate, normalizeDateToIso } from '../../utils/bookingService';
+import {
+  fetchBookingSettings,
+  fetchScheduleOverrides,
+  evaluateSlotFeasibility,
+  timeToMinutes,
+  minutesToTime,
+  formatTimeAmPm,
+  getOperatingWindowForDate,
+  parseRequestedTimesFromReason,
+  DEFAULT_BOOKING_SETTINGS,
+  type BookingSettings,
+  type ScheduleOverride,
+} from '../../utils/bookingEngine';
 import {
   sendCustomerRescheduleApproval,
   sendCustomerRescheduleRejection,
@@ -60,6 +75,10 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
   // ── Reschedule States ────────────────────────────────────────────────────
   const [rescheduleBooking, setRescheduleBooking] = useState<any | null>(null);
   const [newRescheduleDate, setNewRescheduleDate] = useState('');
+  const [directRescheduleStartTime, setDirectRescheduleStartTime] = useState('13:00');
+  const [directRescheduleEndTime, setDirectRescheduleEndTime] = useState('18:00');
+  const [adminBookingSettings, setAdminBookingSettings] = useState<BookingSettings>(DEFAULT_BOOKING_SETTINGS);
+  const [adminScheduleOverrides, setAdminScheduleOverrides] = useState<ScheduleOverride[]>([]);
   const [adminRescheduleNotes, setAdminRescheduleNotes] = useState('');
   const [reviewRescheduleBooking, setReviewRescheduleBooking] = useState<any | null>(null);
   const [isProcessingReschedule, setIsProcessingReschedule] = useState(false);
@@ -192,6 +211,8 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
               refundReferenceNumber: (b.cancellation_data?.refund_reference_number || b.refund_reference_number) || null,
               refundReceiptUrl: (b.cancellation_data?.refund_receipt_url || b.refund_receipt_url) || null,
               refundedAt: (b.cancellation_data?.refunded_at || b.refunded_at) || null,
+              startTime: (b.start_time || '13:00').slice(0, 5),
+              endTime: (b.end_time || '18:00').slice(0, 5),
             };
           })
         );
@@ -221,6 +242,81 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  useEffect(() => {
+    async function loadEngineSettings() {
+      try {
+        const [settings, overrides] = await Promise.all([
+          fetchBookingSettings(),
+          fetchScheduleOverrides(),
+        ]);
+        if (settings) setAdminBookingSettings(settings);
+        setAdminScheduleOverrides(overrides);
+      } catch (err) {
+        console.warn('Failed loading booking engine data in admin bookings:', err);
+      }
+    }
+    loadEngineSettings();
+  }, []);
+
+  const engineBookings = useMemo(() => {
+    return bookings.map((b) => ({
+      id: b.dbId,
+      event_date: (b.rawDate || '').split('T')[0],
+      start_time: (b.startTime || '13:00').slice(0, 5),
+      end_time: (b.endTime || '18:00').slice(0, 5),
+      package_name: b.package || 'Event Booking',
+      payment_status: b.rawStatus,
+      venue_address: b.venue,
+    }));
+  }, [bookings]);
+
+  const directRescheduleOpWindow = useMemo(() => {
+    if (!newRescheduleDate) return { isOpen: true, openTime: '08:00', closeTime: '23:00' };
+    const res = getOperatingWindowForDate(newRescheduleDate, adminBookingSettings, adminScheduleOverrides);
+    const openTime = res.openTime || '08:00';
+    const closeTime = res.closeTime === '00:00' && res.isOpen ? '23:59' : (res.closeTime || '23:00');
+    return { ...res, openTime, closeTime };
+  }, [newRescheduleDate, adminBookingSettings, adminScheduleOverrides]);
+
+  const directRescheduleFeasibility = useMemo(() => {
+    if (!newRescheduleDate || !directRescheduleStartTime || !directRescheduleEndTime) return null;
+    return evaluateSlotFeasibility({
+      targetDate: newRescheduleDate,
+      startTime: directRescheduleStartTime,
+      endTime: directRescheduleEndTime,
+      venueAddress: rescheduleBooking?.venue || 'Metro Manila',
+      existingBookings: engineBookings,
+      settings: adminBookingSettings,
+      overrides: adminScheduleOverrides,
+      excludeBookingId: rescheduleBooking?.dbId,
+    });
+  }, [newRescheduleDate, directRescheduleStartTime, directRescheduleEndTime, engineBookings, adminBookingSettings, adminScheduleOverrides, rescheduleBooking]);
+
+  const reviewCustomerTimes = useMemo(() => {
+    if (!reviewRescheduleBooking) return { startTime: '13:00', endTime: '18:00', cleanReason: '' };
+    const parsed = parseRequestedTimesFromReason(reviewRescheduleBooking.rescheduleReason);
+    return {
+      startTime: parsed.startTime || reviewRescheduleBooking.startTime || '13:00',
+      endTime: parsed.endTime || reviewRescheduleBooking.endTime || '18:00',
+      cleanReason: parsed.cleanReason || reviewRescheduleBooking.rescheduleReason,
+    };
+  }, [reviewRescheduleBooking]);
+
+  const reviewRescheduleFeasibility = useMemo(() => {
+    if (!reviewRescheduleBooking || !reviewRescheduleBooking.rescheduleRequestedDate) return null;
+    const targetDate = (reviewRescheduleBooking.rescheduleRequestedDate || '').slice(0, 10);
+    return evaluateSlotFeasibility({
+      targetDate,
+      startTime: reviewCustomerTimes.startTime,
+      endTime: reviewCustomerTimes.endTime,
+      venueAddress: reviewRescheduleBooking?.venue || 'Metro Manila',
+      existingBookings: engineBookings,
+      settings: adminBookingSettings,
+      overrides: adminScheduleOverrides,
+      excludeBookingId: reviewRescheduleBooking.dbId,
+    });
+  }, [reviewRescheduleBooking, reviewCustomerTimes, engineBookings, adminBookingSettings, adminScheduleOverrides]);
 
   // Reset pagination to page 1 whenever search, filter, or page size changes
   useEffect(() => {
@@ -457,10 +553,11 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
     return `Dear ${booking.customer},\n\nThank you for reaching out. Regrettably, our production crew and staging equipment are fully booked for your requested date (${reqDate}).\n\nYour reservation remains active and secured for your original scheduled date (${booking.date}). Please feel free to reply if you would like to explore alternative open dates.\n\nBest regards,\nBINHI Concept Production Team`;
   };
 
-  const getDirectRescheduleEmailTemplate = (booking: any, targetDate: string) => {
+  const getDirectRescheduleEmailTemplate = (booking: any, targetDate: string, startTime?: string, endTime?: string) => {
     if (!booking) return '';
     const dateStr = formatDisplayDate(targetDate);
-    return `Dear ${booking.customer},\n\nThis is an official notice that your event schedule for Booking #${booking.id} (${booking.package}) has been updated to ${dateStr} per our recent coordination.\n\nAll staging equipment, logistics, and crew assignments have been updated accordingly.\n\nWarm regards,\nBINHI Concept Production Team`;
+    const timeStr = startTime && endTime ? ` (${formatTimeAmPm(startTime)} – ${formatTimeAmPm(endTime)})` : '';
+    return `Dear ${booking.customer},\n\nThis is an official notice that your event schedule for Booking #${booking.id} (${booking.package}) has been updated to ${dateStr}${timeStr} per our recent coordination.\n\nAll staging equipment, logistics, and crew assignments have been updated accordingly.\n\nWarm regards,\nBINHI Concept Production Team`;
   };
 
   const handleApproveCustomerReschedule = async () => {
@@ -471,10 +568,15 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
       const newDateIso = reviewRescheduleBooking.rescheduleRequestedDate;
       const formattedNewDate = formatDisplayDate(newDateIso);
 
+      const targetStartTime = reviewCustomerTimes.startTime;
+      const targetEndTime = reviewCustomerTimes.endTime;
+
       const { error } = await supabase
         .from('bookings')
         .update({
           event_date: newDateIso,
+          start_time: targetStartTime,
+          end_time: targetEndTime,
           reschedule_status: 'approved',
           reschedule_reviewed_at: new Date().toISOString(),
           reschedule_admin_notes: adminRescheduleNotes.trim() || null,
@@ -489,9 +591,9 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         module: 'bookings',
         targetId: reviewRescheduleBooking.id,
         targetName: `${reviewRescheduleBooking.customer} - ${reviewRescheduleBooking.package}`,
-        details: `Approved reschedule for booking ${reviewRescheduleBooking.id} from "${oldDate}" to "${formattedNewDate}"`,
-        previousData: { event_date: oldDate },
-        currentData: { event_date: formattedNewDate },
+        details: `Approved reschedule for booking ${reviewRescheduleBooking.id} from "${oldDate}" to "${formattedNewDate} (${formatTimeAmPm(targetStartTime)} - ${formatTimeAmPm(targetEndTime)})"`,
+        previousData: { event_date: oldDate, start_time: reviewRescheduleBooking.startTime, end_time: reviewRescheduleBooking.endTime },
+        currentData: { event_date: formattedNewDate, start_time: targetStartTime, end_time: targetEndTime },
       });
 
       // Email customer
@@ -501,7 +603,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         bookingId: reviewRescheduleBooking.id,
         packageName: reviewRescheduleBooking.package,
         oldDate: oldDate,
-        newDate: formattedNewDate,
+        newDate: `${formattedNewDate} (${formatTimeAmPm(targetStartTime)} – ${formatTimeAmPm(targetEndTime)})`,
         venue: reviewRescheduleBooking.venue,
         adminNotes: adminRescheduleNotes.trim() || undefined,
         isDirectAdminReschedule: false,
@@ -574,6 +676,32 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
   const handleDirectAdminReschedule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rescheduleBooking || !newRescheduleDate) return;
+
+    if (timeToMinutes(directRescheduleEndTime) <= timeToMinutes(directRescheduleStartTime)) {
+      alert('Event End Time must be strictly after Start Time.');
+      return;
+    }
+
+    // Validate same-day start time has not already passed
+    const todayIso = normalizeDateToIso(new Date());
+    if (newRescheduleDate === todayIso) {
+      const now = new Date();
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      if (timeToMinutes(directRescheduleStartTime) <= currentMinutes) {
+        alert(
+          `Event start time (${formatTimeAmPm(directRescheduleStartTime)}) has already passed today. Please select a time slot after ${formatTimeAmPm(minutesToTime(currentMinutes))}.`
+        );
+        return;
+      }
+    }
+
+    if (directRescheduleFeasibility && !directRescheduleFeasibility.isAvailable) {
+      const confirmWarning = window.confirm(
+        `Scheduling / Turnaround Warning:\n${directRescheduleFeasibility.conflicts.map(c => `• ${c.message}`).join('\n')}\n\nDo you want to override and confirm this schedule anyway?`
+      );
+      if (!confirmWarning) return;
+    }
+
     setIsProcessingReschedule(true);
 
     try {
@@ -584,6 +712,8 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         .from('bookings')
         .update({
           event_date: newRescheduleDate,
+          start_time: directRescheduleStartTime,
+          end_time: directRescheduleEndTime,
           reschedule_status: 'approved',
           reschedule_reviewed_at: new Date().toISOString(),
           reschedule_admin_notes: adminRescheduleNotes.trim() || 'Directly rescheduled by System Administrator',
@@ -598,9 +728,9 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         module: 'bookings',
         targetId: rescheduleBooking.id,
         targetName: `${rescheduleBooking.customer} - ${rescheduleBooking.package}`,
-        details: `Directly rescheduled booking ${rescheduleBooking.id} from "${oldDate}" to "${formattedNewDate}"`,
-        previousData: { event_date: oldDate },
-        currentData: { event_date: formattedNewDate },
+        details: `Directly rescheduled booking ${rescheduleBooking.id} from "${oldDate}" to "${formattedNewDate} (${formatTimeAmPm(directRescheduleStartTime)} - ${formatTimeAmPm(directRescheduleEndTime)})"`,
+        previousData: { event_date: oldDate, start_time: rescheduleBooking.startTime, end_time: rescheduleBooking.endTime },
+        currentData: { event_date: formattedNewDate, start_time: directRescheduleStartTime, end_time: directRescheduleEndTime },
       });
 
       // Email customer
@@ -610,7 +740,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         bookingId: rescheduleBooking.id,
         packageName: rescheduleBooking.package,
         oldDate: oldDate,
-        newDate: formattedNewDate,
+        newDate: `${formattedNewDate} (${formatTimeAmPm(directRescheduleStartTime)} – ${formatTimeAmPm(directRescheduleEndTime)})`,
         venue: rescheduleBooking.venue,
         adminNotes: adminRescheduleNotes.trim() || 'Rescheduled per production logistics update.',
         isDirectAdminReschedule: true,
@@ -844,7 +974,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         refundReceiptUrl: receiptUrl || undefined,
         adminNotes: refundAdminNotes.trim() || undefined,
         isPayMongoRefund: finalChannel.toLowerCase().includes('paymongo'),
-        isDirectAdminCancel: false,
+        isDirectAdminCancellation: false,
       });
 
       setRescheduleToast(`Cancellation approved & refund processed (${refundAmountFormatted}) for #${reviewCancellationBooking.id}! Customer emailed.`);
@@ -1064,7 +1194,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         refundReceiptUrl: receiptUrl || undefined,
         adminNotes: refundAdminNotes.trim() || undefined,
         isPayMongoRefund: finalChannel.toLowerCase().includes('paymongo'),
-        isDirectAdminCancel: true,
+        isDirectAdminCancellation: true,
       });
 
       setRescheduleToast(`Booking #${adminCancelAndRefundBooking.id} cancelled & refund processed (${refundAmountFormatted})! Customer notified via email.`);
@@ -1730,7 +1860,11 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                                         setRescheduleBooking(row);
                                         const targetDate = row.rawDate ? row.rawDate.slice(0, 10) : '';
                                         setNewRescheduleDate(targetDate);
-                                        setAdminRescheduleNotes(getDirectRescheduleEmailTemplate(row, targetDate));
+                                        const sTime = (row.startTime || '13:00').slice(0, 5);
+                                        const eTime = (row.endTime || '18:00').slice(0, 5);
+                                        setDirectRescheduleStartTime(sTime);
+                                        setDirectRescheduleEndTime(eTime);
+                                        setAdminRescheduleNotes(getDirectRescheduleEmailTemplate(row, targetDate, sTime, eTime));
                                       }}
                                       className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-[var(--mist)] flex items-center gap-2.5 transition-colors cursor-pointer"
                                     >
@@ -2135,7 +2269,11 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                               setRescheduleBooking(row);
                               const targetDate = row.rawDate ? row.rawDate.slice(0, 10) : '';
                               setNewRescheduleDate(targetDate);
-                              setAdminRescheduleNotes(getDirectRescheduleEmailTemplate(row, targetDate));
+                              const sTime = (row.startTime || '13:00').slice(0, 5);
+                              const eTime = (row.endTime || '18:00').slice(0, 5);
+                              setDirectRescheduleStartTime(sTime);
+                              setDirectRescheduleEndTime(eTime);
+                              setAdminRescheduleNotes(getDirectRescheduleEmailTemplate(row, targetDate, sTime, eTime));
                             }}
                             className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-[var(--mist)] flex items-center gap-2.5 transition-colors cursor-pointer"
                           >
@@ -2313,17 +2451,25 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                     <span className="font-bold text-xs text-amber-900 line-through opacity-75 inline-block bg-amber-100/60 px-2.5 py-1 rounded-lg">
                       {reviewRescheduleBooking.date}
                     </span>
+                    {reviewRescheduleBooking.startTime && (
+                      <span className="text-[10px] text-amber-900/70 block">
+                        ({formatTimeAmPm(reviewRescheduleBooking.startTime)} – {formatTimeAmPm(reviewRescheduleBooking.endTime)})
+                      </span>
+                    )}
                   </div>
                   <div className="hidden sm:flex items-center justify-center w-8 h-8 rounded-full bg-amber-200/80 text-amber-800 font-black text-sm shrink-0">
-                    →
+                    <IconArrow className="w-4 h-4" />
                   </div>
-                  <div className="space-y-1.5 sm:text-right">
+                  <div className="space-y-1 sm:text-right">
                     <span className="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider block">
-                      Requested New Date
+                      Requested New Schedule
                     </span>
                     <span className="font-black text-sm text-amber-950 bg-amber-200 px-3.5 py-1.5 rounded-full border border-amber-400/70 shadow-xs inline-block">
                       {formatDisplayDate(reviewRescheduleBooking.rescheduleRequestedDate)}
                     </span>
+                    <div className="text-[11px] font-bold text-amber-900 pt-0.5">
+                      Time: {formatTimeAmPm(reviewCustomerTimes.startTime)} – {formatTimeAmPm(reviewCustomerTimes.endTime)}
+                    </div>
                   </div>
                 </div>
 
@@ -2333,9 +2479,42 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                     Customer's Reason / Request Message:
                   </label>
                   <div className="p-3.5 rounded-2xl bg-white border border-[#24252c]/15 text-xs text-[var(--ink)] italic">
-                    "{reviewRescheduleBooking.rescheduleReason || 'No specific reason provided.'}"
+                    "{reviewCustomerTimes.cleanReason || 'No specific reason provided.'}"
                   </div>
                 </div>
+
+                {/* Feasibility Assessment for Requested Slot */}
+                {reviewRescheduleFeasibility && (
+                  <div>
+                    {reviewRescheduleFeasibility.isAvailable ? (
+                      <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-emerald-200 text-emerald-800 flex items-center justify-center shrink-0">
+                          <IconCheck className="w-3.5 h-3.5" />
+                        </span>
+                        <div>
+                          <strong className="block font-bold">Crew Turnaround Gap &amp; Operating Hours Verified</strong>
+                          <span className="text-[11px] text-emerald-800">
+                            Requested slot ({formatTimeAmPm(reviewCustomerTimes.startTime)} – {formatTimeAmPm(reviewCustomerTimes.endTime)}) has minimum rest buffer clear for this date.
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-amber-200 text-amber-900 flex items-center justify-center shrink-0">
+                            <IconAlertTriangle className="w-3.5 h-3.5" />
+                          </span>
+                          <strong className="font-bold">Turnaround Gap / Scheduling Alert on Requested Slot:</strong>
+                        </div>
+                        <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-900 pl-1">
+                          {reviewRescheduleFeasibility.conflicts.map((c, idx) => (
+                            <li key={idx}>{c.message}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Live Calendar Availability Preview */}
                 <div>
@@ -2466,7 +2645,14 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                 <div className="p-3.5 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.06] flex items-center justify-between">
                   <div>
                     <span className="text-[10px] font-bold uppercase text-[#24252c]/50 block">Current Schedule</span>
-                    <span className="font-extrabold text-sm text-[var(--ink)]">{rescheduleBooking.date}</span>
+                    <span className="font-extrabold text-sm text-[var(--ink)]">
+                      {rescheduleBooking.date}
+                    </span>
+                    {rescheduleBooking.startTime && (
+                      <span className="text-[10px] text-[#24252c]/60 block font-medium">
+                        ({formatTimeAmPm(rescheduleBooking.startTime)} – {formatTimeAmPm(rescheduleBooking.endTime)})
+                      </span>
+                    )}
                   </div>
                   <div className="text-right">
                     <span className="font-bold text-xs text-[var(--ink)] block">{rescheduleBooking.customer}</span>
@@ -2481,7 +2667,9 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                     selectedDate={newRescheduleDate}
                     onSelectDate={(d) => {
                       setNewRescheduleDate(d);
-                      setAdminRescheduleNotes(getDirectRescheduleEmailTemplate(rescheduleBooking, d));
+                      setAdminRescheduleNotes(
+                        getDirectRescheduleEmailTemplate(rescheduleBooking, d, directRescheduleStartTime, directRescheduleEndTime)
+                      );
                     }}
                     excludeBookingId={rescheduleBooking.dbId}
                   />
@@ -2494,6 +2682,162 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                     <span className="font-extrabold text-xs text-[#1090F8] bg-white px-3 py-1 rounded-full border border-blue-300 shadow-2xs">
                       {formatDisplayDate(newRescheduleDate)}
                     </span>
+                  </div>
+                )}
+
+                {/* Event Schedule Window & Time Selection */}
+                {newRescheduleDate && (
+                  <div className="p-4 rounded-2xl bg-[#F8F9FA] border border-[#24252c]/10 space-y-3.5">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <IconClock className="w-4 h-4 text-[#1090F8]" />
+                        <span className="text-[11px] font-bold uppercase text-[var(--ink)] tracking-wider">
+                          Event Schedule Window
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            directRescheduleOpWindow.isOpen
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                              : 'bg-rose-50 text-rose-800 border-rose-300'
+                          }`}
+                        >
+                          {directRescheduleOpWindow.isOpen
+                            ? `Operating Hours: ${formatTimeAmPm(directRescheduleOpWindow.openTime)} - ${formatTimeAmPm(directRescheduleOpWindow.closeTime)}`
+                            : 'Closed on this Date'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Quick Preset Buttons */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <span className="text-[10px] text-[#24252c]/50 font-bold uppercase mr-1">Quick Presets:</span>
+                      {[
+                        { label: 'Afternoon (1 PM - 6 PM)', s: '13:00', e: '18:00' },
+                        { label: 'Morning (9 AM - 2 PM)', s: '09:00', e: '14:00' },
+                        { label: 'Evening (4 PM - 9 PM)', s: '16:00', e: '21:00' },
+                        { label: 'Full Day (10 AM - 6 PM)', s: '10:00', e: '18:00' },
+                      ].map((preset) => {
+                        const isMatch = directRescheduleStartTime === preset.s && directRescheduleEndTime === preset.e;
+                        return (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() => {
+                              setDirectRescheduleStartTime(preset.s);
+                              setDirectRescheduleEndTime(preset.e);
+                              setAdminRescheduleNotes(
+                                getDirectRescheduleEmailTemplate(rescheduleBooking, newRescheduleDate, preset.s, preset.e)
+                              );
+                            }}
+                            className={`text-[10px] font-bold px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+                              isMatch
+                                ? 'bg-[var(--ink)] text-white border-[var(--ink)] shadow-2xs'
+                                : 'bg-white text-[var(--ink)] border-black/10 hover:border-black/25'
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Time Inputs Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <label className="text-[10px] font-bold uppercase text-[#24252c]/60 block mb-1">
+                          Start Time <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="time"
+                          value={directRescheduleStartTime}
+                          min={directRescheduleOpWindow.openTime}
+                          max={directRescheduleOpWindow.closeTime}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setDirectRescheduleStartTime(val);
+                            setAdminRescheduleNotes(
+                              getDirectRescheduleEmailTemplate(rescheduleBooking, newRescheduleDate, val, directRescheduleEndTime)
+                            );
+                          }}
+                          className="w-full rounded-xl border border-black/10 px-3 py-2 bg-white text-xs font-semibold text-[var(--ink)] focus:outline-none focus:border-[#1090F8] transition-colors"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold uppercase text-[#24252c]/60 block mb-1">
+                          End Time <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="time"
+                          value={directRescheduleEndTime}
+                          min={directRescheduleStartTime || directRescheduleOpWindow.openTime}
+                          max={directRescheduleOpWindow.closeTime}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setDirectRescheduleEndTime(val);
+                            setAdminRescheduleNotes(
+                              getDirectRescheduleEmailTemplate(rescheduleBooking, newRescheduleDate, directRescheduleStartTime, val)
+                            );
+                          }}
+                          className="w-full rounded-xl border border-black/10 px-3 py-2 bg-white text-xs font-semibold text-[var(--ink)] focus:outline-none focus:border-[#1090F8] transition-colors"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    {/* Duration Info Pill */}
+                    {directRescheduleStartTime && directRescheduleEndTime && (
+                      <div className="flex items-center justify-between text-[11px] px-1 text-[#24252c]/70">
+                        <span>Event Duration:</span>
+                        <span className="font-bold text-[var(--ink)]">
+                          {(() => {
+                            const diffMin = timeToMinutes(directRescheduleEndTime) - timeToMinutes(directRescheduleStartTime);
+                            if (diffMin <= 0) return 'Invalid time range (End must be after start)';
+                            const hrs = Math.floor(diffMin / 60);
+                            const mins = diffMin % 60;
+                            return `${hrs > 0 ? `${hrs} hr${hrs > 1 ? 's' : ''}` : ''}${mins > 0 ? ` ${mins} min` : ''} (${formatTimeAmPm(directRescheduleStartTime)} - ${formatTimeAmPm(directRescheduleEndTime)})`;
+                          })()}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Real-time Feasibility & Minimum Rest / Turnaround Gap Feedback */}
+                    {directRescheduleFeasibility && (
+                      <div className="pt-1">
+                        {directRescheduleFeasibility.isAvailable ? (
+                          <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-emerald-200 text-emerald-800 flex items-center justify-center shrink-0">
+                              <IconCheck className="w-3.5 h-3.5" />
+                            </span>
+                            <div>
+                              <strong className="block font-bold">Time Slot Confirmed Available</strong>
+                              <span className="text-[11px] text-emerald-800">
+                                Required minimum turnaround buffer is clear. No conflicts with other events.
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-1.5">
+                            <div className="flex items-center gap-2">
+                              <span className="w-5 h-5 rounded-full bg-amber-200 text-amber-800 flex items-center justify-center shrink-0">
+                                <IconAlertTriangle className="w-3.5 h-3.5" />
+                              </span>
+                              <strong className="font-bold text-amber-950">
+                                Schedule Notice / Turnaround Gap Warning
+                              </strong>
+                            </div>
+                            <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-900 pl-1">
+                              {directRescheduleFeasibility.conflicts.map((c, idx) => (
+                                <li key={idx}>{c.message}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2515,7 +2859,12 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                         type="button"
                         onClick={() =>
                           setAdminRescheduleNotes(
-                            getDirectRescheduleEmailTemplate(rescheduleBooking, newRescheduleDate || rescheduleBooking.rawDate)
+                            getDirectRescheduleEmailTemplate(
+                              rescheduleBooking,
+                              newRescheduleDate || rescheduleBooking.rawDate,
+                              directRescheduleStartTime,
+                              directRescheduleEndTime
+                            )
                           )
                         }
                         className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-blue-50 text-[#1090F8] border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
@@ -2526,7 +2875,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                         type="button"
                         onClick={() =>
                           setAdminRescheduleNotes(
-                            `Dear ${rescheduleBooking.customer},\n\nAs discussed during our phone coordination regarding Booking #${rescheduleBooking.id}, your event date has been moved to ${formatDisplayDate(newRescheduleDate || rescheduleBooking.rawDate)}. All equipment inclusions and crew assignments remain secured.\n\nWarm regards,\nBINHI Concept Production Team`
+                            `Dear ${rescheduleBooking.customer},\n\nAs discussed during our phone coordination regarding Booking #${rescheduleBooking.id}, your event date has been moved to ${formatDisplayDate(newRescheduleDate || rescheduleBooking.rawDate)} (${formatTimeAmPm(directRescheduleStartTime)} – ${formatTimeAmPm(directRescheduleEndTime)}). All equipment inclusions and crew assignments remain secured.\n\nWarm regards,\nBINHI Concept Production Team`
                           )
                         }
                         className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors cursor-pointer"

@@ -1,12 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconTicket, IconCalendar, IconPin, IconX, IconPrinter, IconCheck, IconShield, IconClock, IconAlertTriangle } from '../../components/shared/icons';
+import { IconTicket, IconCalendar, IconPin, IconX, IconPrinter, IconCheck, IconShield, IconClock, IconAlertTriangle, IconBan } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { BookingRescheduleCalendar } from '../../components/shared/BookingRescheduleCalendar';
 import { supabase } from '../../lib/supabase';
-import { formatDisplayDate } from '../../utils/bookingService';
+import { formatDisplayDate, fetchDbBookedDates, normalizeDateToIso, type DBBooking } from '../../utils/bookingService';
 import { sendAdminRescheduleAlert, sendAdminCancellationAlert } from '../../utils/emailService';
 import { createPaymongoCheckoutSession } from '../../utils/paymongoPayment';
 import {
@@ -15,6 +15,18 @@ import {
   loadCancellationPolicy,
   calculateCancellationRefund,
 } from '../../utils/cancellationPolicy';
+import {
+  fetchBookingSettings,
+  fetchScheduleOverrides,
+  evaluateSlotFeasibility,
+  timeToMinutes,
+  minutesToTime,
+  formatTimeAmPm,
+  getOperatingWindowForDate,
+  DEFAULT_BOOKING_SETTINGS,
+  type BookingSettings,
+  type ScheduleOverride,
+} from '../../utils/bookingEngine';
 
 export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
   const [historyItems, setHistoryItems] = useState<any[]>([]);
@@ -28,10 +40,15 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
   // Reschedule Request Modal States
   const [rescheduleTargetItem, setRescheduleTargetItem] = useState<any | null>(null);
   const [newRescheduleDate, setNewRescheduleDate] = useState('');
+  const [newRescheduleStartTime, setNewRescheduleStartTime] = useState('13:00');
+  const [newRescheduleEndTime, setNewRescheduleEndTime] = useState('18:00');
   const [rescheduleReason, setRescheduleReason] = useState('');
   const [submittingReschedule, setSubmittingReschedule] = useState(false);
   const [rescheduleSuccessToast, setRescheduleSuccessToast] = useState(false);
   const [rescheduleError, setRescheduleError] = useState('');
+  const [dbBookings, setDbBookings] = useState<DBBooking[]>([]);
+  const [bookingSettings, setBookingSettings] = useState<BookingSettings>(DEFAULT_BOOKING_SETTINGS);
+  const [scheduleOverrides, setScheduleOverrides] = useState<ScheduleOverride[]>([]);
 
   // Cancellation & Refund Modal States
   const [cancellationTargetItem, setCancellationTargetItem] = useState<any | null>(null);
@@ -44,6 +61,45 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
   useEffect(() => {
     loadCancellationPolicy().then(setCancellationPolicy).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    async function loadEngineData() {
+      try {
+        const [settings, overrides, bookedDates] = await Promise.all([
+          fetchBookingSettings(),
+          fetchScheduleOverrides(),
+          fetchDbBookedDates(),
+        ]);
+        if (settings) setBookingSettings(settings);
+        setScheduleOverrides(overrides);
+        setDbBookings(bookedDates);
+      } catch (err) {
+        console.warn('Failed loading booking engine data in history page:', err);
+      }
+    }
+    loadEngineData();
+  }, []);
+
+  const rescheduleOpWindow = useMemo(() => {
+    const res = getOperatingWindowForDate(newRescheduleDate, bookingSettings, scheduleOverrides);
+    const openTime = res.openTime || '08:00';
+    const closeTime = res.closeTime === '00:00' && res.isOpen ? '23:59' : (res.closeTime || '23:00');
+    return { ...res, openTime, closeTime };
+  }, [newRescheduleDate, bookingSettings, scheduleOverrides]);
+
+  const rescheduleFeasibility = useMemo(() => {
+    if (!newRescheduleDate || !newRescheduleStartTime || !newRescheduleEndTime) return null;
+    return evaluateSlotFeasibility({
+      targetDate: newRescheduleDate,
+      startTime: newRescheduleStartTime,
+      endTime: newRescheduleEndTime,
+      venueAddress: rescheduleTargetItem?.venue || 'Metro Manila',
+      existingBookings: dbBookings,
+      settings: bookingSettings,
+      overrides: scheduleOverrides,
+      excludeBookingId: rescheduleTargetItem?.dbId || undefined,
+    });
+  }, [newRescheduleDate, newRescheduleStartTime, newRescheduleEndTime, rescheduleTargetItem, dbBookings, bookingSettings, scheduleOverrides]);
 
   const fetchHistory = async () => {
     setLoading(true);
@@ -128,6 +184,8 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
               refundReferenceNumber: (b.cancellation_data?.refund_reference_number || b.refund_reference_number) || null,
               refundReceiptUrl: (b.cancellation_data?.refund_receipt_url || b.refund_receipt_url) || null,
               refundedAt: (b.cancellation_data?.refunded_at || b.refunded_at) || null,
+              startTime: (b.start_time || '13:00').slice(0, 5),
+              endTime: (b.end_time || '18:00').slice(0, 5),
             };
           })
         );
@@ -161,6 +219,8 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
   const handleOpenRescheduleModal = (item: any) => {
     setRescheduleTargetItem(item);
     setNewRescheduleDate('');
+    setNewRescheduleStartTime((item.startTime || '13:00').slice(0, 5));
+    setNewRescheduleEndTime((item.endTime || '18:00').slice(0, 5));
     setRescheduleReason('');
     setRescheduleError('');
   };
@@ -176,6 +236,33 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
       setRescheduleError('The new date cannot be the same as your currently scheduled event date.');
       return;
     }
+    if (!newRescheduleStartTime || !newRescheduleEndTime) {
+      setRescheduleError('Please select both start and end times for your event.');
+      return;
+    }
+    if (timeToMinutes(newRescheduleEndTime) <= timeToMinutes(newRescheduleStartTime)) {
+      setRescheduleError('Event end time must be after the start time.');
+      return;
+    }
+
+    // Validate same-day start time has not already passed
+    const todayIso = normalizeDateToIso(new Date());
+    if (newRescheduleDate === todayIso) {
+      const now = new Date();
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      if (timeToMinutes(newRescheduleStartTime) <= currentMinutes) {
+        setRescheduleError(
+          `Event start time (${formatTimeAmPm(newRescheduleStartTime)}) has already passed today. Please select a time slot after ${formatTimeAmPm(minutesToTime(currentMinutes))}.`
+        );
+        return;
+      }
+    }
+
+    if (rescheduleFeasibility && !rescheduleFeasibility.isAvailable) {
+      const firstConflict = rescheduleFeasibility.conflicts[0]?.message || 'Selected time slot conflicts with existing production schedules or operating hours.';
+      setRescheduleError(`Scheduling Conflict: ${firstConflict}`);
+      return;
+    }
     if (!rescheduleReason.trim()) {
       setRescheduleError('Please enter a reason or note for your reschedule request.');
       return;
@@ -187,13 +274,16 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
 
+      const timeTag = `[Requested Time: ${formatTimeAmPm(newRescheduleStartTime)} – ${formatTimeAmPm(newRescheduleEndTime)}]`;
+      const combinedReason = `${timeTag} ${rescheduleReason.trim()}`;
+
       // 1. Update booking in database
       const { error: dbError } = await supabase
         .from('bookings')
         .update({
           reschedule_status: 'pending',
           reschedule_requested_date: newRescheduleDate,
-          reschedule_reason: rescheduleReason.trim(),
+          reschedule_reason: combinedReason,
           reschedule_requested_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
@@ -209,8 +299,8 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
         customerPhone: rescheduleTargetItem.customerPhone || '',
         packageName: rescheduleTargetItem.package,
         originalDate: rescheduleTargetItem.date,
-        requestedDate: formatDisplayDate(newRescheduleDate),
-        reason: rescheduleReason.trim(),
+        requestedDate: `${formatDisplayDate(newRescheduleDate)} (${formatTimeAmPm(newRescheduleStartTime)} – ${formatTimeAmPm(newRescheduleEndTime)})`,
+        reason: combinedReason,
         venue: rescheduleTargetItem.venue,
       });
 
@@ -904,7 +994,7 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                         setRescheduleError('');
                       }}
                       excludeBookingId={rescheduleTargetItem.dbId}
-                      minDateOffsetDays={1}
+                      minDateOffsetDays={0}
                     />
                   </div>
 
@@ -915,6 +1005,154 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                       <span className="font-extrabold text-xs text-[#1090F8] bg-white px-3 py-1 rounded-full border border-blue-300 shadow-2xs">
                         {formatDisplayDate(newRescheduleDate)}
                       </span>
+                    </div>
+                  )}
+
+                  {/* Event Schedule Window & Time Selection */}
+                  {newRescheduleDate && (
+                    <div className="p-4 rounded-2xl bg-[#F8F9FA] border border-[#24252c]/10 space-y-3.5">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <IconClock className="w-4 h-4 text-[#1090F8]" />
+                          <span className="text-[11px] font-bold uppercase text-[var(--ink)] tracking-wider">
+                            Event Schedule Window
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              rescheduleOpWindow.isOpen
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                : 'bg-rose-50 text-rose-800 border-rose-300'
+                            }`}
+                          >
+                            {rescheduleOpWindow.isOpen
+                              ? `Operating Hours: ${formatTimeAmPm(rescheduleOpWindow.openTime)} - ${formatTimeAmPm(rescheduleOpWindow.closeTime)}`
+                              : 'Closed on this Date'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Quick Preset Buttons */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <span className="text-[10px] text-[#24252c]/50 font-bold uppercase mr-1">Quick Presets:</span>
+                        {[
+                          { label: 'Afternoon (1 PM - 6 PM)', s: '13:00', e: '18:00' },
+                          { label: 'Morning (9 AM - 2 PM)', s: '09:00', e: '14:00' },
+                          { label: 'Evening (4 PM - 9 PM)', s: '16:00', e: '21:00' },
+                          { label: 'Full Day (10 AM - 6 PM)', s: '10:00', e: '18:00' },
+                        ].map((preset) => {
+                          const isMatch = newRescheduleStartTime === preset.s && newRescheduleEndTime === preset.e;
+                          return (
+                            <button
+                              key={preset.label}
+                              type="button"
+                              onClick={() => {
+                                setNewRescheduleStartTime(preset.s);
+                                setNewRescheduleEndTime(preset.e);
+                                setRescheduleError('');
+                              }}
+                              className={`text-[10px] font-bold px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+                                isMatch
+                                  ? 'bg-[var(--ink)] text-white border-[var(--ink)] shadow-2xs'
+                                  : 'bg-white text-[var(--ink)] border-black/10 hover:border-black/25'
+                              }`}
+                            >
+                              {preset.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Time Inputs Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label className="text-[10px] font-bold uppercase text-[#24252c]/60 block mb-1">
+                            Start Time <span className="text-rose-500">*</span>
+                          </label>
+                          <input
+                            type="time"
+                            value={newRescheduleStartTime}
+                            min={rescheduleOpWindow.openTime}
+                            max={rescheduleOpWindow.closeTime}
+                            onChange={(e) => {
+                              setNewRescheduleStartTime(e.target.value);
+                              setRescheduleError('');
+                            }}
+                            className="w-full rounded-xl border border-black/10 px-3 py-2 bg-white text-xs font-semibold text-[var(--ink)] focus:outline-none focus:border-[#1090F8] transition-colors"
+                            required
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold uppercase text-[#24252c]/60 block mb-1">
+                            End Time <span className="text-rose-500">*</span>
+                          </label>
+                          <input
+                            type="time"
+                            value={newRescheduleEndTime}
+                            min={newRescheduleStartTime || rescheduleOpWindow.openTime}
+                            max={rescheduleOpWindow.closeTime}
+                            onChange={(e) => {
+                              setNewRescheduleEndTime(e.target.value);
+                              setRescheduleError('');
+                            }}
+                            className="w-full rounded-xl border border-black/10 px-3 py-2 bg-white text-xs font-semibold text-[var(--ink)] focus:outline-none focus:border-[#1090F8] transition-colors"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Duration Info Pill */}
+                      {newRescheduleStartTime && newRescheduleEndTime && (
+                        <div className="flex items-center justify-between text-[11px] px-1 text-[#24252c]/70">
+                          <span>Event Duration:</span>
+                          <span className="font-bold text-[var(--ink)]">
+                            {(() => {
+                              const diffMin = timeToMinutes(newRescheduleEndTime) - timeToMinutes(newRescheduleStartTime);
+                              if (diffMin <= 0) return 'Invalid time range (End must be after start)';
+                              const hrs = Math.floor(diffMin / 60);
+                              const mins = diffMin % 60;
+                              return `${hrs > 0 ? `${hrs} hr${hrs > 1 ? 's' : ''}` : ''}${mins > 0 ? ` ${mins} min` : ''} (${formatTimeAmPm(newRescheduleStartTime)} - ${formatTimeAmPm(newRescheduleEndTime)})`;
+                            })()}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Real-time Feasibility & Minimum Rest / Turnaround Gap Feedback */}
+                      {rescheduleFeasibility && (
+                        <div className="pt-1">
+                          {rescheduleFeasibility.isAvailable ? (
+                            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center gap-2">
+                              <span className="w-5 h-5 rounded-full bg-emerald-200 text-emerald-800 flex items-center justify-center shrink-0">
+                                <IconCheck className="w-3.5 h-3.5" />
+                              </span>
+                              <div>
+                                <strong className="block font-bold">Time Slot Confirmed Available</strong>
+                                <span className="text-[11px] text-emerald-800">
+                                  Required crew turnaround buffer is clear. No conflicts with other events.
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-1.5">
+                              <div className="flex items-center gap-2">
+                                <span className="w-5 h-5 rounded-full bg-amber-200 text-amber-800 flex items-center justify-center shrink-0">
+                                  <IconAlertTriangle className="w-3.5 h-3.5" />
+                                </span>
+                                <strong className="font-bold text-amber-950">
+                                  Schedule Notice / Turnaround Gap Warning
+                                </strong>
+                              </div>
+                              <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-900 pl-1">
+                                {rescheduleFeasibility.conflicts.map((c, idx) => (
+                                  <li key={idx}>{c.message}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 
