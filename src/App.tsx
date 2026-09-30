@@ -234,6 +234,7 @@ export default function App() {
       p === 'wishlist' ||
       p === 'loyalty' ||
       p === 'review-submit' ||
+      p === 'my-reviews' ||
       p === 'profile'
     ) {
       setIsCustomerSession(true);
@@ -464,7 +465,7 @@ export default function App() {
           />
         )}
         {page === 'loyalty' && <LoyaltyPage go={go} />}
-        {page === 'review-submit' && <MyReviewsPage go={go} />}
+        {(page === 'review-submit' || page === 'my-reviews') && <MyReviewsPage go={go} />}
         {page === 'profile' && <ProfilePage go={go} />}
       </main>
 

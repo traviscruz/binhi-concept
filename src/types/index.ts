@@ -21,6 +21,7 @@ export type Page =
   | 'wishlist'
   | 'loyalty'
   | 'review-submit'
+  | 'my-reviews'
   | 'profile'
   | 'inventory-dashboard'
   | 'inventory-items'

@@ -192,7 +192,7 @@ export function PackageReviewsSection({
 
         <button
           type="button"
-          onClick={() => go(isCustomer ? 'my-reviews' : 'login')}
+          onClick={() => go(isCustomer ? 'review-submit' : 'login')}
           className="self-start md:self-auto bg-[var(--ink)] text-white text-xs font-bold px-5 py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors inline-flex items-center gap-2 shadow-sm cursor-pointer"
         >
           <span>Share Your Event Experience</span>
