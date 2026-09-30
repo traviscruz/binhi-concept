@@ -12,9 +12,22 @@ import {
   IconEnvelope,
   IconTruck,
   IconFileSpreadsheet,
+  IconAlertTriangle,
+  IconInfo,
+  IconX,
 } from '../../components/shared/icons';
+import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { supabase } from '../../utils/supabase';
 import { formatDisplayDate, normalizeDateToIso } from '../../utils/bookingService';
+import {
+  runSystemHealthDiagnostics,
+  resolveSystemError,
+  clearResolvedErrors,
+  retryFailedEmail,
+  type ServiceHealthItem,
+  type SystemErrorLog,
+  type HealthStatus,
+} from '../../utils/systemHealthService';
 
 interface DashboardStats {
   totalRevenue: number;
@@ -76,6 +89,68 @@ export default function AdminDashboard({ go }: { go: (p: Page) => void }) {
   const [pendingBookings, setPendingBookings] = useState<PendingBookingItem[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEventItem[]>([]);
   const [recentActivities, setRecentActivities] = useState<RecentActivityItem[]>([]);
+
+  // System Health & Diagnostics State
+  const [healthServices, setHealthServices] = useState<ServiceHealthItem[]>([]);
+  const [errorLogs, setErrorLogs] = useState<SystemErrorLog[]>([]);
+  const [overallHealth, setOverallHealth] = useState<HealthStatus>('operational');
+  const [lastDiagnosticsRun, setLastDiagnosticsRun] = useState<string>('');
+  const [runningDiagnostics, setRunningDiagnostics] = useState<boolean>(false);
+  const [selectedErrorForModal, setSelectedErrorForModal] = useState<SystemErrorLog | null>(null);
+  const [errorFilter, setErrorFilter] = useState<'all' | 'payment_webhook' | 'database' | 'email_sms'>('all');
+  const [retryingErrorId, setRetryingErrorId] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const loadHealthData = async () => {
+    setRunningDiagnostics(true);
+    try {
+      const diag = await runSystemHealthDiagnostics();
+      setHealthServices(diag.services);
+      setErrorLogs(diag.errorLogs);
+      setOverallHealth(diag.overallHealth);
+      setLastDiagnosticsRun(diag.testedAt);
+    } catch (err) {
+      console.warn('Diagnostics error:', err);
+    } finally {
+      setRunningDiagnostics(false);
+    }
+  };
+
+  const handleResolveLog = (id: string) => {
+    resolveSystemError(id);
+    setErrorLogs((prev) =>
+      prev.map((e) => (e.id === id ? { ...e, status: 'resolved', resolvedAt: new Date().toISOString() } : e))
+    );
+    setActionFeedback({ text: 'Error marked as resolved.', type: 'success' });
+    setTimeout(() => setActionFeedback(null), 3500);
+  };
+
+  const handleClearResolvedLogs = () => {
+    clearResolvedErrors();
+    setErrorLogs((prev) => prev.filter((e) => e.status !== 'resolved'));
+    setActionFeedback({ text: 'Cleared resolved error items from panel.', type: 'success' });
+    setTimeout(() => setActionFeedback(null), 3500);
+  };
+
+  const handleRetryDispatch = async (errorLog: SystemErrorLog) => {
+    setRetryingErrorId(errorLog.id);
+    try {
+      const res = await retryFailedEmail(errorLog);
+      if (res.success) {
+        setActionFeedback({ text: res.message, type: 'success' });
+        setErrorLogs((prev) =>
+          prev.map((e) => (e.id === errorLog.id ? { ...e, status: 'resolved', resolvedAt: new Date().toISOString() } : e))
+        );
+      } else {
+        setActionFeedback({ text: res.message, type: 'error' });
+      }
+    } catch (err: any) {
+      setActionFeedback({ text: err.message || 'Retry failed', type: 'error' });
+    } finally {
+      setRetryingErrorId(null);
+      setTimeout(() => setActionFeedback(null), 4000);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -222,6 +297,7 @@ export default function AdminDashboard({ go }: { go: (p: Page) => void }) {
     }
 
     loadDashboardData();
+    loadHealthData();
 
     return () => {
       isMounted = false;
@@ -247,6 +323,13 @@ export default function AdminDashboard({ go }: { go: (p: Page) => void }) {
     }
   };
 
+  const filteredErrors = errorLogs.filter((item) => {
+    if (errorFilter === 'all') return true;
+    return item.service === errorFilter;
+  });
+
+  const activeErrorsCount = errorLogs.filter((e) => e.status === 'active').length;
+
   return (
     <div className="space-y-6 pb-12">
       {/* Top Header & Quick Actions */}
@@ -262,6 +345,14 @@ export default function AdminDashboard({ go }: { go: (p: Page) => void }) {
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          <button
+            onClick={() => go('inventory-maintenance-reports')}
+            className="px-4 py-2.5 rounded-full bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
+          >
+            <IconShield className="w-3.5 h-3.5 text-amber-700" />
+            <span>Maintenance Reports</span>
+          </button>
+
           <button
             onClick={() => go('admin-reports')}
             className="px-4 py-2.5 rounded-full bg-white hover:bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/10 text-xs font-semibold transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
@@ -279,6 +370,25 @@ export default function AdminDashboard({ go }: { go: (p: Page) => void }) {
           </button>
         </div>
       </div>
+
+      {/* Action Toast Alert */}
+      {actionFeedback && (
+        <div
+          className={`p-3.5 rounded-xl text-xs flex items-center justify-between shadow-sm animate-fade-in ${
+            actionFeedback.type === 'success'
+              ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border border-rose-200 text-rose-800'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <IconCheck className="w-4 h-4 text-emerald-600" />
+            <span className="font-semibold">{actionFeedback.text}</span>
+          </div>
+          <button onClick={() => setActionFeedback(null)} className="opacity-70 hover:opacity-100">
+            <IconX className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* 4 Key Executive Performance Indicators */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -578,6 +688,360 @@ export default function AdminDashboard({ go }: { go: (p: Page) => void }) {
           </div>
         </div>
       </div>
+
+      {/* ── 🛡️ SYSTEM HEALTH, DIAGNOSTICS & ERROR LOGS PANEL ── */}
+      <div className="bg-white rounded-2xl p-5 sm:p-6 border border-[#24252c]/[0.08] shadow-sm space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#24252c]/[0.06]">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-50 text-[#1090F8] border border-blue-200">
+                System Health & Error Diagnostics
+              </span>
+              <span
+                className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1.5 ${
+                  overallHealth === 'operational'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : overallHealth === 'degraded'
+                    ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                    : 'bg-rose-50 text-rose-700 border border-rose-200'
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    overallHealth === 'operational'
+                      ? 'bg-emerald-500'
+                      : overallHealth === 'degraded'
+                      ? 'bg-amber-500'
+                      : 'bg-rose-500 animate-ping'
+                  }`}
+                />
+                <span>
+                  {overallHealth === 'operational'
+                    ? 'All Services Operational'
+                    : overallHealth === 'degraded'
+                    ? 'Attention Required'
+                    : 'Service Interruption'}
+                </span>
+              </span>
+            </div>
+            <h2 className="text-lg font-extrabold text-[var(--ink)] mt-1.5">
+              Service Health, Webhooks & Error Logs
+            </h2>
+            <p className="text-xs text-[#24252c]/60 mt-0.5">
+              Real-time monitor for failed payment webhooks, database connection latency, and unsent customer emails/SMS.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={loadHealthData}
+              disabled={runningDiagnostics}
+              className="flex items-center gap-1.5 bg-[var(--ink)] hover:bg-[var(--ink-soft)] text-white text-xs font-semibold px-4 py-2 rounded-full transition-colors cursor-pointer disabled:opacity-50 shadow-xs"
+            >
+              <span className={runningDiagnostics ? 'animate-spin' : ''}>↻</span>
+              <span>{runningDiagnostics ? 'Testing Endpoints...' : 'Run Diagnostics'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Service Endpoint Status Badges Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {healthServices.map((svc) => {
+            let badgeBg = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+            let dotBg = 'bg-emerald-500';
+            if (svc.status === 'degraded') {
+              badgeBg = 'bg-amber-50 text-amber-700 border-amber-200';
+              dotBg = 'bg-amber-500';
+            } else if (svc.status === 'outage') {
+              badgeBg = 'bg-rose-50 text-rose-700 border-rose-200';
+              dotBg = 'bg-rose-500';
+            }
+
+            return (
+              <div
+                key={svc.id}
+                className="p-4 rounded-xl bg-[var(--mist)]/70 border border-[#24252c]/[0.06] space-y-2 text-xs"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[var(--ink)] truncate">{svc.name}</span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeBg} flex items-center gap-1 shrink-0`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${dotBg}`} />
+                    <span className="capitalize">{svc.status}</span>
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#24252c]/65 line-clamp-2">{svc.details}</p>
+                <div className="flex items-center justify-between text-[10px] text-[#24252c]/45 pt-1 border-t border-[#24252c]/[0.04]">
+                  <span>{svc.latencyMs ? `Latency: ${svc.latencyMs}ms` : 'Status Active'}</span>
+                  {svc.errorCount > 0 && (
+                    <span className="font-bold text-rose-600">{svc.errorCount} Issue(s)</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Error Queue Filters & Control Bar */}
+        <div className="pt-2 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <h3 className="font-extrabold text-sm text-[var(--ink)]">
+                Troubleshooting & Error Log Queue
+              </h3>
+              {activeErrorsCount > 0 ? (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">
+                  {activeErrorsCount} Active
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                  0 Active Errors
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 text-xs">
+              {/* Category Filter Tabs */}
+              <div className="flex rounded-lg bg-[var(--mist)] p-0.5 border border-[#24252c]/10 text-[11px]">
+                <button
+                  onClick={() => setErrorFilter('all')}
+                  className={`px-2.5 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
+                    errorFilter === 'all' ? 'bg-white text-[var(--ink)] shadow-2xs font-bold' : 'text-[#24252c]/60'
+                  }`}
+                >
+                  All Logs ({errorLogs.length})
+                </button>
+                <button
+                  onClick={() => setErrorFilter('payment_webhook')}
+                  className={`px-2.5 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
+                    errorFilter === 'payment_webhook' ? 'bg-white text-[var(--ink)] shadow-2xs font-bold' : 'text-[#24252c]/60'
+                  }`}
+                >
+                  Webhooks
+                </button>
+                <button
+                  onClick={() => setErrorFilter('database')}
+                  className={`px-2.5 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
+                    errorFilter === 'database' ? 'bg-white text-[var(--ink)] shadow-2xs font-bold' : 'text-[#24252c]/60'
+                  }`}
+                >
+                  Database
+                </button>
+                <button
+                  onClick={() => setErrorFilter('email_sms')}
+                  className={`px-2.5 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
+                    errorFilter === 'email_sms' ? 'bg-white text-[var(--ink)] shadow-2xs font-bold' : 'text-[#24252c]/60'
+                  }`}
+                >
+                  Emails & SMS
+                </button>
+              </div>
+
+              {errorLogs.some((e) => e.status === 'resolved') && (
+                <button
+                  onClick={handleClearResolvedLogs}
+                  className="text-[11px] text-[#24252c]/50 hover:text-rose-600 font-semibold cursor-pointer underline"
+                >
+                  Clear Resolved
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Error Item List */}
+          {filteredErrors.length === 0 ? (
+            <div className="p-8 text-center bg-emerald-50/40 rounded-xl border border-dashed border-emerald-200 space-y-1">
+              <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-2 font-bold">
+                ✓
+              </div>
+              <h4 className="text-xs font-bold text-emerald-900">Zero System Errors Recorded</h4>
+              <p className="text-[11px] text-emerald-700/80 max-w-sm mx-auto">
+                Payment webhooks, Supabase queries, and automated email/SMS dispatches are functioning normally without unhandled failures.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {filteredErrors.map((err) => {
+                let sevBadge = 'bg-blue-50 text-blue-700 border-blue-200';
+                if (err.severity === 'critical' || err.severity === 'high') {
+                  sevBadge = 'bg-rose-50 text-rose-700 border-rose-200';
+                } else if (err.severity === 'medium') {
+                  sevBadge = 'bg-amber-50 text-amber-700 border-amber-200';
+                }
+
+                const isResolved = err.status === 'resolved';
+
+                return (
+                  <div
+                    key={err.id}
+                    className={`p-4 rounded-xl border transition-all text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                      isResolved
+                        ? 'bg-white/60 border-[#24252c]/[0.04] opacity-60'
+                        : 'bg-white border-[#24252c]/[0.08] shadow-2xs hover:border-[#1090F8]/30'
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full border ${sevBadge} uppercase font-mono`}>
+                          {err.severity}
+                        </span>
+                        <span className="font-bold text-[var(--ink)] text-sm">{err.title}</span>
+                        {isResolved ? (
+                          <span className="text-[10px] px-2 py-0.2 rounded-full bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">
+                            Resolved
+                          </span>
+                        ) : (
+                          <span className="text-[10px] px-2 py-0.2 rounded-full bg-rose-50 text-rose-700 font-semibold border border-rose-200">
+                            Active Issue
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-[11px] text-rose-800/90 font-mono bg-rose-50/50 p-1.5 rounded border border-rose-100 max-w-2xl break-all">
+                        {err.errorMessage}
+                      </p>
+
+                      <div className="flex items-center gap-3 text-[10px] text-[#24252c]/50">
+                        {err.endpointOrContext && (
+                          <span>Context: <strong>{err.endpointOrContext}</strong></span>
+                        )}
+                        <span>Logged: {formatRelativeTime(err.timestamp)}</span>
+                      </div>
+                    </div>
+
+                    {/* Troubleshooting Action Controls */}
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                      <button
+                        onClick={() => setSelectedErrorForModal(err)}
+                        className="px-3 py-1.5 rounded-full bg-[var(--mist)] hover:bg-[#EEEEEE] text-[var(--ink)] text-[11px] font-bold transition-colors cursor-pointer"
+                      >
+                        Inspect
+                      </button>
+
+                      {err.service === 'email_sms' && !isResolved && (
+                        <button
+                          onClick={() => handleRetryDispatch(err)}
+                          disabled={retryingErrorId === err.id}
+                          className="px-3 py-1.5 rounded-full bg-[#1090F8] hover:bg-[#0c78d1] text-white text-[11px] font-bold transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1 shadow-xs"
+                        >
+                          {retryingErrorId === err.id ? 'Retrying...' : 'Resend Email'}
+                        </button>
+                      )}
+
+                      {!isResolved && (
+                        <button
+                          onClick={() => handleResolveLog(err.id)}
+                          className="px-3 py-1.5 rounded-full bg-white border border-[#24252c]/15 hover:border-emerald-500 hover:text-emerald-700 text-[var(--ink)] text-[11px] font-bold transition-colors cursor-pointer"
+                        >
+                          Resolve
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Error Technical Inspection Modal ── */}
+      <ModalOverlay isOpen={Boolean(selectedErrorForModal)} onClose={() => setSelectedErrorForModal(null)}>
+        {selectedErrorForModal && (
+          <div className="bg-white rounded-[2rem] p-6 max-w-xl w-full shadow-2xl border border-[#24252c]/10 relative space-y-4 max-h-[90vh] overflow-y-auto text-xs">
+            <button
+              onClick={() => setSelectedErrorForModal(null)}
+              className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+            >
+              <IconX className="w-5 h-5" />
+            </button>
+
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs font-bold text-rose-600 uppercase px-2.5 py-0.5 rounded-full bg-rose-50 border border-rose-200">
+                  {selectedErrorForModal.service} · {selectedErrorForModal.severity}
+                </span>
+                <span className="text-[#24252c]/50 font-mono text-[11px]">
+                  {selectedErrorForModal.timestamp}
+                </span>
+              </div>
+              <h3 className="text-base font-extrabold text-[var(--ink)] mt-1">
+                {selectedErrorForModal.title}
+              </h3>
+            </div>
+
+            <div className="p-3 bg-rose-50 text-rose-900 rounded-xl font-mono text-[11px] border border-rose-200 break-all space-y-1">
+              <div className="font-bold">Error Message:</div>
+              <div>{selectedErrorForModal.errorMessage}</div>
+            </div>
+
+            {selectedErrorForModal.endpointOrContext && (
+              <div>
+                <span className="font-bold text-[#24252c]/60">Target Endpoint / Recipient:</span>
+                <p className="font-mono text-[11px] text-[var(--ink)] bg-[var(--mist)] p-2 rounded-lg mt-0.5">
+                  {selectedErrorForModal.endpointOrContext}
+                </p>
+              </div>
+            )}
+
+            {selectedErrorForModal.payload && (
+              <div>
+                <span className="font-bold text-[#24252c]/60">Captured Payload / Context:</span>
+                <pre className="font-mono text-[10px] text-[var(--ink)] bg-[var(--mist)] p-3 rounded-xl overflow-x-auto mt-1 max-h-48 border border-[#24252c]/[0.06]">
+                  {JSON.stringify(selectedErrorForModal.payload, null, 2)}
+                </pre>
+              </div>
+            )}
+
+            <div className="p-3 bg-blue-50/70 border border-blue-200/80 rounded-xl text-blue-900 space-y-1">
+              <div className="font-bold text-[11px]">💡 Troubleshooting Guide:</div>
+              <ul className="list-disc pl-4 space-y-0.5 text-[10px] text-blue-800">
+                {selectedErrorForModal.service === 'payment_webhook' && (
+                  <>
+                    <li>Verify PayMongo webhook signing secret in environment variables.</li>
+                    <li>Check if the customer cancelled the e-wallet checkout or if network dropped.</li>
+                  </>
+                )}
+                {selectedErrorForModal.service === 'email_sms' && (
+                  <>
+                    <li>Ensure SMTP credentials (user, pass, port 587/465) are valid.</li>
+                    <li>Click "Resend Email" once network connectivity is restored.</li>
+                  </>
+                )}
+                {selectedErrorForModal.service === 'database' && (
+                  <>
+                    <li>Check Supabase project status and RLS policies on target table.</li>
+                    <li>Ensure user network is not blocking outbound REST / WebSocket traffic.</li>
+                  </>
+                )}
+              </ul>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              {selectedErrorForModal.service === 'email_sms' && selectedErrorForModal.status !== 'resolved' && (
+                <button
+                  onClick={() => {
+                    handleRetryDispatch(selectedErrorForModal);
+                    setSelectedErrorForModal(null);
+                  }}
+                  className="flex-1 bg-[#1090F8] hover:bg-[#0c78d1] text-white font-bold py-2.5 rounded-full transition-colors cursor-pointer text-center"
+                >
+                  Resend Dispatch Now
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  handleResolveLog(selectedErrorForModal.id);
+                  setSelectedErrorForModal(null);
+                }}
+                className="flex-1 bg-[var(--ink)] hover:bg-[var(--ink-soft)] text-white font-bold py-2.5 rounded-full transition-colors cursor-pointer text-center"
+              >
+                Mark as Resolved
+              </button>
+            </div>
+          </div>
+        )}
+      </ModalOverlay>
     </div>
   );
 }
+

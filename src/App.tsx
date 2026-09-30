@@ -36,6 +36,7 @@ import InventoryItemsPage from './pages/inventory-manager/InventoryItemsPage';
 import UnitAssignmentPage from './pages/inventory-manager/UnitAssignmentPage';
 import InventoryAlertsPage from './pages/inventory-manager/InventoryAlertsPage';
 import UsageReportsPage from './pages/inventory-manager/UsageReportsPage';
+import MaintenanceReportsPage from './pages/inventory-manager/MaintenanceReportsPage';
 import InventoryProfilePage from './pages/inventory-manager/InventoryProfilePage';
 
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -321,6 +322,7 @@ export default function App() {
         {page === 'inventory-units' && <UnitAssignmentPage go={go} />}
         {page === 'inventory-alerts' && <InventoryAlertsPage go={go} />}
         {page === 'inventory-reports' && <UsageReportsPage go={go} />}
+        {page === 'inventory-maintenance-reports' && <MaintenanceReportsPage go={go} />}
         {page === 'inventory-profile' && <InventoryProfilePage go={go} />}
       </InventoryLayout>
     );

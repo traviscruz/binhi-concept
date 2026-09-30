@@ -209,6 +209,14 @@ export default function AdminReportsPage({ go }: { go: (p: Page) => void }) {
         {/* Action Export Buttons */}
         <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
           <button
+            onClick={() => go('inventory-maintenance-reports')}
+            className="px-3.5 py-2 rounded-full bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+          >
+            <IconShield className="w-3.5 h-3.5 text-amber-700" />
+            <span>Equipment Maintenance Reports →</span>
+          </button>
+
+          <button
             onClick={() => go('admin-bookings')}
             className="px-4 py-2 rounded-full bg-[var(--mist)] hover:bg-gray-200 text-[var(--ink)] border border-[#24252c]/10 text-xs font-semibold transition-colors cursor-pointer"
           >

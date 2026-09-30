@@ -4,8 +4,9 @@ import type { Page } from '../../types';
 import { FEATURED_PACKAGES, type PackageData } from '../../data/packages';
 import { MonoBadge } from '../../components/shared/Badges';
 import { PhotoCarousel } from '../../components/shared/PhotoCarousel';
-import { IconArrow, IconCheck, IconTicket, IconHeart, IconX } from '../../components/shared/icons';
+import { IconArrow, IconCheck, IconTicket, IconHeart, IconX, IconShield } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
+import { PackageReviewsSection } from '../../components/shared/PackageReviewsSection';
 import { supabase } from '../../lib/supabase';
 import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
 import {
@@ -26,6 +27,7 @@ interface AddonModel {
   category: string;
   rentalRate: number;
   availableCount: number;
+  underRepairCount: number;
 }
 
 interface AddonSelection {
@@ -55,8 +57,15 @@ function AddonCard({
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-[var(--ink)] truncate leading-tight">{model.name}</div>
           <div className="text-[10px] text-[#24252c]/50 mt-0.5">{model.brand} · {model.category}</div>
-          <div className="text-[10px] text-emerald-600 font-semibold mt-0.5">
-            {model.availableCount} unit{model.availableCount !== 1 ? 's' : ''} available
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            <span className="text-[10px] text-emerald-600 font-semibold">
+              {model.availableCount} unit{model.availableCount !== 1 ? 's' : ''} available
+            </span>
+            {model.underRepairCount > 0 && (
+              <span className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">
+                {model.underRepairCount} in repair
+              </span>
+            )}
           </div>
         </div>
         <div className="flex flex-col items-end gap-1.5 shrink-0">
@@ -143,24 +152,29 @@ export default function PackageDetailPage({
     loadEngineData();
   }, []);
 
-  // Live inventory add-ons state
+  // Live inventory add-ons & maintenance state
   const [addonModels, setAddonModels] = useState<AddonModel[]>([]);
   const [addonsLoading, setAddonsLoading] = useState(true);
   const [showAddonModal, setShowAddonModal] = useState(false);
+  const [totalMaintenanceDeduction, setTotalMaintenanceDeduction] = useState(0);
+  const [inclusionsMaintenanceMap, setInclusionsMaintenanceMap] = useState<
+    Record<string, { inRepairCount: number; deductedAmount: number; modelName: string }>
+  >({});
 
   const ADDON_PREVIEW_COUNT = 3;
 
-  // ── Fetch available inventory from Supabase ───────────────────────────────
+  // ── Fetch available inventory & compute maintenance deductions ──────────────
   useEffect(() => {
     const fetchAvailableInventory = async () => {
       setAddonsLoading(true);
       try {
-        // Get all physical units that are available
+        // Get all physical units across statuses to detect available & quarantined gear
         const { data: units, error } = await supabase
           .from('physical_units')
           .select(`
             model_id,
             status,
+            condition,
             equipment_models (
               model_id,
               name,
@@ -168,12 +182,11 @@ export default function PackageDetailPage({
               category,
               rental_rate
             )
-          `)
-          .eq('status', 'Available in Warehouse');
+          `);
 
         if (error) throw error;
 
-        // Group by model_id and count available units
+        // Group by model_id and count available vs under-repair units
         const modelMap: Record<string, AddonModel> = {};
 
         (units ?? []).forEach((unit: any) => {
@@ -188,16 +201,17 @@ export default function PackageDetailPage({
               category: em.category,
               rentalRate: Number(em.rental_rate ?? 0),
               availableCount: 0,
+              underRepairCount: 0,
             };
           }
-          modelMap[mid].availableCount += 1;
+          if (unit.status === 'Available in Warehouse') {
+            modelMap[mid].availableCount += 1;
+          } else if (unit.status === 'Maintenance / Repair' || unit.condition === 'In Repair') {
+            modelMap[mid].underRepairCount += 1;
+          }
         });
 
-        // ── Triple-check: remove models already fully used by this package ──
-        // The package inclusions list strings like "2x Active PA Speakers".
-        // We fuzzy-match each inclusion label to equipment model names.
-        // For each matched model, we subtract the inclusion's quantity from
-        // availableCount. If it reaches 0 or below, the model is hidden from add-ons.
+        // ── Match Package Inclusions to compute automatic maintenance discount ──
         const packageInclusions: string[] = Array.isArray(pkg.inclusions) ? pkg.inclusions : [];
 
         function normStr(s: string) {
@@ -205,7 +219,6 @@ export default function PackageDetailPage({
         }
 
         function inclusionFuzzyMatch(inclusionLabel: string, modelName: string): boolean {
-          // Strip leading quantity prefix (e.g. "2x")
           const stripped = inclusionLabel.replace(/^\d+\s*[xX]\s+/, '');
           const words = normStr(stripped).split(' ').filter((w) => w.length > 2);
           const normModel = normStr(modelName);
@@ -218,32 +231,57 @@ export default function PackageDetailPage({
           return m ? parseInt(m[1], 10) : 1;
         }
 
+        let totalDeduction = 0;
+        const maintMap: Record<string, { inRepairCount: number; deductedAmount: number; modelName: string }> = {};
+
         packageInclusions.forEach((inclusion) => {
           const claimedQty = parseQtyPrefix(inclusion);
-          Object.values(modelMap).forEach((model) => {
+          let matchedModel: AddonModel | null = null;
+
+          for (const model of Object.values(modelMap)) {
             if (inclusionFuzzyMatch(inclusion, model.name)) {
+              matchedModel = model;
+              // Deduct claimed units from add-on availability
               model.availableCount = Math.max(0, model.availableCount - claimedQty);
+              break;
             }
-          });
+          }
+
+          // If matched model has units in repair / quarantine, calculate discount
+          if (matchedModel && matchedModel.underRepairCount > 0) {
+            const affectedUnits = Math.min(claimedQty, matchedModel.underRepairCount);
+            const deduction = affectedUnits * matchedModel.rentalRate;
+            if (deduction > 0) {
+              maintMap[inclusion] = {
+                inRepairCount: affectedUnits,
+                deductedAmount: deduction,
+                modelName: matchedModel.name,
+              };
+              totalDeduction += deduction;
+            }
+          }
         });
+
+        setTotalMaintenanceDeduction(totalDeduction);
+        setInclusionsMaintenanceMap(maintMap);
 
         // Remove models with 0 available units after package deduction
         const afterDeduction = Object.values(modelMap).filter((m) => m.availableCount > 0);
-
-        // Sort alphabetically by name
         const sorted = afterDeduction.sort((a, b) => a.name.localeCompare(b.name));
 
         setAddonModels(sorted);
       } catch (err) {
         console.error('Failed to fetch available inventory for add-ons:', err);
         setAddonModels([]);
+        setTotalMaintenanceDeduction(0);
+        setInclusionsMaintenanceMap({});
       } finally {
         setAddonsLoading(false);
       }
     };
 
     fetchAvailableInventory();
-  }, [pkg.id]);  // re-fetch if package changes
+  }, [pkg.id]); // re-fetch if package changes
 
   // ── Quantity helpers ──────────────────────────────────────────────────────
   const setQty = (modelId: string, qty: number) => {
@@ -265,7 +303,8 @@ export default function PackageDetailPage({
     return sum + qty * m.rentalRate;
   }, 0);
 
-  const totalPrice = pkg.rawPrice + addonsTotal;
+  const adjustedPackagePrice = Math.max(0, pkg.rawPrice - totalMaintenanceDeduction);
+  const totalPrice = adjustedPackagePrice + addonsTotal;
 
   // ── Dynamic Sorting: Selected items float to top ──────────────────────────
   const displayAddonModels = [...addonModels].sort((a, b) => {
@@ -280,6 +319,13 @@ export default function PackageDetailPage({
   const selectedAddonStrings = displayAddonModels
     .filter((m) => getQty(m.modelId) > 0)
     .map((m) => `${getQty(m.modelId)}x ${m.name} (+₱${(getQty(m.modelId) * m.rentalRate).toLocaleString()})`);
+
+  const handleStartBookingWithDiscount = () => {
+    try {
+      localStorage.setItem('binhi_package_maintenance_deduction', String(totalMaintenanceDeduction));
+    } catch (e) {}
+    startBooking(pkg.id, selectedDate, guestCount, selectedAddonStrings);
+  };
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -315,17 +361,75 @@ export default function PackageDetailPage({
           {/* ── Left Column ── */}
           <div className="lg:col-span-2 space-y-8">
             <div className="bg-[var(--mist)] rounded-[2rem] p-6 md:p-8 border border-[#24252c]/[0.06]">
-              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <span className="w-8 h-8 rounded-full bg-[#1090F8] text-white flex items-center justify-center text-sm">✓</span>
-                Package Equipment Inclusions
-              </h3>
-              <div className="space-y-3">
-                {pkg.inclusions.map((item, i) => (
-                  <div key={i} className="flex items-start gap-3 p-3 bg-white rounded-xl border border-[#24252c]/[0.05]">
-                    <IconCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                    <span className="text-sm font-medium text-[var(--ink)] leading-snug">{item}</span>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold flex items-center gap-2">
+                  <span className="w-8 h-8 rounded-full bg-[#1090F8] text-white flex items-center justify-center">
+                    <IconCheck className="w-4 h-4" />
+                  </span>
+                  Package Equipment Inclusions
+                </h3>
+                {totalMaintenanceDeduction > 0 && (
+                  <span className="text-[11px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-3 py-1 rounded-full flex items-center gap-1">
+                    <IconShield className="w-3 h-3 text-amber-800" />
+                    <span>-₱{totalMaintenanceDeduction.toLocaleString()} Maintenance Discount</span>
+                  </span>
+                )}
+              </div>
+
+              {totalMaintenanceDeduction > 0 && (
+                <div className="mb-4 p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2.5">
+                  <IconShield className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block">Quarantine / Maintenance Price Adjustment Applied</span>
+                    <span className="text-[#24252c]/70 text-[11px]">
+                      Some units in this package are currently in maintenance/repair. Available stock has been safely locked and the rental rate has been automatically deducted from your package total.
+                    </span>
                   </div>
-                ))}
+                </div>
+              )}
+
+              <div className="space-y-3">
+                {pkg.inclusions.map((item, i) => {
+                  const maintInfo = inclusionsMaintenanceMap[item];
+                  return (
+                    <div
+                      key={i}
+                      className={`flex items-start justify-between gap-3 p-3.5 rounded-xl border transition-colors ${
+                        maintInfo
+                          ? 'bg-amber-50/70 border-amber-200 shadow-sm'
+                          : 'bg-white border-[#24252c]/[0.05]'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3 min-w-0">
+                        <IconCheck
+                          className={`w-5 h-5 shrink-0 mt-0.5 ${
+                            maintInfo ? 'text-amber-600' : 'text-emerald-600'
+                          }`}
+                        />
+                        <div>
+                          <span className="text-sm font-medium text-[var(--ink)] leading-snug block">{item}</span>
+                          {maintInfo && (
+                            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200 flex items-center gap-1">
+                                <IconShield className="w-3 h-3 text-amber-800" />
+                                <span>{maintInfo.inRepairCount} unit{maintInfo.inRepairCount !== 1 ? 's' : ''} in repair</span>
+                              </span>
+                              <span className="text-[10px] text-amber-700 font-semibold">
+                                (-₱{maintInfo.deductedAmount.toLocaleString()} deducted)
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {maintInfo && (
+                        <span className="shrink-0 text-xs font-bold text-amber-700 bg-white border border-amber-200 px-2.5 py-1 rounded-lg">
+                          -₱{maintInfo.deductedAmount.toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -425,8 +529,9 @@ export default function PackageDetailPage({
                     Reserved Date: All available operational windows are booked.
                   </p>
                 ) : getDayAvailabilityStatus(selectedDate, dbBookings, bookingSettings, scheduleOverrides).status === 'slots_available' ? (
-                  <p className="text-[11px] font-bold text-amber-700 mt-1 ml-2">
-                    ✓ Multiple slots available! Exact timings validated during checkout.
+                  <p className="text-[11px] font-bold text-amber-700 mt-1 ml-2 flex items-center gap-1">
+                    <IconCheck className="w-3.5 h-3.5 text-amber-600 inline shrink-0" />
+                    <span>Multiple slots available! Exact timings validated during checkout.</span>
                   </p>
                 ) : null}
               </div>
@@ -545,26 +650,49 @@ export default function PackageDetailPage({
               </ModalOverlay>
 
               {/* ── Price Summary ── */}
-              <div className="pt-4 border-t border-[#24252c]/[0.08] mb-5">
-                <div className="flex items-center justify-between text-xs text-[#24252c]/50 mb-1">
-                  <span>Base Package Rate</span>
-                  <span>{pkg.price}</span>
+              <div className="pt-4 border-t border-[#24252c]/[0.08] mb-5 space-y-1.5">
+                <div className="flex items-center justify-between text-xs text-[#24252c]/50">
+                  <span>Standard Package Base Rate</span>
+                  <span className={totalMaintenanceDeduction > 0 ? 'line-through text-[#24252c]/40' : ''}>{pkg.price}</span>
                 </div>
+
+                {totalMaintenanceDeduction > 0 && (
+                  <>
+                    <div className="flex items-center justify-between text-xs text-amber-700 font-medium bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-200">
+                      <span className="flex items-center gap-1.5">
+                        <IconShield className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                        <span>Maintenance / Quarantine Discount</span>
+                      </span>
+                      <span className="font-bold">-₱{totalMaintenanceDeduction.toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-[var(--ink)] font-semibold">
+                      <span>Adjusted Package Base</span>
+                      <span className="text-emerald-700">₱{adjustedPackagePrice.toLocaleString()}</span>
+                    </div>
+                  </>
+                )}
+
                 {addonsTotal > 0 && (
-                  <div className="flex items-center justify-between text-xs text-[#24252c]/50 mb-1">
-                    <span>Add-ons Total</span>
+                  <div className="flex items-center justify-between text-xs text-[#24252c]/50">
+                    <span>Optional Add-ons Total</span>
                     <span>+₱{addonsTotal.toLocaleString()}</span>
                   </div>
                 )}
-                <div className="flex items-center justify-between text-base font-extrabold text-[var(--ink)] mt-2 pt-2 border-t border-[#24252c]/[0.06]">
-                  <span>Total Calculated Rate</span>
+
+                <div className="flex items-center justify-between text-base font-extrabold text-[var(--ink)] pt-2 border-t border-[#24252c]/[0.06]">
+                  <div>
+                    <span>Total Calculated Rate</span>
+                    {totalMaintenanceDeduction > 0 && (
+                      <span className="block text-[10px] text-amber-600 font-medium">Includes quarantine discount</span>
+                    )}
+                  </div>
                   <span className="text-2xl text-[#1090F8]">₱{totalPrice.toLocaleString()}</span>
                 </div>
               </div>
 
               <button
-                onClick={() => startBooking(pkg.id, selectedDate, guestCount, selectedAddonStrings)}
-                className="w-full bg-[var(--ink)] text-white text-sm font-semibold py-4 rounded-full hover:bg-[var(--ink-soft)] transition-colors inline-flex items-center justify-center gap-2 shadow-md"
+                onClick={handleStartBookingWithDiscount}
+                className="w-full bg-[var(--ink)] text-white text-sm font-semibold py-4 rounded-full hover:bg-[var(--ink-soft)] transition-colors inline-flex items-center justify-center gap-2 shadow-md cursor-pointer"
               >
                 Proceed to Book This Setup <IconArrow className="w-4 h-4" />
               </button>
@@ -586,6 +714,14 @@ export default function PackageDetailPage({
             </div>
           </div>
         </div>
+
+        {/* Per-Package Client Reviews Section */}
+        <PackageReviewsSection
+          packageName={pkg.name}
+          packageId={pkg.id}
+          go={go}
+          isCustomer={isCustomer}
+        />
       </div>
     </section>
   );

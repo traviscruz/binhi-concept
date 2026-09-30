@@ -26,6 +26,7 @@ import {
   timeToMinutes,
   minutesToTime,
   formatTimeAmPm,
+  calculateCrewArrivalTime,
   getOperatingWindowForDate,
   DEFAULT_BOOKING_SETTINGS,
   type BookingSettings,
@@ -1019,8 +1020,8 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
                   <div className="bg-[var(--mist)] rounded-2xl p-4 border border-[#24252c]/[0.06] space-y-3">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-[#24252c]/[0.08] pb-2.5">
                       <div>
-                        <h4 className="text-xs font-extrabold uppercase tracking-wider text-[var(--ink)]">Event Schedule Window</h4>
-                        <p className="text-[11px] text-[#24252c]/60">Select production start and conclusion times within daily operating hours.</p>
+                        <h4 className="text-xs font-extrabold uppercase tracking-wider text-[var(--ink)]">Event Schedule Window (Event Proper)</h4>
+                        <p className="text-[11px] text-[#24252c]/60">Select actual event program start and end time. Crew arrives early for setup.</p>
                       </div>
                       {rescheduleOpWindow.isOpen ? (
                         <span className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 px-2.5 py-1 rounded-full self-start sm:self-auto">
@@ -1032,6 +1033,20 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
                         </span>
                       )}
                     </div>
+
+                    {rescheduleOpWindow.isOpen && newRescheduleStartTime && (
+                      <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200/90 px-3 py-2 rounded-xl text-xs">
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-900 block">Binhi Styling &amp; Setup Ingress:</span>
+                          <span className="text-[11px] text-emerald-800">
+                            Crew arrives on-site early to assemble styling before program start
+                          </span>
+                        </div>
+                        <span className="font-mono font-extrabold text-xs text-emerald-950 bg-white px-2.5 py-1 rounded-lg border border-emerald-300 shrink-0">
+                          Call Time: ~{formatTimeAmPm(calculateCrewArrivalTime(newRescheduleStartTime, bookingSettings.default_turnaround_hours))}
+                        </span>
+                      </div>
+                    )}
 
                     {!rescheduleOpWindow.isOpen && (
                       <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">

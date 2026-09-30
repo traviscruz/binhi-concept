@@ -277,11 +277,49 @@ function fuzzyMatch(itemLabel: string, modelName: string): boolean {
   return matches.length >= Math.max(1, Math.floor(labelWords.length * 0.4));
 }
 
-// Parse quantity prefix from label, e.g. "2x Active PA" -> { qty: 2, label: "Active PA" }
-function parseQty(raw: string): { qty: number; label: string } {
-  const m = (raw || '').match(/^(\d+)\s*[xX]\s+(.+)$/);
-  if (m) return { qty: parseInt(m[1], 10) || 1, label: m[2].trim() };
-  return { qty: 1, label: (raw || '').trim() };
+// Parse quantity prefix and format proper clean naming for gear & add-on items
+function parseQty(raw: any, modelMap?: Record<string, { name: string }>): { qty: number; label: string } {
+  if (!raw) return { qty: 1, label: 'Equipment Item' };
+
+  let str = '';
+  let explicitQty: number | null = null;
+
+  if (typeof raw === 'object') {
+    str = raw.name || raw.label || raw.model_id || raw.modelId || 'Equipment Item';
+    if (raw.qty) explicitQty = Number(raw.qty);
+    else if (raw.quantity) explicitQty = Number(raw.quantity);
+  } else {
+    str = String(raw).trim();
+  }
+
+  // Strip price tags e.g. "Wireless Mic (₱1,500)" or "(+₱2,000)" or "- ₱1,500" or "[+₱1,500]"
+  str = str.replace(/(\s*[\(\[-]\s*(\+?\s*₱|\+?\s*PHP)\s*[\d,]+(\.\d{2})?(\s*each|\s*\/unit)?\s*[\)\]]?)/gi, '').trim();
+
+  // Check if string starts with "2x " or "2 x " or "2 Units of "
+  const qtyMatch = str.match(/^(\d+)\s*(?:[xX]|\s*units?\s+of)\s+(.+)$/i);
+  if (qtyMatch) {
+    explicitQty = parseInt(qtyMatch[1], 10) || 1;
+    str = qtyMatch[2].trim();
+  }
+
+  if (modelMap && modelMap[str]?.name) {
+    str = modelMap[str].name;
+  } else if (modelMap) {
+    const matchedModel = Object.entries(modelMap).find(([mid]) => mid.toLowerCase() === str.toLowerCase());
+    if (matchedModel) {
+      str = matchedModel[1].name;
+    }
+  }
+
+  // Convert hyphenated or underscored slugs (e.g. "chauvet-intimidator-moving-head") to proper Title Case
+  if (/^[a-z0-9_-]+$/i.test(str) && (str.includes('-') || str.includes('_'))) {
+    str = str
+      .split(/[-_]+/)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+  }
+
+  return { qty: explicitQty || 1, label: str.trim() || 'Equipment Item' };
 }
 
 /**
@@ -317,11 +355,58 @@ export async function fetchBookingPackingChecklist(bookingId: string): Promise<P
 
     const bookingRef = booking.paymongo_reference_number || `BNH-${booking.id.slice(0, 8)}`;
 
-    // 2. Fetch equipment models, physical units, and packages from database
+    // Extract existing saved assignments & checklist verification from database
+    const existingAssignedUnits: any[] = Array.isArray(booking.assigned_units)
+      ? booking.assigned_units
+      : typeof booking.assigned_units === 'string'
+      ? JSON.parse(booking.assigned_units || '[]')
+      : [];
+
+    // If the database already has assigned_units saved, reconstruct directly from DB records
+    if (existingAssignedUnits.length > 0) {
+      const gearMap: Record<string, PackingGearItem> = {};
+      existingAssignedUnits.forEach((u: any, idx: number) => {
+        const { label: properName } = parseQty(typeof u === 'string' ? u : u.name || u.raw_name || 'Equipment Item');
+        const name = properName;
+        const rawName = typeof u === 'string' ? u : u.raw_name || name;
+        const isAddon = typeof u === 'object' ? Boolean(u.is_addon || u.isAddon) : false;
+        const category = (typeof u === 'object' && u.category) || (isAddon ? 'Add-on Gear' : 'Sound & Lighting');
+        const key = `${isAddon ? 'addon' : 'pkg'}::${name}`;
+
+        if (!gearMap[key]) {
+          gearMap[key] = {
+            id: `gear-${idx}-${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+            name,
+            rawName,
+            qty: 0,
+            category,
+            isAddon,
+            units: [],
+          };
+        }
+
+        const serialId = typeof u === 'string' ? u : u.serial_id || u.serialId || `EQP-${idx}`;
+        const unitId = typeof u === 'object' && (u.unit_id || u.unitId) ? (u.unit_id || u.unitId) : `${bookingRef}__${name}__${idx}__${serialId}`;
+        const condition = (typeof u === 'object' && u.condition) || 'Operational (Good)';
+        const checked = typeof u === 'object' ? Boolean(u.checked) : false;
+
+        gearMap[key].qty += 1;
+        gearMap[key].units.push({
+          unitId,
+          serialId,
+          condition,
+          checked,
+        });
+      });
+
+      return Object.values(gearMap);
+    }
+
+    // 2. Otherwise fetch equipment models, physical units, and packages from database
     const [modelsRes, unitsRes, pkgsRes] = await Promise.all([
-      supabase.from('equipment_models').select('model_id, name, category'),
-      supabase.from('physical_units').select('serial_id, model_id, status, condition'),
-      supabase.from('packages').select('package_id, name, tag, inclusions, items'),
+      supabase.from('equipment_models').select('model_id, name, category').order('model_id', { ascending: true }),
+      supabase.from('physical_units').select('serial_id, model_id, status, condition').order('serial_id', { ascending: true }),
+      supabase.from('packages').select('package_id, name, tag, inclusions, items').order('package_id', { ascending: true }),
     ]);
 
     const equipmentModels: any[] = modelsRes.data || [];
@@ -378,8 +463,9 @@ export async function fetchBookingPackingChecklist(bookingId: string): Promise<P
         const cleanCode = label.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 4) || 'EQP';
         for (let k = 0; k < qty; k++) {
           const serial = `BNH-${cleanCode}-00${k + 1}`;
+          const unitId = `${targetRef}__${label}__${itemIndex}__${k}__${serial}`;
           units.push({
-            unitId: `${targetRef}__${label}__${itemIndex}__${k}__${serial}`,
+            unitId,
             serialId: serial,
             condition: 'Operational (Good)',
             checked: false,
@@ -396,8 +482,9 @@ export async function fetchBookingPackingChecklist(bookingId: string): Promise<P
             attempts++;
           }
           const picked = availableSerials[idx];
+          const unitId = `${targetRef}__${label}__${itemIndex}__${k}__${picked.serial_id}`;
           units.push({
-            unitId: `${targetRef}__${label}__${itemIndex}__${k}__${picked.serial_id}`,
+            unitId,
             serialId: picked.serial_id,
             condition: picked.condition,
             checked: false,
@@ -444,10 +531,76 @@ export async function fetchBookingPackingChecklist(bookingId: string): Promise<P
       resolveSerials(addon, bookingRef, inclusionsList.length + i, true)
     );
 
-    return [...packageGear, ...addonGear];
+    const combined = [...packageGear, ...addonGear];
+
+    // Auto-persist initial assignments to Supabase bookings table
+    if (combined.length > 0) {
+      saveBookingPackingChecklist(booking.id, combined).catch(() => {});
+    }
+
+    return combined;
   } catch (err) {
     console.error('Error in fetchBookingPackingChecklist:', err);
     return [];
+  }
+}
+
+/**
+ * Persist packing checklist and unit verification statuses directly into public.bookings (assigned_units) in Supabase.
+ */
+export async function saveBookingPackingChecklist(
+  bookingId: string,
+  gearItems: PackingGearItem[]
+): Promise<boolean> {
+  const cleanId = (bookingId || '').trim();
+  if (!cleanId) return false;
+
+  try {
+    const flattenedUnits = gearItems.flatMap((g) =>
+      g.units.map((u) => ({
+        serial_id: u.serialId,
+        unit_id: u.unitId,
+        name: g.name,
+        raw_name: g.rawName,
+        category: g.category,
+        is_addon: g.isAddon,
+        condition: u.condition,
+        checked: Boolean(u.checked),
+        checked_at: u.checked ? new Date().toISOString() : null,
+      }))
+    );
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId);
+
+    if (isUuid) {
+      const { error } = await supabase
+        .from('bookings')
+        .update({
+          assigned_units: flattenedUnits,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', cleanId);
+
+      if (!error) return true;
+    }
+
+    // Try update by paymongo_reference_number or fallback
+    const { error: refError } = await supabase
+      .from('bookings')
+      .update({
+        assigned_units: flattenedUnits,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('paymongo_reference_number', cleanId);
+
+    if (refError) {
+      console.warn('Update by paymongo_reference_number failed:', refError.message);
+    }
+
+    return true;
+  } catch (err) {
+    console.error('Error saving packing checklist to Supabase database:', err);
+    return false;
   }
 }
 

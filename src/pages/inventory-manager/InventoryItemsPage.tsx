@@ -10,6 +10,9 @@ import {
   IconSearch,
   IconPlus,
   IconPrinter,
+  IconCheck,
+  IconShield,
+  IconCalendar,
 } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { supabase } from '../../lib/supabase';
@@ -161,6 +164,23 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
   const [unitEditLastMaint, setUnitEditLastMaint] = useState('');
   const [unitEditNotes, setUnitEditNotes] = useState('');
   const [unitEditError, setUnitEditError] = useState('');
+
+  // Quarantine / Maintenance Mode State
+  interface UnitBookingAssignment {
+    bookingId: string;
+    eventName: string;
+    customerName: string;
+    eventDate: string;
+  }
+  const [unitAssignmentsMap, setUnitAssignmentsMap] = useState<Record<string, UnitBookingAssignment[]>>({});
+  const [quarantineTarget, setQuarantineTarget] = useState<{
+    modelId: string;
+    modelName: string;
+    unit: PhysicalUnit;
+    conflictingBookings: UnitBookingAssignment[];
+  } | null>(null);
+  const [showQuarantineModal, setShowQuarantineModal] = useState(false);
+  const [isSubmittingQuarantine, setIsSubmittingQuarantine] = useState(false);
 
   // Print Labels State
   const [showPrintModal, setShowPrintModal] = useState(false);
@@ -328,17 +348,48 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
   const dynamicAddPrefix = getSerialPrefix(addName, addBrand, addCat);
 
   // =========================================================================
-  // SUPABASE READ (FETCH MODELS & PHYSICAL UNITS)
+  // SUPABASE READ (FETCH MODELS & PHYSICAL UNITS + UPCOMING BOOKING ASSIGNMENTS)
   // =========================================================================
   const fetchInventoryData = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('equipment_models')
-        .select('*, units:physical_units(*)')
-        .order('created_at', { ascending: false });
+      const [modelsRes, bookingsRes] = await Promise.all([
+        supabase
+          .from('equipment_models')
+          .select('*, units:physical_units(*)')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('bookings')
+          .select('id, event_name, customer_name, event_date, assigned_units')
+          .neq('payment_status', 'cancelled'),
+      ]);
 
-      if (error) throw error;
+      const data = modelsRes.data;
+      const bookingsData = bookingsRes.data;
+
+      // Build assignments lookup for physical serial units
+      const assignMap: Record<string, UnitBookingAssignment[]> = {};
+      (bookingsData || []).forEach((b: any) => {
+        const units: any[] = Array.isArray(b.assigned_units)
+          ? b.assigned_units
+          : typeof b.assigned_units === 'string'
+          ? JSON.parse(b.assigned_units || '[]')
+          : [];
+
+        units.forEach((u: any) => {
+          const sid = typeof u === 'string' ? u : u.serial_id || u.serialId || '';
+          if (sid) {
+            if (!assignMap[sid]) assignMap[sid] = [];
+            assignMap[sid].push({
+              bookingId: b.id,
+              eventName: b.event_name || 'Production Event',
+              customerName: b.customer_name || 'Event Host',
+              eventDate: b.event_date || 'Upcoming',
+            });
+          }
+        });
+      });
+      setUnitAssignmentsMap(assignMap);
 
       if (data && data.length > 0) {
         const formatted: MasterEquipmentModel[] = data.map((m: any) => ({
@@ -882,6 +933,170 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
     }
   };
 
+  // =========================================================================
+  // MAINTENANCE & QUARANTINE MODE HANDLERS
+  // =========================================================================
+  const handleInitiateQuarantine = (modelId: string, modelName: string, unit: PhysicalUnit) => {
+    const conflicts = unitAssignmentsMap[unit.serialId] || [];
+    if (conflicts.length > 0) {
+      setQuarantineTarget({ modelId, modelName, unit, conflictingBookings: conflicts });
+      setShowQuarantineModal(true);
+    } else {
+      executeQuarantine(modelId, modelName, unit, false);
+    }
+  };
+
+  const executeQuarantine = async (
+    modelId: string,
+    modelName: string,
+    unit: PhysicalUnit,
+    unassignFromBookings: boolean
+  ) => {
+    setIsSubmittingQuarantine(true);
+    try {
+      const todayIso = new Date().toISOString().split('T')[0];
+
+      // 1. If unassign requested, update bookings table to remove unit from assigned_units
+      if (unassignFromBookings && quarantineTarget) {
+        for (const conflict of quarantineTarget.conflictingBookings) {
+          const { data: bData } = await supabase
+            .from('bookings')
+            .select('assigned_units')
+            .eq('id', conflict.bookingId)
+            .maybeSingle();
+
+          if (bData && bData.assigned_units) {
+            const raw: any[] = Array.isArray(bData.assigned_units)
+              ? bData.assigned_units
+              : typeof bData.assigned_units === 'string'
+              ? JSON.parse(bData.assigned_units || '[]')
+              : [];
+
+            const filteredAssigned = raw.filter((u: any) => {
+              const sid = typeof u === 'string' ? u : u.serial_id || u.serialId || '';
+              return sid !== unit.serialId;
+            });
+
+            await supabase
+              .from('bookings')
+              .update({ assigned_units: filteredAssigned, updated_at: new Date().toISOString() })
+              .eq('id', conflict.bookingId);
+          }
+        }
+      }
+
+      // 2. Update physical unit status to Maintenance / Repair & condition to In Repair
+      await supabase
+        .from('physical_units')
+        .update({
+          status: 'Maintenance / Repair',
+          condition: 'In Repair',
+          last_maintenance: todayIso,
+          notes: `[QUARANTINE] Tagged under repair on ${todayIso}`,
+        })
+        .eq('serial_id', unit.serialId);
+
+      // 3. Create Maintenance Alert in inventory_alerts table
+      await supabase.from('inventory_alerts').insert({
+        alert_type: 'Hardware Damage Log',
+        severity: 'High',
+        gear_name: `${modelName} (${unit.serialId})`,
+        details: `Unit placed in Quarantine / Under Repair mode. Automatically deducted from available booking stock.`,
+        status: 'active',
+      });
+
+      // 4. Log Audit Trail
+      await logAuditToSupabase(
+        'QUARANTINE_UNIT',
+        unit.serialId,
+        `Placed unit ${unit.serialId} (${modelName}) in Quarantine / Under Repair mode.`
+      );
+
+      // 5. Update local state
+      setModels((prev) =>
+        prev.map((m) => {
+          if (m.modelId === modelId) {
+            return {
+              ...m,
+              units: m.units.map((u) =>
+                u.serialId === unit.serialId
+                  ? {
+                      ...u,
+                      status: 'Maintenance / Repair' as PhysicalUnitStatus,
+                      condition: 'In Repair' as PhysicalUnitCondition,
+                      lastMaintenance: todayIso,
+                      notes: `[QUARANTINE] Tagged under repair on ${todayIso}`,
+                    }
+                  : u
+              ),
+            };
+          }
+          return m;
+        })
+      );
+
+      setShowQuarantineModal(false);
+      setQuarantineTarget(null);
+      window.dispatchEvent(new Event('inventory-updated'));
+    } catch (err) {
+      console.error('Failed to quarantine unit:', err);
+    } finally {
+      setIsSubmittingQuarantine(false);
+    }
+  };
+
+  const handleRestoreUnitOperational = async (modelId: string, modelName: string, unit: PhysicalUnit) => {
+    try {
+      const todayIso = new Date().toISOString().split('T')[0];
+      await supabase
+        .from('physical_units')
+        .update({
+          status: 'Available in Warehouse',
+          condition: 'Operational (Good)',
+          last_maintenance: todayIso,
+          notes: null,
+        })
+        .eq('serial_id', unit.serialId);
+
+      await supabase
+        .from('inventory_alerts')
+        .update({ status: 'resolved', resolved_at: new Date().toISOString() })
+        .eq('serial_id', unit.serialId);
+
+      await logAuditToSupabase(
+        'RESTORE_OPERATIONAL_UNIT',
+        unit.serialId,
+        `Restored unit ${unit.serialId} (${modelName}) to Operational (Good) in warehouse.`
+      );
+
+      setModels((prev) =>
+        prev.map((m) => {
+          if (m.modelId === modelId) {
+            return {
+              ...m,
+              units: m.units.map((u) =>
+                u.serialId === unit.serialId
+                  ? {
+                      ...u,
+                      status: 'Available in Warehouse' as PhysicalUnitStatus,
+                      condition: 'Operational (Good)' as PhysicalUnitCondition,
+                      lastMaintenance: todayIso,
+                      notes: undefined,
+                    }
+                  : u
+              ),
+            };
+          }
+          return m;
+        })
+      );
+
+      window.dispatchEvent(new Event('inventory-updated'));
+    } catch (err) {
+      console.error('Failed to restore unit:', err);
+    }
+  };
+
   // Handle File Input Change
   const handleImageFileChange = (
     e: React.ChangeEvent<HTMLInputElement>,
@@ -1122,73 +1337,133 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
                       </div>
                     ) : (
                       <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
-                        {model.units.map((unit) => (
-                          <div
-                            key={unit.serialId}
-                            className="bg-white p-4 rounded-xl border border-[#24252c]/[0.08] shadow-sm flex flex-col justify-between"
-                          >
-                            <div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-mono font-extrabold text-[#1090F8]">
-                                  {unit.serialId}
-                                </span>
-                                <span
-                                  className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${
-                                    unit.condition === 'Operational (Good)'
-                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                      : unit.condition === 'In Repair'
-                                      ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                                      : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                  }`}
-                                >
-                                  {unit.condition}
-                                </span>
-                              </div>
+                        {model.units.map((unit) => {
+                          const isUnderRepair =
+                            unit.status === 'Maintenance / Repair' ||
+                            unit.condition === 'In Repair' ||
+                            unit.status === 'Decommissioned / Inactive';
 
-                              <div className="text-xs font-bold text-[var(--ink)] mt-2">
-                                {unit.status}
-                              </div>
-                              <div className="text-[10px] text-[#24252c]/50 mt-1">
-                                Last Inspection: {unit.lastMaintenance}
-                              </div>
-                              {unit.notes && (
-                                <div className="text-[10px] text-amber-600 mt-1 italic">
-                                  "{unit.notes}"
+                          const assignments = unitAssignmentsMap[unit.serialId] || [];
+                          const hasUpcomingBooking = assignments.length > 0;
+
+                          return (
+                            <div
+                              key={unit.serialId}
+                              className={`bg-white p-4 rounded-xl border shadow-sm flex flex-col justify-between transition-all ${
+                                isUnderRepair
+                                  ? 'border-rose-300 ring-1 ring-rose-200 bg-rose-50/20'
+                                  : 'border-[#24252c]/[0.08]'
+                              }`}
+                            >
+                              <div>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-mono font-extrabold text-[#1090F8]">
+                                    {unit.serialId}
+                                  </span>
+                                  <span
+                                    className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                                      unit.condition === 'Operational (Good)'
+                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                        : unit.condition === 'In Repair'
+                                        ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                        : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                    }`}
+                                  >
+                                    {unit.condition}
+                                  </span>
                                 </div>
-                              )}
-                            </div>
 
-                            <div className="mt-3 pt-2 border-t border-[#24252c]/[0.06] flex items-center gap-2">
-                              <button
-                                onClick={() => handleOpenEditUnitModal(model.modelId, unit)}
-                                className="flex-1 bg-[var(--mist)] text-[var(--ink)] text-[11px] font-semibold py-1.5 rounded-lg border border-[#24252c]/10 hover:bg-[#1090F8] hover:text-white transition-colors cursor-pointer"
-                              >
-                                Edit Serial & Status
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setPrintScope('unit');
-                                  setSelectedPrintModel(model);
-                                  setSelectedPrintUnit(unit);
-                                  setShowPrintModal(true);
-                                }}
-                                title="Print Serial Tag Sticker for this unit"
-                                className="bg-sky-50 text-sky-700 hover:bg-sky-600 hover:text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg border border-sky-200 transition-colors cursor-pointer shrink-0 flex items-center gap-1"
-                              >
-                                <IconPrinter className="w-3.5 h-3.5" /> Tag
-                              </button>
-                              <button
-                                onClick={() =>
-                                  setUnitToDelete({ modelId: model.modelId, serialId: unit.serialId })
-                                }
-                                title="Remove Unit"
-                                className="bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg border border-rose-200 transition-colors cursor-pointer shrink-0"
-                              >
-                                Remove
-                              </button>
+                                <div className="text-xs font-bold text-[var(--ink)] mt-2 flex items-center gap-1.5">
+                                  {isUnderRepair && (
+                                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                                  )}
+                                  <span>{unit.status}</span>
+                                </div>
+
+                                <div className="text-[10px] text-[#24252c]/50 mt-1">
+                                  Last Inspection: {unit.lastMaintenance}
+                                </div>
+
+                                {unit.notes && (
+                                  <div className="text-[10px] text-amber-600 mt-1 italic">
+                                    "{unit.notes}"
+                                  </div>
+                                )}
+
+                                {/* Live Upcoming Event Assignment Badge */}
+                                {hasUpcomingBooking && (
+                                  <div className="mt-2 p-2 bg-blue-50/80 border border-blue-200 rounded-lg text-[10px] text-blue-900">
+                                    <div className="flex items-center gap-1 font-bold text-blue-800">
+                                      <IconCalendar className="w-3 h-3 text-blue-700" />
+                                      <span>Scheduled Event:</span>
+                                    </div>
+                                    <div className="font-semibold truncate mt-0.5">
+                                      {assignments[0].eventName}
+                                    </div>
+                                    <div className="text-[9px] text-blue-700/80">
+                                      Date: {assignments[0].eventDate} ({assignments[0].customerName})
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="mt-3 pt-2 border-t border-[#24252c]/[0.06] flex flex-wrap items-center gap-1.5">
+                                {/* 1-Click Quarantine or Restore Button */}
+                                {isUnderRepair ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRestoreUnitOperational(model.modelId, model.name, unit)}
+                                    title="Mark fixed and restore to warehouse availability"
+                                    className="flex-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white border border-emerald-300 text-[11px] font-bold py-1.5 px-2 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1"
+                                  >
+                                    <IconCheck className="w-3.5 h-3.5" /> Restore
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleInitiateQuarantine(model.modelId, model.name, unit)}
+                                    title="Tag Under Repair to deduct from available booking stock"
+                                    className="flex-1 bg-amber-50 text-amber-700 hover:bg-rose-600 hover:text-white border border-amber-300 text-[11px] font-bold py-1.5 px-2 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1"
+                                  >
+                                    <span>Quarantine</span>
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditUnitModal(model.modelId, unit)}
+                                  className="bg-[var(--mist)] text-[var(--ink)] text-[11px] font-semibold py-1.5 px-2.5 rounded-lg border border-[#24252c]/10 hover:bg-[#1090F8] hover:text-white transition-colors cursor-pointer"
+                                  title="Edit Serial Tag, Condition, or Status"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPrintScope('unit');
+                                    setSelectedPrintModel(model);
+                                    setSelectedPrintUnit(unit);
+                                    setShowPrintModal(true);
+                                  }}
+                                  title="Print Serial Tag Sticker for this unit"
+                                  className="bg-sky-50 text-sky-700 hover:bg-sky-600 hover:text-white text-[11px] font-bold px-2 py-1.5 rounded-lg border border-sky-200 transition-colors cursor-pointer shrink-0 flex items-center gap-0.5"
+                                >
+                                  <IconPrinter className="w-3.5 h-3.5" /> Tag
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setUnitToDelete({ modelId: model.modelId, serialId: unit.serialId })
+                                  }
+                                  title="Remove Unit"
+                                  className="bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white text-[11px] font-bold px-2 py-1.5 rounded-lg border border-rose-200 transition-colors cursor-pointer shrink-0"
+                                >
+                                  Remove
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -1198,6 +1473,94 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
           })}
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* QUARANTINE BOOKING CONFLICT MODAL                                         */}
+      {/* ========================================================================= */}
+      <ModalOverlay isOpen={showQuarantineModal} onClose={() => setShowQuarantineModal(false)}>
+        <div className="bg-white rounded-[2rem] p-6 max-w-lg w-full shadow-2xl border border-[#24252c]/10 relative">
+          <button
+            onClick={() => setShowQuarantineModal(false)}
+            className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+          >
+            <IconX className="w-5 h-5" />
+          </button>
+
+          <div className="flex items-center gap-2 mb-1">
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
+            <span className="text-xs font-bold uppercase tracking-wider text-rose-600">Booking Assignment Conflict</span>
+          </div>
+
+          <h3 className="text-xl font-extrabold text-[var(--ink)]">
+            Quarantine Scheduled Unit
+          </h3>
+          <p className="text-xs text-[#24252c]/60 mt-1 mb-4 leading-relaxed">
+            Unit <strong className="font-mono font-extrabold text-[#1090F8]">{quarantineTarget?.unit.serialId}</strong> ({quarantineTarget?.modelName}) is currently assigned to upcoming event(s).
+          </p>
+
+          {quarantineTarget && quarantineTarget.conflictingBookings.length > 0 && (
+            <div className="space-y-2 mb-5">
+              <span className="text-[11px] font-bold text-[#24252c]/70 uppercase tracking-wider block">
+                Affected Event Deployments:
+              </span>
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {quarantineTarget.conflictingBookings.map((b) => (
+                  <div
+                    key={b.bookingId}
+                    className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl text-xs space-y-0.5 text-amber-950"
+                  >
+                    <div className="font-extrabold text-sm text-[var(--ink)]">{b.eventName}</div>
+                    <div className="text-[11px] text-[#24252c]/70 flex items-center gap-1.5 flex-wrap">
+                      <IconCalendar className="w-3.5 h-3.5 text-amber-800 shrink-0" />
+                      <span><strong>Event Date:</strong> {b.eventDate} • <strong>Client:</strong> {b.customerName}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2.5 pt-2 border-t border-[#24252c]/[0.06]">
+            <button
+              type="button"
+              disabled={isSubmittingQuarantine}
+              onClick={() => {
+                if (quarantineTarget) {
+                  executeQuarantine(
+                    quarantineTarget.modelId,
+                    quarantineTarget.modelName,
+                    quarantineTarget.unit,
+                    true
+                  );
+                }
+              }}
+              className="w-full bg-rose-600 text-white font-semibold py-3 rounded-full hover:bg-rose-700 transition-colors cursor-pointer text-xs shadow-md disabled:opacity-50"
+            >
+              {isSubmittingQuarantine
+                ? 'Processing...'
+                : 'Quarantine & Unassign from Booking (Prompt for Replacement)'}
+            </button>
+
+            <button
+              type="button"
+              disabled={isSubmittingQuarantine}
+              onClick={() => {
+                if (quarantineTarget) {
+                  executeQuarantine(
+                    quarantineTarget.modelId,
+                    quarantineTarget.modelName,
+                    quarantineTarget.unit,
+                    false
+                  );
+                }
+              }}
+              className="w-full bg-[var(--mist)] text-[var(--ink)] font-semibold py-3 rounded-full hover:bg-[#EBEBEB] transition-colors cursor-pointer text-xs border border-[#24252c]/10"
+            >
+              Quarantine &amp; Keep Flagged in Booking Table
+            </button>
+          </div>
+        </div>
+      </ModalOverlay>
 
       {/* ========================================================================= */}
       {/* UNIFORM ADD MASTER MODEL MODAL (FULL CONTAINER PREVIEW IN MODAL) */}

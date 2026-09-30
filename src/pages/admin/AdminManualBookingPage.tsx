@@ -11,6 +11,7 @@ import {
   DEFAULT_LOGISTICS_CONFIG,
 } from '../../utils/logistics';
 import { logAuditEvent } from '../../utils/auditLogger';
+import { sendBookingConfirmationEmails } from '../../utils/emailService';
 import {
   fetchBookingSettings,
   fetchScheduleOverrides,
@@ -646,6 +647,32 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
           addons: selectedAddonStrings,
         },
       });
+
+      // Dispatch automated booking confirmation email
+      if (email.trim() && email.includes('@')) {
+        sendBookingConfirmationEmails({
+          bookingId: bookingPayload.paymongo_reference_number,
+          paymongoReference: bookingPayload.paymongo_reference_number,
+          customerName: fullCustomerName,
+          customerEmail: email.trim(),
+          customerPhone: phoneDigits.trim() ? `+63 ${phoneDigits.trim()}` : undefined,
+          packageName: selectedPkg.name,
+          packageTag: selectedPkg.tag,
+          eventType: eventType,
+          eventDate: eventDate,
+          startTime: startTime ? formatTimeAmPm(startTime) : '1:00 PM',
+          endTime: endTime ? formatTimeAmPm(endTime) : '6:00 PM',
+          venueAddress: venueAddress,
+          totalCost: totalCost,
+          depositAmount: amountDueToday,
+          remainingBalance: remainingBalanceAmount,
+          paymentChannel: finalChannel,
+          isFullyPaid: isFullPayment,
+          selectedAddons: selectedAddonStrings,
+          inclusions: selectedPkg.inclusions,
+          balancePaymentMethod: finalMethod,
+        }).catch((e) => console.warn('Manual booking confirmation email notice:', e));
+      }
 
       setSuccessBookingData({
         ref: bookingPayload.paymongo_reference_number,

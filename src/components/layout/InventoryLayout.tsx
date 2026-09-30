@@ -205,6 +205,7 @@ export function InventoryLayout({
             {navItem('Unit Assignments', 'inventory-units', <IconShield className="w-4 h-4" />)}
             {navItem('Alerts & Repairs', 'inventory-alerts', <IconBox className="w-4 h-4" />, activeAlertCount)}
             {navItem('Usage Reports', 'inventory-reports', <IconTicket className="w-4 h-4" />)}
+            {navItem('Maintenance Reports', 'inventory-maintenance-reports', <IconShield className="w-4 h-4" />)}
           </nav>
         </div>
 

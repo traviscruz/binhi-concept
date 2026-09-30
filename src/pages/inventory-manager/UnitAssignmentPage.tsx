@@ -1,22 +1,44 @@
 import { useState, useEffect } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconShield, IconSearch } from '../../components/shared/icons';
+import {
+  IconShield,
+  IconSearch,
+  IconCheck,
+  IconBox,
+  IconClock,
+  IconChevronUp,
+  IconChevronDown,
+} from '../../components/shared/icons';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { supabase } from '../../lib/supabase';
+
+function IconAlertTriangle({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+      />
+    </svg>
+  );
+}
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
 
 interface GearItem {
-  name: string;       // raw item label (with qty prefix stripped)
-  rawName: string;    // original label as stored
-  qty: number;        // parsed quantity (e.g. 2 for "2x")
-  serialIds: string[]; // assigned serial IDs (length = qty or pool size)
+  name: string;
+  rawName: string;
+  qty: number;
+  serialIds: string[];
   isAddon: boolean;
 }
 
 interface BookingEquipment {
+  id: string;
   bookingRef: string;
   customerName: string;
   packageName: string;
@@ -26,207 +48,427 @@ interface BookingEquipment {
   eventType: string;
   venue: string;
   paymentStatus: string;
-  gear: GearItem[]; // merged inclusions + addons with serials
+  assignedUnitsRaw: any[];
+  gear: GearItem[];
+  hasConflict?: boolean;
+  conflictSerials?: string[];
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  paid: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-  confirmed: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-  pending: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
-  cancelled: 'bg-rose-500/10 text-rose-600 border-rose-500/20',
+  paid: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  confirmed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  partial: 'bg-amber-50 text-amber-700 border-amber-200',
+  pending: 'bg-sky-50 text-sky-700 border-sky-200',
+  pending_verification: 'bg-purple-50 text-purple-700 border-purple-200',
+  cancelled: 'bg-rose-50 text-rose-700 border-rose-200',
 };
 
 const STATUS_LABEL: Record<string, string> = {
-  paid: 'Confirmed',
+  paid: 'Paid (Full)',
   confirmed: 'Confirmed',
+  partial: 'Deposit Paid',
   pending: 'Pending',
+  pending_verification: 'Pending Review',
   cancelled: 'Cancelled',
 };
 
-// Deterministic-but-spread hash: seeds with bookingRef + item name + itemIndex
-// so the same booking always gets the same serials, but different items/bookings rotate
-function seededIndex(seed: string, len: number): number {
-  let h = 0;
+function seededIndex(seed: string, max: number): number {
+  let hash = 0;
   for (let i = 0; i < seed.length; i++) {
-    h = (Math.imul(31, h) + seed.charCodeAt(i)) | 0;
+    hash = (hash << 5) - hash + seed.charCodeAt(i);
+    hash |= 0;
   }
-  return Math.abs(h) % len;
+  return Math.abs(hash) % max;
 }
 
-// Fuzzy match: check if a model name is relevant to a gear item label
 function fuzzyMatch(itemLabel: string, modelName: string): boolean {
-  const norm = (s: string) =>
-    s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-  const labelWords = norm(itemLabel).split(' ').filter((w) => w.length > 2);
-  const modelNorm = norm(modelName);
-  const matches = labelWords.filter((w) => modelNorm.includes(w));
-  return matches.length >= Math.max(1, Math.floor(labelWords.length * 0.4));
+  const item = itemLabel.toLowerCase();
+  const model = modelName.toLowerCase();
+  if (model.includes(item) || item.includes(model)) return true;
+  const keywords = item.split(/\s+/).filter((w) => w.length > 2);
+  return keywords.some((kw) => model.includes(kw));
 }
 
 export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
-  const [bookingItems, setBookingItems] = useState<BookingEquipment[]>([]);
+  const [bookingsList, setBookingsList] = useState<BookingEquipment[]>([]);
+  const [physicalUnitsLookup, setPhysicalUnitsLookup] = useState<Record<string, { status: string; condition: string; modelId: string }>>({});
+  const [modelAvailableSerials, setModelAvailableSerials] = useState<Record<string, { name: string; availableSerials: string[] }>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [expandedRef, setExpandedRef] = useState<string | null>(null);
+  const [swappingSerial, setSwappingSerial] = useState(false);
 
-  useEffect(() => {
-    async function fetchData() {
-      setLoading(true);
-      try {
-        // 1. Fetch all non-cancelled bookings sorted by event date ascending
-        const { data: bookings, error: bookingsError } = await supabase
-          .from('bookings')
-          .select(
-            'id, paymongo_reference_number, customer_name, package_id, package_name, event_date, event_type, venue_address, payment_status, selected_addons'
-          )
-          .neq('payment_status', 'cancelled')
-          .order('event_date', { ascending: true });
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      // 1. Fetch all non-cancelled bookings with assigned_units directly from Supabase
+      const { data: bookings, error: bookingsError } = await supabase
+        .from('bookings')
+        .select(
+          'id, paymongo_reference_number, customer_name, package_id, package_name, event_date, event_type, venue_address, payment_status, selected_addons, assigned_units'
+        )
+        .neq('payment_status', 'cancelled')
+        .order('event_date', { ascending: true });
 
-        if (bookingsError) throw bookingsError;
+      if (bookingsError) throw bookingsError;
 
-        // 2. Fetch all packages for inclusions/tag
-        const { data: packages, error: packagesError } = await supabase
-          .from('packages')
-          .select('package_id, name, tag, inclusions, items');
+      // 2. Fetch all packages for inclusions/tag
+      const { data: packages, error: packagesError } = await supabase
+        .from('packages')
+        .select('package_id, name, tag, inclusions, items');
 
-        if (packagesError) throw packagesError;
+      if (packagesError) throw packagesError;
 
-        // 3. Fetch all physical units with model info
-        const { data: physicalUnits, error: unitsError } = await supabase
-          .from('physical_units')
-          .select('serial_id, model_id, status, condition');
+      // 3. Fetch all physical units with status and condition
+      const { data: physicalUnits, error: unitsError } = await supabase
+        .from('physical_units')
+        .select('serial_id, model_id, status, condition');
 
-        if (unitsError) throw unitsError;
+      if (unitsError) throw unitsError;
 
-        // 4. Fetch equipment models for name lookup
-        const { data: equipmentModels, error: modelsError } = await supabase
-          .from('equipment_models')
-          .select('model_id, name, category');
+      // 4. Fetch equipment models for name lookup
+      const { data: equipmentModels, error: modelsError } = await supabase
+        .from('equipment_models')
+        .select('model_id, name, category');
 
-        if (modelsError) throw modelsError;
+      if (modelsError) throw modelsError;
 
-        // Build lookup maps
-        const pkgMap: Record<string, { tag: string; inclusions: string[] }> = {};
-        (packages || []).forEach((p: any) => {
-          const inclusions: string[] =
-            Array.isArray(p.inclusions) && p.inclusions.length > 0
-              ? p.inclusions
-              : Array.isArray(p.items)
-              ? p.items
-              : [];
-          pkgMap[p.package_id] = { tag: p.tag || 'Standard Setup', inclusions };
-        });
+      // Build physical units status lookup
+      const unitLookup: Record<string, { status: string; condition: string; modelId: string }> = {};
+      (physicalUnits || []).forEach((u: any) => {
+        unitLookup[u.serial_id] = {
+          status: u.status,
+          condition: u.condition,
+          modelId: u.model_id,
+        };
+      });
+      setPhysicalUnitsLookup(unitLookup);
 
-        // model_id -> { name, units: serial_id[] }
-        const modelMap: Record<string, { name: string; serials: string[] }> = {};
-        (equipmentModels || []).forEach((m: any) => {
-          modelMap[m.model_id] = { name: m.name, serials: [] };
-        });
-        (physicalUnits || []).forEach((u: any) => {
-          if (modelMap[u.model_id]) {
-            modelMap[u.model_id].serials.push(u.serial_id);
-          }
-        });
+      // Build lookup maps
+      const pkgMap: Record<string, { tag: string; inclusions: string[] }> = {};
+      (packages || []).forEach((p: any) => {
+        const inclusions: string[] =
+          Array.isArray(p.inclusions) && p.inclusions.length > 0
+            ? p.inclusions
+            : Array.isArray(p.items)
+            ? p.items
+            : [];
+        pkgMap[p.package_id] = { tag: p.tag || 'Standard Setup', inclusions };
+      });
 
-        // Flatten: itemLabel -> list of available serial IDs
-        // We'll fuzzy-match package inclusions/addon names to model names
-        const allModelEntries = Object.values(modelMap); // { name, serials }[]
+      // model_id -> { name, availableSerials: string[] } ONLY operational warehouse units
+      const modelMap: Record<string, { name: string; availableSerials: string[] }> = {};
+      (equipmentModels || []).forEach((m: any) => {
+        modelMap[m.model_id] = { name: m.name, availableSerials: [] };
+      });
 
-        // Parse quantity prefix from label, e.g. "2x Active PA" -> { qty: 2, label: "Active PA" }
-        function parseQty(raw: string): { qty: number; label: string } {
-          const m = raw.match(/^(\d+)\s*[xX]\s+(.+)$/);
-          if (m) return { qty: parseInt(m[1], 10), label: m[2].trim() };
-          return { qty: 1, label: raw.trim() };
+      (physicalUnits || []).forEach((u: any) => {
+        const isOperational =
+          u.status === 'Available in Warehouse' &&
+          u.condition !== 'In Repair' &&
+          u.status !== 'Maintenance / Repair' &&
+          u.status !== 'Decommissioned / Inactive';
+
+        if (isOperational && modelMap[u.model_id]) {
+          modelMap[u.model_id].availableSerials.push(u.serial_id);
+        }
+      });
+      setModelAvailableSerials(modelMap);
+
+      // Flatten: itemLabel -> list of available serial IDs
+      const allModelEntries = Object.values(modelMap);
+
+      // Parse quantity prefix and format proper clean naming for gear & add-on items
+      function parseQty(raw: any): { qty: number; label: string } {
+        if (!raw) return { qty: 1, label: 'Add-on Item' };
+
+        let str = '';
+        let explicitQty: number | null = null;
+
+        if (typeof raw === 'object') {
+          str = raw.name || raw.label || raw.model_id || raw.modelId || 'Add-on Item';
+          if (raw.qty) explicitQty = Number(raw.qty);
+          else if (raw.quantity) explicitQty = Number(raw.quantity);
+        } else {
+          str = String(raw).trim();
         }
 
-        // Resolve N unique serials for a given gear item using seeded rotation
-        function resolveSerials(
-          rawLabel: string,
-          bookingRef: string,
-          itemIndex: number
-        ): { label: string; qty: number; serialIds: string[] } {
-          const { qty, label } = parseQty(rawLabel);
+        // Strip price tags e.g. "Wireless Mic (₱1,500)" or "(+₱2,000)" or "- ₱1,500" or "[+₱1,500]"
+        str = str.replace(/(\s*[\(\[-]\s*(\+?\s*₱|\+?\s*PHP)\s*[\d,]+(\.\d{2})?(\s*each|\s*\/unit)?\s*[\)\]]?)/gi, '').trim();
 
-          const matched = allModelEntries.filter((m) => fuzzyMatch(label, m.name));
-          const allSerials = [...new Set(matched.flatMap((m) => m.serials))].sort();
+        // Check if string starts with "2x " or "2 x " or "2 Units of "
+        const qtyMatch = str.match(/^(\d+)\s*(?:[xX]|\s*units?\s+of)\s+(.+)$/i);
+        if (qtyMatch) {
+          explicitQty = parseInt(qtyMatch[1], 10) || 1;
+          str = qtyMatch[2].trim();
+        }
 
-          if (allSerials.length === 0) return { label, qty, serialIds: [] };
+        // Check if str matches an official equipment model ID
+        if (modelMap[str]?.name) {
+          str = modelMap[str].name;
+        } else {
+          const matchedModel = Object.entries(modelMap).find(([mid]) => mid.toLowerCase() === str.toLowerCase());
+          if (matchedModel) {
+            str = matchedModel[1].name;
+          }
+        }
 
-          // Pick `qty` unique serials by rotating through pool with seeded offsets
-          const chosen: string[] = [];
-          const used = new Set<string>();
-          for (let k = 0; k < qty; k++) {
-            const seed = `${bookingRef}::${label}::${itemIndex}::${k}`;
-            let idx = seededIndex(seed, allSerials.length);
-            // Walk forward until we find an unused serial (wrap around)
-            let attempts = 0;
-            while (used.has(allSerials[idx]) && attempts < allSerials.length) {
-              idx = (idx + 1) % allSerials.length;
-              attempts++;
+        // Convert hyphenated or underscored slugs (e.g. "chauvet-intimidator-moving-head") to proper Title Case
+        if (/^[a-z0-9_-]+$/i.test(str) && (str.includes('-') || str.includes('_'))) {
+          str = str
+            .split(/[-_]+/)
+            .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+            .join(' ');
+        }
+
+        return { qty: explicitQty || 1, label: str.trim() || 'Add-on Item' };
+      }
+
+      // Resolve N unique serials for a given gear item using seeded rotation or database
+      function resolveSerials(
+        rawLabel: string,
+        bookingRef: string,
+        itemIndex: number,
+        existingUnitsForBooking: any[]
+      ): { label: string; qty: number; serialIds: string[] } {
+        const { qty, label } = parseQty(rawLabel);
+
+        // Check if already persisted in database assigned_units
+        const matchingDbSerials = existingUnitsForBooking
+          .filter((u: any) => {
+            if (typeof u === 'string') return false;
+            const uName = (u.name || u.raw_name || '').toLowerCase();
+            return uName.includes(label.toLowerCase()) || label.toLowerCase().includes(uName);
+          })
+          .map((u: any) => u.serial_id || u.serialId)
+          .filter(Boolean);
+
+        if (matchingDbSerials.length >= qty) {
+          return { label, qty, serialIds: matchingDbSerials.slice(0, qty) };
+        }
+
+        const matched = allModelEntries.filter((m) => fuzzyMatch(label, m.name));
+        const allSerials = [...new Set(matched.flatMap((m) => m.availableSerials))].sort();
+
+        if (allSerials.length === 0) return { label, qty, serialIds: [] };
+
+        // Pick `qty` unique serials by rotating through pool with seeded offsets
+        const chosen: string[] = [];
+        const used = new Set<string>();
+        for (let k = 0; k < qty; k++) {
+          const seed = `${bookingRef}::${label}::${itemIndex}::${k}`;
+          let idx = seededIndex(seed, allSerials.length);
+          let attempts = 0;
+          while (used.has(allSerials[idx]) && attempts < allSerials.length) {
+            idx = (idx + 1) % allSerials.length;
+            attempts++;
+          }
+          const picked = allSerials[idx];
+          chosen.push(picked);
+          used.add(picked);
+        }
+
+        return { label, qty, serialIds: chosen };
+      }
+
+      // Map bookings to BookingEquipment with conflict detection
+      const mapped: BookingEquipment[] = (bookings || []).map((b: any) => {
+        const pkg = pkgMap[b.package_id] || { tag: 'Production Setup', inclusions: [] };
+        const addons: string[] = Array.isArray(b.selected_addons) ? b.selected_addons : [];
+        const bookingRef = b.paymongo_reference_number || `BNH-${b.id.slice(0, 8)}`;
+        const dbAssigned: any[] = Array.isArray(b.assigned_units)
+          ? b.assigned_units
+          : typeof b.assigned_units === 'string'
+          ? JSON.parse(b.assigned_units || '[]')
+          : [];
+
+        let allGear: GearItem[] = [];
+        const conflictSerials: string[] = [];
+
+        if (dbAssigned.length > 0) {
+          const gearMap: Record<string, GearItem> = {};
+          dbAssigned.forEach((u: any) => {
+            const { label: properName } = parseQty(typeof u === 'string' ? u : u.name || u.raw_name || 'Equipment Item');
+            const name = properName;
+            const rawName = typeof u === 'string' ? u : u.raw_name || name;
+            const isAddon = typeof u === 'object' ? Boolean(u.is_addon || u.isAddon) : false;
+            const key = `${isAddon ? 'addon' : 'pkg'}::${name}`;
+            const sid = typeof u === 'string' ? u : u.serial_id || u.serialId || '';
+
+            if (!gearMap[key]) {
+              gearMap[key] = {
+                name,
+                rawName,
+                qty: 0,
+                serialIds: [],
+                isAddon,
+              };
             }
-            const picked = allSerials[idx];
-            chosen.push(picked);
-            used.add(picked);
-          }
 
-          return { label, qty, serialIds: chosen };
-        }
-
-        // Map bookings to BookingEquipment
-        const mapped: BookingEquipment[] = (bookings || []).map((b: any) => {
-          const pkg = pkgMap[b.package_id] || { tag: 'Production Setup', inclusions: [] };
-          const addons: string[] = Array.isArray(b.selected_addons) ? b.selected_addons : [];
-          const bookingRef = b.paymongo_reference_number || `BNH-${b.id.slice(0, 8)}`;
-
+            gearMap[key].qty += 1;
+            if (sid && !gearMap[key].serialIds.includes(sid)) {
+              gearMap[key].serialIds.push(sid);
+              // Check if assigned serial is currently under repair / quarantine
+              const uInfo = unitLookup[sid];
+              if (
+                uInfo &&
+                (uInfo.status === 'Maintenance / Repair' ||
+                  uInfo.status === 'Decommissioned / Inactive' ||
+                  uInfo.condition === 'In Repair')
+              ) {
+                conflictSerials.push(sid);
+              }
+            }
+          });
+          allGear = Object.values(gearMap);
+        } else {
           const inclusionGear: GearItem[] = pkg.inclusions.map((item, i) => {
-            const { label, qty, serialIds } = resolveSerials(item, bookingRef, i);
+            const { label, qty, serialIds } = resolveSerials(item, bookingRef, i, dbAssigned);
             return { name: label, rawName: item, qty, serialIds, isAddon: false };
           });
 
           const addonGear: GearItem[] = addons.map((addon, i) => {
-            const { label, qty, serialIds } = resolveSerials(addon, bookingRef, pkg.inclusions.length + i);
+            const { label, qty, serialIds } = resolveSerials(addon, bookingRef, pkg.inclusions.length + i, dbAssigned);
             return { name: label, rawName: addon, qty, serialIds, isAddon: true };
           });
 
-          return {
-            bookingRef,
-            customerName: b.customer_name || 'Customer',
-            packageName: b.package_name || 'Production Package',
-            packageTag: pkg.tag,
-            eventDate: b.event_date
-              ? new Date(b.event_date).toLocaleDateString('en-US', {
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric',
-                })
-              : '—',
-            eventDateRaw: b.event_date || '',
-            eventType: b.event_type || '',
-            venue: b.venue_address || '—',
-            paymentStatus: b.payment_status || 'pending',
-            gear: [...inclusionGear, ...addonGear],
-          };
-        });
+          allGear = [...inclusionGear, ...addonGear];
 
-        setBookingItems(mapped);
-      } catch (err) {
-        console.error('Failed to fetch booking equipment data:', err);
-      } finally {
-        setLoading(false);
-      }
+          if (allGear.length > 0) {
+            const initialUnits = allGear.flatMap((g, gIdx) =>
+              g.serialIds.map((sid, sIdx) => ({
+                serial_id: sid,
+                unit_id: `${bookingRef}__${g.name}__${gIdx}__${sIdx}__${sid}`,
+                name: g.name,
+                raw_name: g.rawName,
+                is_addon: g.isAddon,
+                condition: 'Operational (Good)',
+                checked: false,
+              }))
+            );
+            supabase
+              .from('bookings')
+              .update({ assigned_units: initialUnits, updated_at: new Date().toISOString() })
+              .eq('id', b.id)
+              .then();
+          }
+        }
+
+        return {
+          id: b.id,
+          bookingRef,
+          customerName: b.customer_name || 'Event Host',
+          packageName: b.package_name || 'Custom Setup',
+          packageTag: pkg.tag,
+          eventDate: b.event_date
+            ? new Date(b.event_date + 'T00:00:00').toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              })
+            : 'Date Pending',
+          eventDateRaw: b.event_date || '',
+          eventType: b.event_type || 'Event Production',
+          venue: b.venue_address || 'TBD / Manila',
+          paymentStatus: (b.payment_status || 'pending').toLowerCase(),
+          gear: allGear,
+          assignedUnitsRaw: dbAssigned,
+          hasConflict: conflictSerials.length > 0,
+          conflictSerials,
+        };
+      });
+
+      setBookingsList(mapped);
+    } catch (err) {
+      console.error('Error fetching unit assignments:', err);
+    } finally {
+      setLoading(false);
     }
+  };
 
+  useEffect(() => {
     fetchData();
+
+    const handleUpdate = () => fetchData();
+    window.addEventListener('inventory-updated', handleUpdate);
+    return () => window.removeEventListener('inventory-updated', handleUpdate);
   }, []);
 
-  const filtered = bookingItems.filter((b) => {
-    const matchesStatus =
-      statusFilter === 'All' ||
-      (statusFilter === 'Confirmed' && (b.paymentStatus === 'paid' || b.paymentStatus === 'confirmed')) ||
-      (statusFilter === 'Pending' && b.paymentStatus === 'pending');
+  // Swap out a damaged/under-repair serial unit with an available operational unit
+  const handleSwapSerial = async (bookingId: string, oldSerialId: string, newSerialId: string, gearName: string) => {
+    if (!newSerialId || oldSerialId === newSerialId) return;
 
-    const q = search.toLowerCase();
+    setSwappingSerial(true);
+    try {
+      const targetBooking = bookingsList.find((b) => b.id === bookingId);
+      if (!targetBooking) return;
+
+      const rawAssigned: any[] = targetBooking.assignedUnitsRaw || [];
+      const updatedAssigned = rawAssigned.map((u: any) => {
+        const sid = typeof u === 'string' ? u : u.serial_id || u.serialId || '';
+        if (sid === oldSerialId) {
+          if (typeof u === 'string') return newSerialId;
+          return {
+            ...u,
+            serial_id: newSerialId,
+            unit_id: u.unit_id ? u.unit_id.replace(oldSerialId, newSerialId) : `${targetBooking.bookingRef}__${gearName}__${newSerialId}`,
+            condition: 'Operational (Good)',
+            checked: false,
+          };
+        }
+        return u;
+      });
+
+      const { error } = await supabase
+        .from('bookings')
+        .update({
+          assigned_units: updatedAssigned,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', bookingId);
+
+      if (error) throw error;
+
+      // Log Audit Trail
+      await supabase.from('audit_logs').insert({
+        action: 'SWAP_UNDER_REPAIR_UNIT',
+        module: 'inventory',
+        target_id: bookingId,
+        details: `Replaced under-repair unit ${oldSerialId} with available unit ${newSerialId} for ${gearName} in Booking ${targetBooking.bookingRef}`,
+        user_role: 'inventory_manager',
+      });
+
+      await fetchData();
+      window.dispatchEvent(new Event('inventory-updated'));
+    } catch (err) {
+      console.error('Failed to swap unit:', err);
+    } finally {
+      setSwappingSerial(false);
+    }
+  };
+
+  // Helper to find available operational serials matching gear item name
+  const getAvailableSerialsForGear = (gearName: string, currentAssignedSerials: string[]): string[] => {
+    const matchedModels = Object.values(modelAvailableSerials).filter((m) => fuzzyMatch(gearName, m.name));
+    const allAvail = [...new Set(matchedModels.flatMap((m) => m.availableSerials))];
+    // Exclude serials already assigned in this booking
+    return allAvail.filter((s) => !currentAssignedSerials.includes(s));
+  };
+
+  const totalConflictBookings = bookingsList.filter((b) => b.hasConflict).length;
+
+  const filtered = bookingsList.filter((b) => {
+    const matchesStatus =
+      statusFilter === 'All'
+        ? true
+        : statusFilter === 'Confirmed'
+        ? b.paymentStatus === 'confirmed' || b.paymentStatus === 'paid' || b.paymentStatus === 'partial'
+        : statusFilter === 'Pending'
+        ? b.paymentStatus === 'pending' || b.paymentStatus === 'pending_verification'
+        : true;
+
+    const q = search.trim().toLowerCase();
     const matchesSearch =
       !q ||
       b.bookingRef.toLowerCase().includes(q) ||
@@ -244,12 +486,12 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.06]">
         <div>
-          <MonoBadge icon={IconShield}>Equipment Planning</MonoBadge>
+          <MonoBadge icon={IconShield}>Equipment Planning & Quarantine Filter</MonoBadge>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ink)] mt-1.5">
             Unit-Level Date Assignments
           </h1>
           <p className="text-xs text-[#24252c]/60 mt-1">
-            Per-booking gear list with assigned serial unit IDs — including upcoming events.
+            Per-booking operational unit assignments. Damaged &amp; quarantined units are automatically filtered out from availability.
           </p>
         </div>
 
@@ -257,9 +499,24 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
           onClick={() => go('inventory-items')}
           className="bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/10 text-xs font-bold px-4 py-2.5 rounded-full hover:bg-[var(--ink)] hover:text-white transition-colors self-start sm:self-auto cursor-pointer"
         >
-          View Equipment Catalog
+          Manage Unit Quarantine in Catalog
         </button>
       </div>
+
+      {/* Top Conflict Warning Banner if Any Booking Has Under-Repair Units */}
+      {totalConflictBookings > 0 && (
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 shadow-sm flex items-start gap-3.5">
+          <IconAlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+          <div className="text-xs text-rose-900 flex-1">
+            <p className="font-extrabold text-sm text-rose-900">
+              Maintenance Conflict Detected ({totalConflictBookings} booking{totalConflictBookings > 1 ? 's' : ''} affected)
+            </p>
+            <p className="text-rose-800/80 mt-0.5 leading-relaxed">
+              One or more units scheduled for upcoming events are currently tagged as <strong>Under Repair / Quarantine</strong>. Use the swap selectors below to reassign available operational warehouse units.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Filter Bar */}
       <div className="bg-white p-4 rounded-2xl border border-[#24252c]/[0.08] shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -315,11 +572,33 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
             const isPast = b.eventDateRaw ? new Date(b.eventDateRaw) < new Date() : false;
             const packageGear = b.gear.filter((g) => !g.isAddon);
             const addonGear = b.gear.filter((g) => g.isAddon);
+            const totalUnitsCount = b.gear.reduce((sum, g) => sum + g.qty, 0);
+
+            // Read live packing verification status directly from Supabase assigned_units
+            const dbAssigned = b.assignedUnitsRaw || [];
+            const isSerialVerified = (serialId: string) => {
+              return dbAssigned.some((u: any) => {
+                if (!u) return false;
+                const uSerial = typeof u === 'string' ? u : (u.serial_id || u.serialId || u.unit_id || '');
+                return uSerial.toUpperCase().includes(serialId.toUpperCase()) && Boolean(u.checked);
+              });
+            };
+
+            const verifiedCount = b.gear.reduce((sum, g) => {
+              return sum + g.serialIds.filter((s) => isSerialVerified(s)).length;
+            }, 0);
+
+            const packingPct = totalUnitsCount > 0 ? Math.min(100, Math.round((verifiedCount / totalUnitsCount) * 100)) : 0;
+            const isFullyPacked = packingPct === 100 && totalUnitsCount > 0;
+
+            const allCurrentSerialsInBooking = b.gear.flatMap((g) => g.serialIds);
 
             return (
               <div
                 key={b.bookingRef}
-                className="bg-white rounded-2xl border border-[#24252c]/[0.08] shadow-sm overflow-hidden"
+                className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all ${
+                  b.hasConflict ? 'border-rose-300 ring-1 ring-rose-200' : 'border-[#24252c]/[0.08]'
+                }`}
               >
                 {/* Booking Row Header */}
                 <button
@@ -338,9 +617,36 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
                     >
                       {STATUS_LABEL[b.paymentStatus] || b.paymentStatus}
                     </span>
+
+                    {/* Conflict Badge */}
+                    {b.hasConflict && (
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-300 flex items-center gap-1 animate-pulse">
+                        <IconAlertTriangle className="w-3 h-3 text-rose-600" />
+                        <span>Unit Under Repair Flagged</span>
+                      </span>
+                    )}
+
                     {isPast && (
                       <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-[#24252c]/10 text-[#24252c]/50 border border-[#24252c]/10 uppercase tracking-wider">
                         Past Event
+                      </span>
+                    )}
+
+                    {/* Live Warehouse Packing Status Badge */}
+                    {isFullyPacked ? (
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-300 flex items-center gap-1.5">
+                        <IconCheck className="w-3 h-3 text-emerald-600 stroke-[2.5]" />
+                        <span>100% Packed &amp; Verified</span>
+                      </span>
+                    ) : verifiedCount > 0 ? (
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-300 flex items-center gap-1.5">
+                        <IconBox className="w-3 h-3 text-amber-600" />
+                        <span>Packing: {verifiedCount}/{totalUnitsCount} ({packingPct}%)</span>
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-medium px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200 flex items-center gap-1.5">
+                        <IconClock className="w-3 h-3 text-gray-400" />
+                        <span>Dispatch Pending</span>
                       </span>
                     )}
                   </div>
@@ -358,9 +664,13 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <span className="text-[10px] font-semibold bg-[#1090F8]/10 text-[#1090F8] px-2 py-0.5 rounded-full border border-[#1090F8]/20">
-                        {b.gear.reduce((sum, g) => sum + g.qty, 0)} unit{b.gear.reduce((sum, g) => sum + g.qty, 0) !== 1 ? 's' : ''}
+                        {totalUnitsCount} unit{totalUnitsCount !== 1 ? 's' : ''}
                       </span>
-                      <span className="text-[#24252c]/40 font-bold text-sm">{isExpanded ? '▲' : '▼'}</span>
+                      {isExpanded ? (
+                        <IconChevronUp className="w-4 h-4 text-[#24252c]/40" />
+                      ) : (
+                        <IconChevronDown className="w-4 h-4 text-[#24252c]/40" />
+                      )}
                     </div>
                   </div>
                 </button>
@@ -379,7 +689,7 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
                             <thead>
                               <tr className="bg-[var(--mist)] border-b border-[#24252c]/[0.06] text-[#24252c]/50 uppercase tracking-wider text-[10px]">
                                 <th className="py-2 px-3 font-semibold text-left">Equipment Item</th>
-                                <th className="py-2 px-3 font-semibold text-left w-1/2">Assigned Serial IDs</th>
+                                <th className="py-2 px-3 font-semibold text-left w-1/2">Assigned Serial IDs &amp; Reassignment</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-[#24252c]/[0.04]">
@@ -398,15 +708,68 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
                                   </td>
                                   <td className="py-2.5 px-3 align-top">
                                     {g.serialIds.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1">
-                                        {g.serialIds.map((sid, si) => (
-                                          <span
-                                            key={si}
-                                            className="font-mono font-bold text-[10px] text-[#1090F8] bg-[#1090F8]/8 px-2 py-0.5 rounded-lg border border-[#1090F8]/15"
-                                          >
-                                            {sid}
-                                          </span>
-                                        ))}
+                                      <div className="flex flex-col gap-2">
+                                        {g.serialIds.map((sid, si) => {
+                                          const verified = isSerialVerified(sid);
+                                          const uInfo = physicalUnitsLookup[sid];
+                                          const isUnderRepair =
+                                            uInfo &&
+                                            (uInfo.status === 'Maintenance / Repair' ||
+                                              uInfo.status === 'Decommissioned / Inactive' ||
+                                              uInfo.condition === 'In Repair');
+
+                                          const availableReplacements = getAvailableSerialsForGear(g.name, allCurrentSerialsInBooking);
+
+                                          return (
+                                            <div key={si} className="flex flex-wrap items-center gap-2">
+                                              <span
+                                                className={`inline-flex items-center gap-1 font-mono font-bold text-[10px] px-2 py-0.5 rounded-lg border transition-all ${
+                                                  isUnderRepair
+                                                    ? 'bg-rose-50 text-rose-800 border-rose-300 ring-1 ring-rose-200'
+                                                    : verified
+                                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                                    : 'bg-[#1090F8]/8 text-[#1090F8] border-[#1090F8]/15'
+                                                }`}
+                                              >
+                                                {isUnderRepair ? (
+                                                  <span className="text-rose-600 font-extrabold flex items-center gap-1">
+                                                    <IconAlertTriangle className="w-3 h-3 text-rose-600" />
+                                                    {sid} [UNDER REPAIR]
+                                                  </span>
+                                                ) : (
+                                                  <>
+                                                    {verified && <IconCheck className="w-2.5 h-2.5 text-emerald-600 stroke-[3]" />}
+                                                    <span>{sid}</span>
+                                                    {verified && <span className="text-[9px] text-emerald-600 uppercase font-semibold">Packed</span>}
+                                                  </>
+                                                )}
+                                              </span>
+
+                                              {/* 1-Click Reassignment Swap Selector for Under-Repair or Quarantined Units */}
+                                              {isUnderRepair && (
+                                                <div className="flex items-center gap-1.5">
+                                                  <select
+                                                    disabled={swappingSerial}
+                                                    onChange={(e) => handleSwapSerial(b.id, sid, e.target.value, g.name)}
+                                                    className="text-[11px] bg-white border border-rose-300 text-rose-900 rounded-lg px-2.5 py-1 font-semibold focus:outline-none focus:border-[#1090F8] shadow-2xs"
+                                                  >
+                                                    <option value="">Reassign Replacement Unit...</option>
+                                                    {availableReplacements.map((availSid) => (
+                                                      <option key={availSid} value={availSid}>
+                                                        Swap to: {availSid} (Operational in Warehouse)
+                                                      </option>
+                                                    ))}
+                                                  </select>
+                                                  {availableReplacements.length === 0 && (
+                                                    <span className="text-[10px] text-rose-600 font-bold italic">
+                                                      No other warehouse units available
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
                                       </div>
                                     ) : (
                                       <span className="text-[#24252c]/30 italic text-[10px]">No unit matched</span>
@@ -431,7 +794,7 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
                             <thead>
                               <tr className="bg-amber-50 border-b border-amber-200/60 text-amber-800/60 uppercase tracking-wider text-[10px]">
                                 <th className="py-2 px-3 font-semibold text-left">Add-on Item</th>
-                                <th className="py-2 px-3 font-semibold text-left w-1/2">Assigned Serial IDs</th>
+                                <th className="py-2 px-3 font-semibold text-left w-1/2">Assigned Serial IDs &amp; Reassignment</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-amber-100">
@@ -450,15 +813,68 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
                                   </td>
                                   <td className="py-2.5 px-3 align-top">
                                     {g.serialIds.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1">
-                                        {g.serialIds.map((sid, si) => (
-                                          <span
-                                            key={si}
-                                            className="font-mono font-bold text-[10px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded-lg border border-amber-200"
-                                          >
-                                            {sid}
-                                          </span>
-                                        ))}
+                                      <div className="flex flex-col gap-2">
+                                        {g.serialIds.map((sid, si) => {
+                                          const verified = isSerialVerified(sid);
+                                          const uInfo = physicalUnitsLookup[sid];
+                                          const isUnderRepair =
+                                            uInfo &&
+                                            (uInfo.status === 'Maintenance / Repair' ||
+                                              uInfo.status === 'Decommissioned / Inactive' ||
+                                              uInfo.condition === 'In Repair');
+
+                                          const availableReplacements = getAvailableSerialsForGear(g.name, allCurrentSerialsInBooking);
+
+                                          return (
+                                            <div key={si} className="flex flex-wrap items-center gap-2">
+                                              <span
+                                                className={`inline-flex items-center gap-1 font-mono font-bold text-[10px] px-2 py-0.5 rounded-lg border transition-all ${
+                                                  isUnderRepair
+                                                    ? 'bg-rose-50 text-rose-800 border-rose-300 ring-1 ring-rose-200'
+                                                    : verified
+                                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                                    : 'bg-amber-100 text-amber-700 border-amber-200'
+                                                }`}
+                                              >
+                                                {isUnderRepair ? (
+                                                  <span className="text-rose-600 font-extrabold flex items-center gap-1">
+                                                    <IconAlertTriangle className="w-3 h-3 text-rose-600" />
+                                                    {sid} [UNDER REPAIR]
+                                                  </span>
+                                                ) : (
+                                                  <>
+                                                    {verified && <IconCheck className="w-2.5 h-2.5 text-emerald-600 stroke-[3]" />}
+                                                    <span>{sid}</span>
+                                                    {verified && <span className="text-[9px] text-emerald-600 uppercase font-semibold">Packed</span>}
+                                                  </>
+                                                )}
+                                              </span>
+
+                                              {/* 1-Click Reassignment Swap Selector for Addon */}
+                                              {isUnderRepair && (
+                                                <div className="flex items-center gap-1.5">
+                                                  <select
+                                                    disabled={swappingSerial}
+                                                    onChange={(e) => handleSwapSerial(b.id, sid, e.target.value, g.name)}
+                                                    className="text-[11px] bg-white border border-rose-300 text-rose-900 rounded-lg px-2.5 py-1 font-semibold focus:outline-none focus:border-[#1090F8] shadow-2xs"
+                                                  >
+                                                    <option value="">Reassign Replacement Unit...</option>
+                                                    {availableReplacements.map((availSid) => (
+                                                      <option key={availSid} value={availSid}>
+                                                        Swap to: {availSid} (Operational in Warehouse)
+                                                      </option>
+                                                    ))}
+                                                  </select>
+                                                  {availableReplacements.length === 0 && (
+                                                    <span className="text-[10px] text-rose-600 font-bold italic">
+                                                      No other warehouse units available
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
                                       </div>
                                     ) : (
                                       <span className="text-[#24252c]/30 italic text-[10px]">No unit matched</span>
@@ -470,12 +886,6 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
                           </table>
                         </div>
                       </div>
-                    )}
-
-                    {b.gear.length === 0 && (
-                      <p className="text-xs text-[#24252c]/40 italic">
-                        No gear inclusions found for this package.
-                      </p>
                     )}
                   </div>
                 )}

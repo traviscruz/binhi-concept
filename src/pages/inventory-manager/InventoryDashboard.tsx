@@ -54,10 +54,10 @@ export default function InventoryDashboard({ go }: { go: (p: Page) => void }) {
       </div>
 
       {/* Quick Navigation Cards */}
-      <div className="grid sm:grid-cols-3 gap-4">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <button
           onClick={() => go('inventory-items')}
-          className="p-5 rounded-2xl bg-white border border-[#24252c]/[0.08] hover:border-[#1090F8]/50 transition-all text-left group shadow-sm"
+          className="p-5 rounded-2xl bg-white border border-[#24252c]/[0.08] hover:border-[#1090F8]/50 transition-all text-left group shadow-sm cursor-pointer"
         >
           <span className="text-xs font-bold text-[#1090F8] uppercase tracking-wider">Equipment CRUD</span>
           <h3 className="font-bold text-base text-[var(--ink)] mt-1 group-hover:text-[#1090F8] transition-colors">Manage Gear Catalog →</h3>
@@ -66,7 +66,7 @@ export default function InventoryDashboard({ go }: { go: (p: Page) => void }) {
 
         <button
           onClick={() => go('inventory-units')}
-          className="p-5 rounded-2xl bg-white border border-[#24252c]/[0.08] hover:border-[#1090F8]/50 transition-all text-left group shadow-sm"
+          className="p-5 rounded-2xl bg-white border border-[#24252c]/[0.08] hover:border-[#1090F8]/50 transition-all text-left group shadow-sm cursor-pointer"
         >
           <span className="text-xs font-bold text-emerald-600 uppercase tracking-wider">Physical Serial Locks</span>
           <h3 className="font-bold text-base text-[var(--ink)] mt-1 group-hover:text-emerald-600 transition-colors">Unit Assignments →</h3>
@@ -75,11 +75,20 @@ export default function InventoryDashboard({ go }: { go: (p: Page) => void }) {
 
         <button
           onClick={() => go('inventory-alerts')}
-          className="p-5 rounded-2xl bg-white border border-[#24252c]/[0.08] hover:border-amber-500/50 transition-all text-left group shadow-sm"
+          className="p-5 rounded-2xl bg-white border border-[#24252c]/[0.08] hover:border-amber-500/50 transition-all text-left group shadow-sm cursor-pointer"
         >
-          <span className="text-xs font-bold text-amber-600 uppercase tracking-wider">Action Items (3)</span>
-          <h3 className="font-bold text-base text-[var(--ink)] mt-1 group-hover:text-amber-600 transition-colors">Maintenance Alerts →</h3>
-          <p className="text-xs text-[#24252c]/60 mt-1">Review low stock warnings and calibration logs.</p>
+          <span className="text-xs font-bold text-amber-600 uppercase tracking-wider">Repairs & Alerts</span>
+          <h3 className="font-bold text-base text-[var(--ink)] mt-1 group-hover:text-amber-600 transition-colors">Alerts & Incidents →</h3>
+          <p className="text-xs text-[#24252c]/60 mt-1">Review post-event damage and quarantine items.</p>
+        </button>
+
+        <button
+          onClick={() => go('inventory-maintenance-reports')}
+          className="p-5 rounded-2xl bg-amber-50/70 border border-amber-200 hover:border-amber-400 transition-all text-left group shadow-sm cursor-pointer"
+        >
+          <span className="text-xs font-bold text-amber-800 uppercase tracking-wider">Executive Audit</span>
+          <h3 className="font-bold text-base text-amber-950 mt-1 group-hover:text-amber-700 transition-colors">Maintenance Reports →</h3>
+          <p className="text-xs text-amber-900/70 mt-1">Printable audit sheets, MTTR downtime & repair costs.</p>
         </button>
       </div>
 

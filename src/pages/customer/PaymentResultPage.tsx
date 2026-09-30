@@ -5,6 +5,7 @@ import { IconCheck, IconX, IconShield, IconPrinter } from '../../components/shar
 import { supabase } from '../../lib/supabase';
 import { formatDisplayDate } from '../../utils/bookingService';
 import { retrievePaymongoCheckoutSession } from '../../utils/paymongoPayment';
+import { sendBookingConfirmationEmails } from '../../utils/emailService';
 
 export default function PaymentResultPage({
   type,
@@ -135,6 +136,37 @@ export default function PaymentResultPage({
                 .from('bookings')
                 .update(updatePayload)
                 .eq('paymongo_reference_number', cleanRef);
+            }
+
+            // Dispatch automated customer confirmation and admin alert email
+            const targetEmail = bookingData?.customer_email || customerEmail;
+            if (targetEmail && targetEmail.includes('@')) {
+              try {
+                const emailSentKey = `binhi_conf_email_sent_${cleanRef || bookingData?.id}`;
+                if (!sessionStorage.getItem(emailSentKey)) {
+                  sessionStorage.setItem(emailSentKey, 'true');
+                  sendBookingConfirmationEmails({
+                    bookingId: bookingData?.id || cleanRef || ref,
+                    paymongoReference: cleanRef || bookingData?.paymongo_reference_number || ref,
+                    customerName: bookingData?.customer_name || customerName || 'Valued Client',
+                    customerEmail: targetEmail,
+                    customerPhone: bookingData?.customer_phone || customerPhone,
+                    packageName: bookingData?.package_name || packageName || 'Production Package',
+                    eventType: bookingData?.event_type || 'Event Production',
+                    eventDate: formatDisplayDate(bookingData?.event_date || eventDate),
+                    startTime: bookingData?.start_time ? String(bookingData.start_time).slice(0, 5) : '1:00 PM',
+                    endTime: bookingData?.end_time ? String(bookingData.end_time).slice(0, 5) : '6:00 PM',
+                    venueAddress: bookingData?.venue_address || venue || 'Selected Venue Location',
+                    totalCost: bookingData?.total_cost || totalAmount || 0,
+                    depositAmount: bookingData?.deposit_amount || paidAmount || 0,
+                    paymentChannel: resolvedChannel,
+                    isFullyPaid: Boolean(isFull),
+                    selectedAddons: Array.isArray(bookingData?.selected_addons) ? bookingData.selected_addons : [],
+                  }).catch((e) => console.warn('Booking confirmation email notice:', e));
+                }
+              } catch (e) {
+                console.warn('Booking confirmation email attempt note:', e);
+              }
             }
           } else {
             // If it's a balance settlement attempt that failed or was cancelled, do NOT cancel the confirmed booking

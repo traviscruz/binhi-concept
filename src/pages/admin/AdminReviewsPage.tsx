@@ -60,7 +60,8 @@ export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void })
     loadReviews();
   }, []);
 
-  const handleUpdateStatus = async (id: string, newStatus: string) => {
+  const handleToggleFeatured = async (id: string, currentStatus: string) => {
+    const newStatus = currentStatus === 'featured' ? 'approved' : 'featured';
     const target = reviews.find((r) => r.id === id);
     try {
       await supabase
@@ -69,12 +70,12 @@ export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void })
         .eq('id', id);
 
       await logAuditEvent({
-        action: 'MODERATE_REVIEW',
+        action: 'FEATURE_REVIEW',
         module: 'reviews',
         targetId: id,
         targetName: target ? `${target.author} (${target.packageName})` : id,
-        details: `Updated review status for ${target?.author || id} from "${target?.status || 'pending'}" to "${newStatus}"`,
-        previousData: { status: target?.status },
+        details: `Updated review featured status for ${target?.author || id} to "${newStatus}"`,
+        previousData: { status: currentStatus },
         currentData: { status: newStatus },
       });
 
@@ -88,8 +89,10 @@ export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void })
 
   const filteredReviews = reviews.filter((r) => {
     if (filter === 'All') return true;
-    if (filter === 'Pending') return r.status === 'pending';
-    if (filter === 'Approved') return r.status === 'approved' || r.status === 'featured';
+    if (filter === '5 Stars') return r.rating === 5;
+    if (filter === '4 Stars') return r.rating === 4;
+    if (filter === '3 Stars & Below') return r.rating <= 3;
+    if (filter === 'Featured') return r.status === 'featured';
     return true;
   });
 
@@ -97,19 +100,19 @@ export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void })
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.06]">
         <div>
-          <MonoBadge icon={IconTicket}>Review Moderation</MonoBadge>
+          <MonoBadge icon={IconTicket}>Customer Feedback</MonoBadge>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ink)] mt-1.5">
-            Customer Review Moderation
+            Published Customer Reviews
           </h1>
           <p className="text-xs text-[#24252c]/60 mt-1">
-            Review and approve customer feedback to feature them live on the landing page testimonials.
+            All reviews are published directly to the home screen and per-package detail pages.
           </p>
         </div>
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-2">
-        {['All', 'Pending', 'Approved'].map((tab) => (
+      <div className="flex items-center gap-2 flex-wrap">
+        {['All', '5 Stars', '4 Stars', '3 Stars & Below', 'Featured'].map((tab) => (
           <button
             key={tab}
             onClick={() => setFilter(tab)}
@@ -140,7 +143,7 @@ export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void })
       ) : (
         <div className="space-y-4">
           {filteredReviews.map((r) => {
-            const isApproved = r.status === 'approved' || r.status === 'featured';
+            const isFeatured = r.status === 'featured';
 
             return (
               <div key={r.id} className="p-6 rounded-2xl bg-white border border-[#24252c]/[0.08] shadow-sm space-y-3">
@@ -150,14 +153,8 @@ export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void })
                     <span className="text-xs font-bold text-amber-500">{'★'.repeat(r.rating)}</span>
                   </div>
 
-                  <span
-                    className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
-                      isApproved
-                        ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
-                        : 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
-                    }`}
-                  >
-                    {r.status}
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                    Live &amp; Published
                   </span>
                 </div>
 
@@ -170,24 +167,23 @@ export default function AdminReviewsPage({ go: _go }: { go: (p: Page) => void })
                 </p>
 
                 <div className="flex justify-end gap-2 pt-1">
-                  {isApproved ? (
-                    <div className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
-                      </svg>
-                      Published on Landing Page
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => handleUpdateStatus(r.id, 'approved')}
-                      className="text-xs font-semibold px-4 py-2 rounded-full bg-emerald-600 text-white border border-emerald-600 hover:bg-emerald-700 transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-                      </svg>
-                      Approve & Publish to Landing Page
-                    </button>
-                  )}
+                  <div className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                    </svg>
+                    Live on Home &amp; Package Pages
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleFeatured(r.id, r.status)}
+                    className={`text-xs font-semibold px-4 py-1.5 rounded-full border transition-all cursor-pointer ${
+                      isFeatured
+                        ? 'bg-amber-100 text-amber-800 border-amber-300'
+                        : 'bg-[var(--mist)] text-[#24252c]/70 border-[#24252c]/10 hover:border-[#1090F8]'
+                    }`}
+                  >
+                    {isFeatured ? '★ Featured Highlight' : '☆ Feature on Home Top'}
+                  </button>
                 </div>
               </div>
             );

@@ -92,6 +92,14 @@ export function formatTimeAmPm(timeStr: string): string {
   return `${h}:${mFmt} ${ampm}`;
 }
 
+export function calculateCrewArrivalTime(startTime: string, bufferHoursOrMinutes: number = 2.5): string {
+  if (!startTime) return '';
+  const startMin = timeToMinutes(startTime);
+  const bufferMin = bufferHoursOrMinutes > 24 ? bufferHoursOrMinutes : Math.round(bufferHoursOrMinutes * 60);
+  const crewArrivalMin = Math.max(0, startMin - bufferMin);
+  return minutesToTime(crewArrivalMin);
+}
+
 const SETTINGS_STORAGE_KEY = 'binhi_booking_settings_config';
 const OVERRIDES_STORAGE_KEY = 'binhi_booking_overrides_config';
 

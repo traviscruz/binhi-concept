@@ -32,6 +32,7 @@ import {
   timeToMinutes,
   minutesToTime,
   formatTimeAmPm,
+  calculateCrewArrivalTime,
   getOperatingWindowForDate,
   parseRequestedTimesFromReason,
   DEFAULT_BOOKING_SETTINGS,
@@ -43,6 +44,7 @@ import {
   sendCustomerRescheduleRejection,
   sendCustomerCancellationRefundEmail,
   sendCustomerCancellationRejectionEmail,
+  sendCustomerBookingConfirmationEmail,
 } from '../../utils/emailService';
 import {
   exportFinancialLedgerToExcel,
@@ -417,6 +419,29 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           customer: row.customer,
         },
       });
+
+      // Dispatch automated booking confirmation email to customer
+      if (row.email && row.email.includes('@')) {
+        sendCustomerBookingConfirmationEmail({
+          bookingId: row.id,
+          paymongoReference: row.paymongoReferenceNumber || row.id,
+          customerName: row.customer,
+          customerEmail: row.email,
+          customerPhone: row.phone,
+          packageName: row.package,
+          eventType: 'Event Production',
+          eventDate: row.date,
+          startTime: row.startTime ? formatTimeAmPm(row.startTime) : '1:00 PM',
+          endTime: row.endTime ? formatTimeAmPm(row.endTime) : '6:00 PM',
+          venueAddress: row.venue,
+          totalCost: row.totalNum || 0,
+          depositAmount: row.depositNum || 0,
+          remainingBalance: row.remainingNum || 0,
+          paymentChannel: row.paymentChannel,
+          isFullyPaid: Boolean(row.isFullyPaid),
+          balancePaymentMethod: row.balancePaymentMethod,
+        }).catch((e) => console.warn('Deposit approval confirmation email notice:', e));
+      }
 
       loadBookings();
     } catch (err) {
@@ -2692,7 +2717,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                       <div className="flex items-center gap-1.5">
                         <IconClock className="w-4 h-4 text-[#1090F8]" />
                         <span className="text-[11px] font-bold uppercase text-[var(--ink)] tracking-wider">
-                          Event Schedule Window
+                          Event Schedule Window (Event Proper)
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5">
@@ -2709,6 +2734,20 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                         </span>
                       </div>
                     </div>
+
+                    {directRescheduleOpWindow.isOpen && directRescheduleStartTime && (
+                      <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200/90 px-3 py-2 rounded-xl text-xs">
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-900 block">Binhi Crew Arrival &amp; Setup (Ingress):</span>
+                          <span className="text-[11px] text-emerald-800">
+                            Crew arrives on-site early to assemble styling before event start
+                          </span>
+                        </div>
+                        <span className="font-mono font-extrabold text-xs text-emerald-950 bg-white px-2 py-1 rounded-lg border border-emerald-300 shrink-0">
+                          Call Time: ~{formatTimeAmPm(calculateCrewArrivalTime(directRescheduleStartTime, adminBookingSettings.default_turnaround_hours))}
+                        </span>
+                      </div>
+                    )}
 
                     {/* Quick Preset Buttons */}
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">

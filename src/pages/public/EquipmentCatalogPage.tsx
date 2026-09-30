@@ -33,11 +33,14 @@ export default function EquipmentCatalogPage({ goItemDetail }: { goItemDetail: (
           .select('model_id, status');
 
         if (!modelsError && modelsData && modelsData.length > 0) {
-          // Build availability lookup per model_id
+          // Build availability & maintenance lookup per model_id
           const availableCountMap: Record<string, number> = {};
+          const inRepairCountMap: Record<string, number> = {};
           (unitsData || []).forEach((u: any) => {
             if (u.status === 'Available in Warehouse') {
               availableCountMap[u.model_id] = (availableCountMap[u.model_id] || 0) + 1;
+            } else if (u.status === 'Maintenance / Repair') {
+              inRepairCountMap[u.model_id] = (inRepairCountMap[u.model_id] || 0) + 1;
             }
           });
 
@@ -48,7 +51,16 @@ export default function EquipmentCatalogPage({ goItemDetail }: { goItemDetail: (
             if (m.category) catSet.add(m.category);
 
             const availCount = availableCountMap[m.model_id] ?? availableCountMap[m.id] ?? 0;
+            const repairCount = inRepairCountMap[m.model_id] ?? inRepairCountMap[m.id] ?? 0;
             const rate = Number(m.rental_rate || 0);
+
+            // Status label with maintenance indicator
+            let statusLabel = availCount > 0 ? `${availCount} Available in Warehouse` : 'Available for Booking';
+            if (availCount === 0 && repairCount > 0) {
+              statusLabel = `Under Repair (${repairCount} in maintenance)`;
+            } else if (repairCount > 0) {
+              statusLabel = `${availCount} Available (${repairCount} under repair)`;
+            }
 
             // Match fallback static item for photos & specs if available
             const staticMatch = EQUIPMENT_ITEMS.find(
@@ -66,7 +78,7 @@ export default function EquipmentCatalogPage({ goItemDetail }: { goItemDetail: (
               category: m.category || 'Audio Production',
               price: rate > 0 ? `₱${rate.toLocaleString()}/day` : 'Included in Package',
               rawPrice: rate,
-              status: availCount > 0 ? `${availCount} Available in Warehouse` : 'Available for Booking',
+              status: statusLabel,
               img: itemImg,
               photos: itemPhotos,
               desc: m.description || m.desc || staticMatch?.desc || 'Professional-grade event production equipment maintained to BINHI quality standards.',
@@ -75,6 +87,7 @@ export default function EquipmentCatalogPage({ goItemDetail }: { goItemDetail: (
                 `Model ID: ${m.model_id}`,
                 `Category: ${m.category}`,
                 `Rental Rate: ₱${rate.toLocaleString()} / day`,
+                ...(repairCount > 0 ? [`Quarantine/Repair: ${repairCount} unit(s) currently under maintenance`] : []),
               ],
               includedInPackages: staticMatch?.includedInPackages || ['Package A — Intimate', 'Package Full — Concert'],
             };

@@ -8,6 +8,7 @@ import {
   formatTimeAmPm,
   timeToMinutes,
   minutesToTime,
+  calculateCrewArrivalTime,
   getOperatingWindowForDate,
   getDayAvailabilityStatus,
   type BookingSettings,
@@ -419,7 +420,7 @@ export function ManualBookingStep1({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-[#24252c]/[0.08] pb-2.5">
               <div>
                 <h4 className="text-xs font-extrabold uppercase tracking-wider text-[var(--ink)]">Event Schedule Window</h4>
-                <p className="text-[11px] text-[#24252c]/60">Select production start and conclusion times within daily operating hours.</p>
+                <p className="text-[11px] text-[#24252c]/60">Select actual event program start and end time (Event Proper).</p>
               </div>
               {opWindow.isOpen ? (
                 <span className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 px-2.5 py-1 rounded-full self-start sm:self-auto">
@@ -431,6 +432,20 @@ export function ManualBookingStep1({
                 </span>
               )}
             </div>
+
+            {opWindow.isOpen && startTime && (
+              <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200/90 px-3 py-2 rounded-xl text-xs">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-900 block">Binhi Crew Arrival &amp; Setup (Ingress):</span>
+                  <span className="text-[11px] text-emerald-800">
+                    Crew will arrive on-site early to assemble styling before program starts
+                  </span>
+                </div>
+                <span className="font-mono font-extrabold text-xs text-emerald-950 bg-white px-2.5 py-1 rounded-lg border border-emerald-300 shrink-0">
+                  Call Time: ~{formatTimeAmPm(calculateCrewArrivalTime(startTime, bookingSettings.default_turnaround_hours))}
+                </span>
+              </div>
+            )}
 
             {!opWindow.isOpen && (
               <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">

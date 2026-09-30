@@ -27,6 +27,7 @@ export type Page =
   | 'inventory-units'
   | 'inventory-alerts'
   | 'inventory-reports'
+  | 'inventory-maintenance-reports'
   | 'inventory-profile'
   | 'admin-dashboard'
   | 'admin-bookings'

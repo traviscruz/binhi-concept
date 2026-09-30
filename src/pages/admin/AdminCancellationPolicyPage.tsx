@@ -74,8 +74,10 @@ export default function AdminCancellationPolicyPage({ go: _go }: { go: (p: Page)
       setSaveSuccess(true);
 
       await logAuditEvent({
-        action: 'CANCELLATION_POLICY_UPDATED',
-        category: 'FINANCIAL',
+        action: 'UPDATE_BOOKING_STATUS',
+        module: 'system',
+        targetId: 'cancellation_policy',
+        targetName: 'Cancellation Policy',
         details: `Updated cancellation policy tiers & rules (${config.tiers.length} active tiers, Grace Period: ${config.gracePeriodHours}h).`,
       });
 

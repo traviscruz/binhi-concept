@@ -117,7 +117,7 @@ export default function MyReviewsPage({ go }: { go: (p: Page) => void }) {
         package_name: selected?.packageName || 'Event Setup',
         rating,
         comment: review.trim(),
-        status: 'pending', // Pending Admin Moderation
+        status: 'approved', // Published directly
         is_mock: false,
       });
 
@@ -139,18 +139,20 @@ export default function MyReviewsPage({ go }: { go: (p: Page) => void }) {
         <div className="max-w-xl mx-auto text-center">
           <div className="bg-white rounded-[2rem] p-8 border border-[#24252c]/[0.08] shadow-sm">
             <span className="w-14 h-14 rounded-full bg-emerald-500 text-white flex items-center justify-center mx-auto text-2xl font-bold mb-4 shadow-md">
-              ✓
+              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </span>
-            <h2 className="text-2xl font-extrabold text-[var(--ink)]">Review Submitted for Moderation</h2>
+            <h2 className="text-2xl font-extrabold text-[var(--ink)]">Review Published Live!</h2>
             <p className="text-xs text-[#24252c]/60 mt-2">
-              Thank you! Your review has been submitted for admin approval and <strong className="text-[#1090F8]">+100 BINHI Loyalty Points</strong> have been added to your account balance.
+              Thank you! Your review is now published live on the home screen and package pages, and <strong className="text-[#1090F8]">+100 BINHI Loyalty Points</strong> have been added to your account balance.
             </p>
             <div className="flex justify-center gap-3 mt-6">
               <button
                 onClick={() => go('landing')}
                 className="bg-[var(--mist)] text-[var(--ink)] text-xs font-semibold px-5 py-3 rounded-full hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer"
               >
-                View Landing Page Testimonials
+                View Home Page Reviews
               </button>
               <button
                 onClick={() => go('loyalty')}

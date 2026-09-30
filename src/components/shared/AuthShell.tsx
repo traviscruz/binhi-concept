@@ -22,7 +22,27 @@ export function AuthShell({
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="flex justify-center mb-8">
-          <img src={binhiLogo} alt="BINHI Concept" className="h-10 w-auto object-contain" draggable={false} />
+          {onBack ? (
+            <button
+              onClick={onBack}
+              className="inline-flex items-center justify-center p-1 hover:opacity-90 transition-all focus:outline-none cursor-pointer"
+              title="Return to home"
+            >
+              <img
+                src={binhiLogo}
+                alt="BINHI Concept"
+                className="h-16 md:h-20 w-auto max-w-[280px] object-contain drop-shadow-xs"
+                draggable={false}
+              />
+            </button>
+          ) : (
+            <img
+              src={binhiLogo}
+              alt="BINHI Concept"
+              className="h-16 md:h-20 w-auto max-w-[280px] object-contain drop-shadow-xs"
+              draggable={false}
+            />
+          )}
         </div>
 
         {onBack && (

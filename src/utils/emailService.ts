@@ -8,6 +8,8 @@ import {
   getAdminCancellationRequestAlertHtml,
   getCustomerCancellationRefundHtml,
   getCustomerCancellationRejectedHtml,
+  getBookingConfirmationEmailHtml,
+  getAdminNewBookingConfirmationAlertHtml,
   type InquiryEmailData,
   type InquiryReplyEmailData,
   type RescheduleRequestEmailData,
@@ -16,8 +18,11 @@ import {
   type CancellationRequestEmailData,
   type CancellationRefundEmailData,
   type CancellationRejectionEmailData,
+  type BookingConfirmationEmailData,
 } from './emailTemplates';
 import { supabase } from '../lib/supabase';
+
+import { logSystemError } from './systemHealthService';
 
 export interface SendEmailPayload {
   to: string;
@@ -50,14 +55,42 @@ export async function sendEmail(payload: SendEmailPayload): Promise<SendEmailRes
 
     const data = await response.json();
     if (!response.ok || !data.success) {
-      console.error('[emailService] Server returned error:', data.error || response.statusText);
-      return { success: false, error: data.error || `HTTP ${response.status}: ${response.statusText}` };
+      const errMsg = data.error || `HTTP ${response.status}: ${response.statusText}`;
+      console.error('[emailService] Server returned error:', errMsg);
+      
+      // Automatically log to System Health Diagnostics for Admin troubleshooting
+      try {
+        logSystemError({
+          service: 'email_sms',
+          severity: 'medium',
+          title: `Unsent Email: ${payload.subject.slice(0, 40)}...`,
+          errorMessage: errMsg,
+          endpointOrContext: `To: ${payload.to}`,
+          payload,
+        });
+      } catch {}
+
+      return { success: false, error: errMsg };
     }
 
     return { success: true, messageId: data.messageId };
   } catch (err: any) {
+    const errMsg = err.message || 'Failed to communicate with email server';
     console.error('[emailService] Network/Fetch error:', err);
-    return { success: false, error: err.message || 'Failed to communicate with email server' };
+
+    // Automatically log to System Health Diagnostics for Admin troubleshooting
+    try {
+      logSystemError({
+        service: 'email_sms',
+        severity: 'medium',
+        title: `Failed Dispatch: ${payload.subject.slice(0, 40)}...`,
+        errorMessage: errMsg,
+        endpointOrContext: `To: ${payload.to}`,
+        payload,
+      });
+    } catch {}
+
+    return { success: false, error: errMsg };
   }
 }
 
@@ -292,4 +325,65 @@ export async function sendCustomerCancellationRejectionEmail(
     replyTo: getAdminEmail(),
   });
 }
+
+/**
+ * Sends Official Booking Confirmation Email directly to the customer.
+ */
+export async function sendCustomerBookingConfirmationEmail(
+  data: BookingConfirmationEmailData
+): Promise<SendEmailResponse> {
+  if (!data.customerEmail || !data.customerEmail.includes('@')) {
+    return { success: false, error: 'Invalid or missing customer email address.' };
+  }
+
+  const html = getBookingConfirmationEmailHtml(data);
+  const safeRef = data.paymongoReference || data.bookingId;
+  const subject = `Official Booking Confirmation: #${safeRef} (${data.eventDate}) - BINHI Concept`;
+
+  return await sendEmail({
+    to: data.customerEmail.trim(),
+    subject,
+    html,
+    replyTo: getAdminEmail(),
+  });
+}
+
+/**
+ * Sends both Customer Booking Confirmation & Admin New Booking Alert emails.
+ */
+export async function sendBookingConfirmationEmails(
+  data: BookingConfirmationEmailData
+): Promise<{ customerSent: boolean; adminSent: boolean }> {
+  let customerSent = false;
+  let adminSent = false;
+  const adminEmail = getAdminEmail();
+
+  // 1. Customer Confirmation Email
+  try {
+    const custRes = await sendCustomerBookingConfirmationEmail(data);
+    customerSent = custRes.success;
+  } catch (err) {
+    console.error('[emailService] Error sending customer booking confirmation email:', err);
+  }
+
+  // 2. Admin Notification Alert
+  try {
+    if (adminEmail) {
+      const adminHtml = getAdminNewBookingConfirmationAlertHtml(data);
+      const safeRef = data.paymongoReference || data.bookingId;
+      const adminRes = await sendEmail({
+        to: adminEmail,
+        subject: `[New Confirmed Booking] #${safeRef} - ${data.customerName} (${data.eventDate})`,
+        html: adminHtml,
+        replyTo: data.customerEmail,
+      });
+      adminSent = adminRes.success;
+    }
+  } catch (err) {
+    console.error('[emailService] Error sending admin booking alert email:', err);
+  }
+
+  return { customerSent, adminSent };
+}
+
 

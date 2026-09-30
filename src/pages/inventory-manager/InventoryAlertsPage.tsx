@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconX, IconShield, IconSearch, IconPlus } from '../../components/shared/icons';
+import { IconX, IconShield, IconSearch, IconPlus, IconCheck } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { supabase } from '../../lib/supabase';
@@ -9,9 +9,50 @@ import { supabase } from '../../lib/supabase';
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
 
+function IconAlertTriangle({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+      />
+    </svg>
+  );
+}
+
+function IconWrench({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+      />
+      <circle cx="12" cy="12" r="3" strokeWidth={2} />
+    </svg>
+  );
+}
+
+function IconDollarSign({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 12c-1.11 0-2.08-.402-2.599-1M12 18v-2"
+      />
+    </svg>
+  );
+}
+
 export interface InventoryAlertItem {
   id: string;
-  type: string; // 'Maintenance Required', 'Hardware Damage Log'
+  type: string; // 'Lost / Missing Gear', 'Hardware Damage', 'Torn / Broken Cable', 'Maintenance Required'
+  category: 'Incident' | 'Maintenance';
   gear: string;
   details: string;
   severity: 'High' | 'Medium' | 'Low';
@@ -19,25 +60,55 @@ export interface InventoryAlertItem {
   modelId?: string;
   serialId?: string;
   isCustomAlert?: boolean;
+  // Post-Event Incident Specific Fields
+  bookingId?: string;
+  eventName?: string;
+  clientName?: string;
+  estimatedCost?: number;
+  clientLiability?: 'Client Liable' | 'Company Absorbed' | 'Under Investigation';
+  resolutionNotes?: string;
 }
 
 export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void }) {
   const [alerts, setAlerts] = useState<InventoryAlertItem[]>([]);
   const [equipmentModels, setEquipmentModels] = useState<any[]>([]);
+  const [recentBookings, setRecentBookings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState<'all' | 'incidents' | 'maintenance' | 'liable'>('all');
   const [severityFilter, setSeverityFilter] = useState('All');
-  const [showAddAlertModal, setShowAddAlertModal] = useState(false);
 
-  // Form State
+  // Modals
+  const [showAddIncidentModal, setShowAddIncidentModal] = useState(false);
+  const [showAddMaintenanceModal, setShowAddMaintenanceModal] = useState(false);
+  const [showResolveModal, setShowResolveModal] = useState(false);
+  const [selectedItemForResolve, setSelectedItemForResolve] = useState<InventoryAlertItem | null>(null);
+  const [resolveOutcome, setResolveOutcome] = useState('');
+  const [restoreUnitOperational, setRestoreUnitOperational] = useState(true);
+
+  // Form State: Post-Event Incident Log
+  const [incidentCategory, setIncidentCategory] = useState<'Lost / Missing Gear' | 'Hardware Damage' | 'Torn / Broken Cable' | 'Liquid Spill' | 'Electrical Fault'>('Lost / Missing Gear');
+  const [targetType, setTargetType] = useState<'model_unit' | 'custom_accessory'>('model_unit');
   const [selectedTarget, setSelectedTarget] = useState('');
-  const [alertType, setAlertType] = useState('Maintenance Required');
-  const [severity, setSeverity] = useState<'High' | 'Medium' | 'Low'>('High');
-  const [details, setDetails] = useState('');
+  const [customAccessoryName, setCustomAccessoryName] = useState('');
+  const [selectedBookingId, setSelectedBookingId] = useState('');
+  const [eventName, setEventName] = useState('');
+  const [clientName, setClientName] = useState('');
+  const [estimatedCost, setEstimatedCost] = useState<string>('3500');
+  const [clientLiability, setClientLiability] = useState<'Client Liable' | 'Company Absorbed' | 'Under Investigation'>('Client Liable');
+  const [incidentSeverity, setIncidentSeverity] = useState<'High' | 'Medium' | 'Low'>('High');
+  const [incidentDetails, setIncidentDetails] = useState('');
+
+  // Form State: Bench Maintenance Alert
+  const [maintTarget, setMaintTarget] = useState('');
+  const [maintType, setMaintType] = useState('Maintenance Required');
+  const [maintSeverity, setMaintSeverity] = useState<'High' | 'Medium' | 'Low'>('High');
+  const [maintDetails, setMaintDetails] = useState('');
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // =========================================================================
-  // SUPABASE READ (FETCH MODELS, UNITS & MAINTENANCE ALERTS)
+  // SUPABASE READ (FETCH MODELS, PHYSICAL UNITS, BOOKINGS & ALERTS)
   // =========================================================================
   const fetchAlertsAndInventory = async () => {
     setLoading(true);
@@ -49,8 +120,17 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
         .order('created_at', { ascending: false });
 
       if (modelsError) throw modelsError;
+      setEquipmentModels(modelsData || []);
 
-      // 2. Fetch active custom maintenance alerts
+      // 2. Fetch recent bookings for incident linking
+      const { data: bookingsData } = await supabase
+        .from('bookings')
+        .select('id, event_name, customer_name, event_date, status')
+        .order('event_date', { ascending: false })
+        .limit(40);
+      setRecentBookings(bookingsData || []);
+
+      // 3. Fetch active custom maintenance & incident alerts
       const { data: customAlertsData, error: alertsError } = await supabase
         .from('inventory_alerts')
         .select('*')
@@ -61,15 +141,13 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
         console.warn('Custom alerts table fetch note:', alertsError);
       }
 
-      setEquipmentModels(modelsData || []);
-
       const derivedAlerts: InventoryAlertItem[] = [];
 
+      // Physical units flagged as requiring repair or decommissioned
       if (modelsData && modelsData.length > 0) {
         modelsData.forEach((m: any) => {
           const units = m.units || [];
 
-          // Maintenance & Hardware Damage Alerts for physical units
           units.forEach((u: any) => {
             if (
               u.condition === 'In Repair' ||
@@ -79,9 +157,12 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
               u.status === 'Decommissioned / Inactive'
             ) {
               const isHigh = u.condition === 'In Repair' || u.status === 'Decommissioned / Inactive';
+              const isLost = (u.notes || '').toLowerCase().includes('lost') || (u.status || '').toLowerCase().includes('inactive');
+
               derivedAlerts.push({
                 id: `unit-${u.serial_id}`,
-                type: u.condition === 'In Repair' ? 'Hardware Damage Log' : 'Maintenance Required',
+                type: isLost ? 'Lost / Missing Gear' : u.condition === 'In Repair' ? 'Hardware Damage' : 'Maintenance Required',
+                category: isLost || u.condition === 'In Repair' ? 'Incident' : 'Maintenance',
                 gear: `${m.name} (${u.serial_id})`,
                 details: u.notes || `Unit condition is currently flagged as ${u.condition} (${u.status}).`,
                 severity: isHigh ? 'High' : 'Medium',
@@ -94,20 +175,56 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
         });
       }
 
-      // Add custom logged alerts from database (excluding stock warnings)
+      // Add custom logged alerts from database with parsed incident attributes
       if (customAlertsData && customAlertsData.length > 0) {
         customAlertsData.forEach((ca: any) => {
           if (ca.alert_type !== 'Low Stock Warning') {
+            let parsedDetails = ca.details || '';
+            let extBookingId = ca.booking_id;
+            let extEventName = ca.event_name;
+            let extClientName = ca.client_name;
+            let extCost = Number(ca.estimated_cost) || 0;
+            let extLiability = ca.client_liability || 'Client Liable';
+
+            // Check if details contains JSON metadata bundle
+            if (parsedDetails.startsWith('__INCIDENT_PAYLOAD__:')) {
+              try {
+                const meta = JSON.parse(parsedDetails.replace('__INCIDENT_PAYLOAD__:', ''));
+                parsedDetails = meta.notes || '';
+                extBookingId = extBookingId || meta.bookingId;
+                extEventName = extEventName || meta.eventName;
+                extClientName = extClientName || meta.clientName;
+                extCost = extCost || Number(meta.estimatedCost) || 0;
+                extLiability = extLiability || meta.clientLiability;
+              } catch (e) {}
+            }
+
+            const isIncident =
+              ca.alert_type === 'Lost / Missing Gear' ||
+              ca.alert_type === 'Hardware Damage' ||
+              ca.alert_type === 'Torn / Broken Cable' ||
+              ca.alert_type === 'Damage Incident' ||
+              ca.alert_type === 'Liquid Spill' ||
+              ca.alert_type === 'Electrical Fault' ||
+              Boolean(extEventName || extCost > 0);
+
             derivedAlerts.push({
               id: ca.id,
               type: ca.alert_type,
+              category: isIncident ? 'Incident' : 'Maintenance',
               gear: ca.gear_name,
-              details: ca.details,
-              severity: ca.severity as any,
+              details: parsedDetails,
+              severity: (ca.severity as any) || 'High',
               date: ca.created_at ? ca.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
               modelId: ca.model_id,
               serialId: ca.serial_id,
               isCustomAlert: true,
+              bookingId: extBookingId,
+              eventName: extEventName,
+              clientName: extClientName,
+              estimatedCost: extCost,
+              clientLiability: extLiability,
+              resolutionNotes: ca.resolution_notes,
             });
           }
         });
@@ -126,6 +243,21 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
     fetchAlertsAndInventory();
   }, []);
 
+  // Sync event & client names when booking is selected in modal
+  const handleBookingSelect = (bookingId: string) => {
+    setSelectedBookingId(bookingId);
+    if (!bookingId) {
+      setEventName('');
+      setClientName('');
+      return;
+    }
+    const b = recentBookings.find((item) => item.id === bookingId);
+    if (b) {
+      setEventName(b.event_name || 'Production Event');
+      setClientName(b.customer_name || 'Event Host');
+    }
+  };
+
   // Helper: Log Action to Audit Logs
   const logAuditToSupabase = async (action: string, targetId: string, details: string) => {
     try {
@@ -142,41 +274,130 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
   };
 
   // =========================================================================
-  // SUPABASE CREATE MAINTENANCE ALERT
+  // CREATE POST-EVENT DAMAGE / LOST EQUIPMENT INCIDENT LOG
   // =========================================================================
-  const handleCreateAlert = async (e: React.FormEvent) => {
+  const handleCreateIncident = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!details.trim()) return;
+    if (!incidentDetails.trim()) return;
 
     setIsSubmitting(true);
-    const gearDisplayName = selectedTarget || (equipmentModels[0]?.name ? `${equipmentModels[0].name}` : 'General Equipment');
+    const gearDisplayName =
+      targetType === 'custom_accessory'
+        ? customAccessoryName.trim() || 'Accessory Item'
+        : selectedTarget || (equipmentModels[0]?.name ? `${equipmentModels[0].name}` : 'General Equipment');
+
+    const costValue = Math.max(0, parseFloat(estimatedCost) || 0);
+
+    // Encode JSON metadata bundle for resilient cross-schema support
+    const metadataBundle = JSON.stringify({
+      bookingId: selectedBookingId || null,
+      eventName: eventName.trim() || null,
+      clientName: clientName.trim() || null,
+      estimatedCost: costValue,
+      clientLiability,
+      notes: incidentDetails.trim(),
+    });
+
+    const fullDetailsPayload = `__INCIDENT_PAYLOAD__:${metadataBundle}`;
 
     try {
-      // 1. Insert into inventory_alerts table
-      const { error: alertInsertError } = await supabase.from('inventory_alerts').insert({
-        alert_type: alertType,
-        severity: severity,
+      // 1. Attempt insert with extended columns, fallback to base columns if needed
+      const primaryPayload: any = {
+        alert_type: incidentCategory,
+        severity: incidentSeverity,
         gear_name: gearDisplayName,
-        details: details.trim(),
+        details: fullDetailsPayload,
         status: 'active',
-      });
+        booking_id: selectedBookingId || null,
+        event_name: eventName.trim() || null,
+        client_name: clientName.trim() || null,
+        estimated_cost: costValue,
+        client_liability: clientLiability,
+      };
+
+      const { error: alertInsertError } = await supabase.from('inventory_alerts').insert(primaryPayload);
 
       if (alertInsertError) {
-        console.warn('Supabase DB Insert Alert Note:', alertInsertError);
+        // Fallback without extended column definitions if table schema is default
+        await supabase.from('inventory_alerts').insert({
+          alert_type: incidentCategory,
+          severity: incidentSeverity,
+          gear_name: gearDisplayName,
+          details: fullDetailsPayload,
+          status: 'active',
+        });
       }
 
-      // 2. If target is a physical unit serial tag, update unit condition in physical_units table
+      // 2. If target is a physical unit serial tag, update unit status in physical_units table
       if (selectedTarget.includes('(') && selectedTarget.includes(')')) {
         const serialTagMatch = selectedTarget.match(/\(([^)]+)\)/);
         const serialTag = serialTagMatch ? serialTagMatch[1] : null;
 
         if (serialTag) {
-          const newCondition = alertType === 'Hardware Damage Log' ? 'In Repair' : 'Needs Inspection';
+          const isLost = incidentCategory === 'Lost / Missing Gear';
+          const newCondition = isLost ? 'Needs Inspection' : 'In Repair';
+          const newStatus = isLost ? 'Decommissioned / Inactive' : 'Maintenance / Repair';
+
           await supabase
             .from('physical_units')
             .update({
               condition: newCondition,
-              notes: details.trim(),
+              status: newStatus,
+              notes: `[INCIDENT - ${incidentCategory}] ${incidentDetails.trim()} | Est: ₱${costValue.toLocaleString()} (${clientLiability})`,
+              last_maintenance: new Date().toISOString().split('T')[0],
+            })
+            .eq('serial_id', serialTag);
+        }
+      }
+
+      await logAuditToSupabase(
+        'POST_EVENT_INCIDENT_LOGGED',
+        gearDisplayName,
+        `Logged ${incidentCategory} incident: ${gearDisplayName}. Est. Cost: ₱${costValue.toLocaleString()} (${clientLiability}). Event: ${eventName || 'N/A'}`
+      );
+
+      await fetchAlertsAndInventory();
+      setShowAddIncidentModal(false);
+      setIncidentDetails('');
+      setCustomAccessoryName('');
+      window.dispatchEvent(new Event('inventory-updated'));
+    } catch (err) {
+      console.warn('Create incident error:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // =========================================================================
+  // CREATE BENCH MAINTENANCE ALERT
+  // =========================================================================
+  const handleCreateMaintenance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!maintDetails.trim()) return;
+
+    setIsSubmitting(true);
+    const gearDisplayName = maintTarget || (equipmentModels[0]?.name ? `${equipmentModels[0].name}` : 'General Equipment');
+
+    try {
+      await supabase.from('inventory_alerts').insert({
+        alert_type: maintType,
+        severity: maintSeverity,
+        gear_name: gearDisplayName,
+        details: maintDetails.trim(),
+        status: 'active',
+      });
+
+      if (maintTarget.includes('(') && maintTarget.includes(')')) {
+        const serialTagMatch = maintTarget.match(/\(([^)]+)\)/);
+        const serialTag = serialTagMatch ? serialTagMatch[1] : null;
+
+        if (serialTag) {
+          const newCondition = maintType === 'Hardware Damage' ? 'In Repair' : 'Needs Inspection';
+          await supabase
+            .from('physical_units')
+            .update({
+              condition: newCondition,
+              notes: maintDetails.trim(),
               last_maintenance: new Date().toISOString().split('T')[0],
             })
             .eq('serial_id', serialTag);
@@ -186,73 +407,110 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
       await logAuditToSupabase(
         'CREATE_MAINTENANCE_ALERT',
         gearDisplayName,
-        `Logged ${severity} priority maintenance alert: ${alertType} (${details.trim()})`
+        `Logged ${maintSeverity} priority maintenance: ${maintType} (${maintDetails.trim()})`
       );
 
-      // Re-fetch database alerts
       await fetchAlertsAndInventory();
-
-      setShowAddAlertModal(false);
-      setDetails('');
+      setShowAddMaintenanceModal(false);
+      setMaintDetails('');
       window.dispatchEvent(new Event('inventory-updated'));
     } catch (err) {
-      console.warn('Create alert error:', err);
+      console.warn('Create maintenance alert error:', err);
     } finally {
       setIsSubmitting(false);
     }
   };
 
   // =========================================================================
-  // SUPABASE UPDATE / RESOLVE ALERT
+  // RESOLVE ALERT / INCIDENT
   // =========================================================================
-  const resolveAlert = async (item: InventoryAlertItem) => {
+  const handleResolveConfirm = async () => {
+    if (!selectedItemForResolve) return;
+    setIsSubmitting(true);
+
+    const item = selectedItemForResolve;
     try {
-      // 1. If it's a physical serial unit alert, reset unit condition to Operational (Good)
-      if (item.serialId) {
+      // 1. If physical serial unit, restore condition if requested
+      if (item.serialId && restoreUnitOperational) {
         await supabase
           .from('physical_units')
           .update({
             condition: 'Operational (Good)',
             status: 'Available in Warehouse',
             last_maintenance: new Date().toISOString().split('T')[0],
-            notes: null,
+            notes: resolveOutcome ? `Resolved: ${resolveOutcome}` : null,
           })
           .eq('serial_id', item.serialId);
       }
 
-      // 2. If it's a custom alert in inventory_alerts table, update status to resolved
+      // 2. Update custom alert in inventory_alerts table
       if (item.isCustomAlert) {
-        await supabase
-          .from('inventory_alerts')
-          .update({
-            status: 'resolved',
-            resolved_at: new Date().toISOString(),
-          })
-          .eq('id', item.id);
+        try {
+          await supabase
+            .from('inventory_alerts')
+            .update({
+              status: 'resolved',
+              resolved_at: new Date().toISOString(),
+              resolution_notes: resolveOutcome || 'Resolved by inventory manager',
+            })
+            .eq('id', item.id);
+        } catch (e) {
+          await supabase
+            .from('inventory_alerts')
+            .update({
+              status: 'resolved',
+              resolved_at: new Date().toISOString(),
+            })
+            .eq('id', item.id);
+        }
       }
 
       await logAuditToSupabase(
-        'RESOLVE_MAINTENANCE_ALERT',
+        'RESOLVE_INCIDENT_ALERT',
         item.serialId || item.modelId || item.id,
-        `Marked maintenance alert for ${item.gear} as resolved.`
+        `Resolved incident for ${item.gear}. Outcome: ${resolveOutcome || 'Operational restored'}`
       );
 
       setAlerts((prev) => prev.filter((a) => a.id !== item.id));
+      setShowResolveModal(false);
+      setSelectedItemForResolve(null);
+      setResolveOutcome('');
       window.dispatchEvent(new Event('inventory-updated'));
     } catch (err) {
-      console.warn('Resolve alert error:', err);
-      setAlerts((prev) => prev.filter((a) => a.id !== item.id));
-      window.dispatchEvent(new Event('inventory-updated'));
+      console.warn('Resolve error:', err);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
+  // =========================================================================
+  // COMPUTED KPI METRICS
+  // =========================================================================
+  const totalIncidentsCount = alerts.filter((a) => a.category === 'Incident').length;
+  const totalMaintenanceCount = alerts.filter((a) => a.category === 'Maintenance').length;
+  const totalReplacementCost = alerts.reduce((sum, a) => sum + (a.estimatedCost || 0), 0);
+  const clientLiableCost = alerts
+    .filter((a) => a.clientLiability === 'Client Liable')
+    .reduce((sum, a) => sum + (a.estimatedCost || 0), 0);
+
+  // Filtered Items
   const filteredAlerts = alerts.filter((a) => {
+    const matchesTab =
+      activeTab === 'all' ||
+      (activeTab === 'incidents' && a.category === 'Incident') ||
+      (activeTab === 'maintenance' && a.category === 'Maintenance') ||
+      (activeTab === 'liable' && a.clientLiability === 'Client Liable');
+
     const matchesSev = severityFilter === 'All' || a.severity === severityFilter;
+
     const matchesSearch =
       a.gear.toLowerCase().includes(search.toLowerCase()) ||
       a.type.toLowerCase().includes(search.toLowerCase()) ||
-      a.details.toLowerCase().includes(search.toLowerCase());
-    return matchesSev && matchesSearch;
+      a.details.toLowerCase().includes(search.toLowerCase()) ||
+      (a.eventName || '').toLowerCase().includes(search.toLowerCase()) ||
+      (a.clientName || '').toLowerCase().includes(search.toLowerCase());
+
+    return matchesTab && matchesSev && matchesSearch;
   });
 
   return (
@@ -260,131 +518,504 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.06]">
         <div>
-          <MonoBadge icon={IconShield}>Maintenance Logs ({alerts.length})</MonoBadge>
+          <MonoBadge icon={IconShield}>Equipment Incident & Maintenance Hub</MonoBadge>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ink)] mt-1.5">
-            Maintenance & Repair Alerts
+            Damage & Lost Equipment Incident Log
           </h1>
-          <p className="text-xs text-[#24252c]/60 mt-1">
-            Real-time equipment repair logs, bench maintenance inspections, and hardware damage reports.
+          <p className="text-xs text-[#24252c]/60 mt-1 max-w-2xl">
+            Post-event incident tracking for missing microphones, broken cables, damaged hardware, estimated replacement costs, and client liability billing.
           </p>
         </div>
 
-        <button
-          onClick={() => setShowAddAlertModal(true)}
-          className="bg-[#1090F8] text-white text-xs font-bold px-5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-all shadow-md self-start sm:self-auto flex items-center gap-2 cursor-pointer"
-        >
-          <IconPlus className="w-4 h-4" /> Log Maintenance Alert
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <button
+            onClick={() => setShowAddIncidentModal(true)}
+            className="bg-rose-600 text-white text-xs font-bold px-4.5 py-2.5 rounded-full hover:bg-rose-700 transition-all shadow-md flex items-center gap-2 cursor-pointer"
+          >
+            <IconAlertTriangle className="w-4 h-4" /> Log Damage / Lost Gear
+          </button>
+          <button
+            onClick={() => setShowAddMaintenanceModal(true)}
+            className="bg-[var(--ink)] text-white text-xs font-bold px-4.5 py-2.5 rounded-full hover:bg-[var(--ink-soft)] transition-all shadow-md flex items-center gap-2 cursor-pointer"
+          >
+            <IconWrench className="w-4 h-4" /> Log Bench Maintenance
+          </button>
+        </div>
       </div>
 
-      {/* Filter & Search Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-[#24252c]/[0.08] shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-1.5 w-full sm:w-auto">
-          <span className="text-xs text-[#24252c]/50 font-semibold mr-1">Severity:</span>
-          {['All', 'High', 'Medium', 'Low'].map((sev) => (
+      {/* KPI Metrics Dashboard Bar */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white p-5 rounded-2xl border border-[#24252c]/[0.08] shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-[#24252c]/50 uppercase tracking-wider">Active Incidents</span>
+            <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+          </div>
+          <p className="text-2xl font-extrabold text-[var(--ink)] mt-2">{totalIncidentsCount}</p>
+          <span className="text-[10px] text-rose-600 font-medium">Post-event damage & lost gear</span>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-[#24252c]/[0.08] shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-[#24252c]/50 uppercase tracking-wider">Est. Replacement Cost</span>
+            <IconDollarSign className="w-4 h-4 text-amber-500" />
+          </div>
+          <p className="text-2xl font-extrabold text-[var(--ink)] mt-2">₱{totalReplacementCost.toLocaleString()}</p>
+          <span className="text-[10px] text-amber-600 font-medium">Total replacement & repair value</span>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-[#24252c]/[0.08] shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-[#24252c]/50 uppercase tracking-wider">Client Liable Value</span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700">Billable</span>
+          </div>
+          <p className="text-2xl font-extrabold text-emerald-700 mt-2">₱{clientLiableCost.toLocaleString()}</p>
+          <span className="text-[10px] text-[#24252c]/50">Chargeable to client / deposit</span>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-[#24252c]/[0.08] shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-[#24252c]/50 uppercase tracking-wider">Bench Maintenance</span>
+            <IconWrench className="w-4 h-4 text-[#1090F8]" />
+          </div>
+          <p className="text-2xl font-extrabold text-[var(--ink)] mt-2">{totalMaintenanceCount}</p>
+          <span className="text-[10px] text-[#1090F8] font-medium">In-house inspections & repairs</span>
+        </div>
+      </div>
+
+      {/* Filter Tabs & Search Bar */}
+      <div className="bg-white p-4 rounded-2xl border border-[#24252c]/[0.08] shadow-sm flex flex-col lg:flex-row items-center justify-between gap-4">
+        {/* Category Tab Selector */}
+        <div className="flex flex-wrap items-center gap-1.5 w-full lg:w-auto">
+          {[
+            { key: 'all', label: `All Alerts (${alerts.length})` },
+            { key: 'incidents', label: `Damage & Lost Reports (${totalIncidentsCount})` },
+            { key: 'liable', label: `Client Liable (${alerts.filter((a) => a.clientLiability === 'Client Liable').length})` },
+            { key: 'maintenance', label: `Bench Maintenance (${totalMaintenanceCount})` },
+          ].map((tab) => (
             <button
-              key={sev}
-              onClick={() => setSeverityFilter(sev)}
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key as any)}
               className={`text-xs px-3.5 py-1.5 rounded-full font-medium transition-all cursor-pointer ${
-                severityFilter === sev
+                activeTab === tab.key
                   ? 'bg-[var(--ink)] text-white shadow-sm font-semibold'
                   : 'bg-[var(--mist)] text-[#24252c]/60 hover:text-[var(--ink)]'
               }`}
             >
-              {sev}
+              {tab.label}
             </button>
           ))}
         </div>
 
-        <div className="relative w-full sm:w-64">
-          <IconSearch className="w-4 h-4 text-[#24252c]/40 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search alerts or equipment..."
-            className={inputClass + ' pl-10'}
-          />
+        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-[#24252c]/50 font-semibold mr-1">Severity:</span>
+            {['All', 'High', 'Medium', 'Low'].map((sev) => (
+              <button
+                key={sev}
+                onClick={() => setSeverityFilter(sev)}
+                className={`text-xs px-3 py-1 rounded-full font-medium transition-all cursor-pointer ${
+                  severityFilter === sev
+                    ? 'bg-[#1090F8] text-white shadow-xs font-semibold'
+                    : 'bg-[var(--mist)] text-[#24252c]/60 hover:text-[var(--ink)]'
+                }`}
+              >
+                {sev}
+              </button>
+            ))}
+          </div>
+
+          <div className="relative w-full sm:w-60">
+            <IconSearch className="w-4 h-4 text-[#24252c]/40 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search gear, event, client..."
+              className={inputClass + ' pl-10'}
+            />
+          </div>
         </div>
       </div>
 
-      {/* Alerts Cards List */}
+      {/* Incidents & Alerts List */}
       {loading ? (
         <div className="bg-white rounded-2xl p-12 text-center text-xs text-[#24252c]/50 border border-[#24252c]/[0.08]">
-          Fetching maintenance alerts from database...
+          Fetching incident and maintenance logs from database...
         </div>
       ) : filteredAlerts.length === 0 ? (
         <div className="bg-white rounded-2xl border border-[#24252c]/[0.08] shadow-sm p-8 text-center">
           <EmptyState
             icon={IconShield}
-            title="No Active Maintenance Alerts"
-            description="All registered equipment models and physical serial units are operational and in good condition."
+            title="No Active Incident or Maintenance Reports"
+            description="No damage incidents or repair alerts match your active filter. All warehouse units and accessories are accounted for."
           />
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredAlerts.map((item) => (
-            <div
-              key={item.id}
-              className="p-6 rounded-2xl bg-white border border-[#24252c]/[0.08] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-amber-500/40 transition-all"
-            >
-              <div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
-                      item.severity === 'High'
-                        ? 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
-                        : item.severity === 'Medium'
-                        ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
-                        : 'bg-[#1090F8]/10 text-[#1090F8] border border-[#1090F8]/20'
-                    }`}
-                  >
-                    {item.severity} Priority
-                  </span>
-                  <span className="text-xs font-semibold text-[#1090F8]">{item.type}</span>
-                  <span className="text-[11px] text-[#24252c]/40">• Logged {item.date}</span>
-                </div>
-                <h3 className="font-bold text-lg text-[var(--ink)] mt-2">{item.gear}</h3>
-                <p className="text-xs text-[#24252c]/60 mt-1 leading-relaxed">{item.details}</p>
-              </div>
+          {filteredAlerts.map((item) => {
+            const isLost = item.type === 'Lost / Missing Gear';
+            const isDamage = item.type === 'Hardware Damage' || item.type === 'Torn / Broken Cable' || item.type === 'Damage Incident';
 
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => resolveAlert(item)}
-                  className="bg-[#1090F8] text-white text-xs font-semibold px-4.5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm cursor-pointer"
-                >
-                  Mark as Resolved
-                </button>
+            return (
+              <div
+                key={item.id}
+                className="p-6 rounded-2xl bg-white border border-[#24252c]/[0.08] shadow-sm hover:border-amber-500/40 transition-all flex flex-col lg:flex-row lg:items-center justify-between gap-5"
+              >
+                <div className="space-y-2.5 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Category / Type Badge */}
+                    <span
+                      className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border ${
+                        isLost
+                          ? 'bg-rose-500/10 text-rose-700 border-rose-500/25'
+                          : isDamage
+                          ? 'bg-amber-500/10 text-amber-700 border-amber-500/25'
+                          : 'bg-[#1090F8]/10 text-[#1090F8] border-[#1090F8]/25'
+                      }`}
+                    >
+                      {item.type}
+                    </span>
+
+                    {/* Severity Badge */}
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                        item.severity === 'High'
+                          ? 'bg-rose-100 text-rose-800'
+                          : item.severity === 'Medium'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-blue-100 text-blue-800'
+                      }`}
+                    >
+                      {item.severity} Priority
+                    </span>
+
+                    {/* Client Liability Tag if available */}
+                    {item.clientLiability && (
+                      <span
+                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                          item.clientLiability === 'Client Liable'
+                            ? 'bg-emerald-500/10 text-emerald-800 border-emerald-500/30'
+                            : item.clientLiability === 'Company Absorbed'
+                            ? 'bg-slate-100 text-slate-700 border-slate-200'
+                            : 'bg-amber-500/10 text-amber-800 border-amber-500/20'
+                        }`}
+                      >
+                        Liability: {item.clientLiability}
+                      </span>
+                    )}
+
+                    <span className="text-[11px] text-[#24252c]/40">• Logged {item.date}</span>
+                  </div>
+
+                  {/* Gear Title */}
+                  <h3 className="font-extrabold text-lg text-[var(--ink)]">{item.gear}</h3>
+
+                  {/* Event & Client Details */}
+                  {(item.eventName || item.clientName) && (
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#24252c]/70 bg-[var(--mist)] px-3 py-1.5 rounded-xl inline-flex">
+                      {item.eventName && (
+                        <span>
+                          <strong className="text-[var(--ink)]">Event:</strong> {item.eventName}
+                        </span>
+                      )}
+                      {item.clientName && (
+                        <span>
+                          <strong className="text-[var(--ink)]">Client:</strong> {item.clientName}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Description / Incident Notes */}
+                  <p className="text-xs text-[#24252c]/70 leading-relaxed max-w-3xl">{item.details}</p>
+
+                  {/* Cost & Recovery Summary */}
+                  {Boolean(item.estimatedCost && item.estimatedCost > 0) && (
+                    <div className="pt-1 flex items-center gap-4 text-xs font-semibold">
+                      <span className="text-[var(--ink)]">
+                        Est. Replacement / Repair Cost:{' '}
+                        <span className="text-rose-600 font-extrabold">₱{item.estimatedCost?.toLocaleString()}</span>
+                      </span>
+                      {item.clientLiability === 'Client Liable' && (
+                        <span className="text-emerald-700 text-[11px] font-bold flex items-center gap-1">
+                          <IconCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Chargeable to Client / Deductible from Security Deposit</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center gap-2 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-[#24252c]/[0.06]">
+                  <button
+                    onClick={() => {
+                      setSelectedItemForResolve(item);
+                      setResolveOutcome('');
+                      setShowResolveModal(true);
+                    }}
+                    className="bg-[#1090F8] text-white text-xs font-semibold px-5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-colors shadow-sm cursor-pointer flex items-center gap-1.5"
+                  >
+                    <IconCheck className="w-3.5 h-3.5" /> Resolve & Close Log
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* Log New Alert Modal */}
-      <ModalOverlay isOpen={showAddAlertModal} onClose={() => setShowAddAlertModal(false)}>
+      {/* ========================================================================= */}
+      {/* MODAL 1: LOG POST-EVENT DAMAGE / LOST EQUIPMENT INCIDENT                   */}
+      {/* ========================================================================= */}
+      <ModalOverlay isOpen={showAddIncidentModal} onClose={() => setShowAddIncidentModal(false)}>
+        <div className="bg-white rounded-[2rem] p-6 max-w-xl w-full shadow-2xl border border-[#24252c]/10 relative max-h-[90vh] overflow-y-auto">
+          <button
+            onClick={() => setShowAddIncidentModal(false)}
+            className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+          >
+            <IconX className="w-5 h-5" />
+          </button>
+
+          <div className="flex items-center gap-2 mb-1">
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
+            <span className="text-xs font-bold uppercase tracking-wider text-rose-600">Post-Event Incident Report</span>
+          </div>
+
+          <h3 className="text-xl font-extrabold text-[var(--ink)]">
+            Log Damage / Lost Equipment
+          </h3>
+          <p className="text-xs text-[#24252c]/50 mb-5">
+            Record missing gear (e.g. mic, receiver), broken cables, or damaged stage fixtures post-event, with replacement cost and client liability.
+          </p>
+
+          <form onSubmit={handleCreateIncident} className="space-y-4 text-xs">
+            {/* Event Connection */}
+            <div className="p-3.5 bg-[var(--mist)] rounded-2xl space-y-3">
+              <label className="font-bold uppercase text-[#24252c]/60 block text-[11px]">
+                1. Connect to Event / Booking
+              </label>
+
+              <div>
+                <select
+                  value={selectedBookingId}
+                  onChange={(e) => handleBookingSelect(e.target.value)}
+                  className={inputClass + ' font-semibold py-2.5 bg-white'}
+                >
+                  <option value="">Select from Recent Bookings (or enter manual event below)...</option>
+                  {recentBookings.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.event_date} — {b.event_name} ({b.customer_name})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="font-semibold text-[#24252c]/50 block mb-1">Event Name</label>
+                  <input
+                    value={eventName}
+                    onChange={(e) => setEventName(e.target.value)}
+                    placeholder="e.g. Cruz-Santos Wedding"
+                    className={inputClass + ' bg-white'}
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-[#24252c]/50 block mb-1">Client / Organizer</label>
+                  <input
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
+                    placeholder="e.g. Maria Santos"
+                    className={inputClass + ' bg-white'}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Incident Classification */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
+                  Incident Category
+                </label>
+                <select
+                  value={incidentCategory}
+                  onChange={(e) => setIncidentCategory(e.target.value as any)}
+                  className={inputClass + ' font-semibold py-2.5'}
+                >
+                  <option value="Lost / Missing Gear">Lost / Missing Equipment</option>
+                  <option value="Hardware Damage">Hardware Damage (Dropped / Cracked)</option>
+                  <option value="Torn / Broken Cable">Torn / Damaged Cable</option>
+                  <option value="Liquid Spill">Liquid Spill / Water Damage</option>
+                  <option value="Electrical Fault">Electrical Fault / Blown Component</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
+                  Urgency / Severity
+                </label>
+                <select
+                  value={incidentSeverity}
+                  onChange={(e) => setIncidentSeverity(e.target.value as any)}
+                  className={inputClass + ' font-semibold py-2.5'}
+                >
+                  <option value="High">High (Immediate Replacement Needed)</option>
+                  <option value="Medium">Medium (Affects Next Booking)</option>
+                  <option value="Low">Low (Spare Available)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Target Gear Selection */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="font-semibold uppercase text-[#24252c]/50 text-[11px]">
+                  Affected Equipment / Accessory
+                </label>
+                <div className="flex items-center gap-3 text-[11px]">
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="targetType"
+                      checked={targetType === 'model_unit'}
+                      onChange={() => setTargetType('model_unit')}
+                    />
+                    Registered Gear
+                  </label>
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="targetType"
+                      checked={targetType === 'custom_accessory'}
+                      onChange={() => setTargetType('custom_accessory')}
+                    />
+                    Custom Accessory (Cable/Mic/Stand)
+                  </label>
+                </div>
+              </div>
+
+              {targetType === 'model_unit' ? (
+                <select
+                  value={selectedTarget}
+                  onChange={(e) => setSelectedTarget(e.target.value)}
+                  className={inputClass + ' font-semibold py-2.5'}
+                >
+                  <option value="">Select Equipment Unit...</option>
+                  {equipmentModels.map((m) => (
+                    <optgroup key={m.model_id} label={`${m.brand} ${m.name} (${m.model_id})`}>
+                      <option value={`${m.name} (${m.model_id})`}>
+                        Master Model: {m.brand} {m.name}
+                      </option>
+                      {(m.units || []).map((u: any) => (
+                        <option key={u.serial_id} value={`${m.name} (${u.serial_id})`}>
+                          Serial Unit: {u.serial_id} — {u.condition} ({u.status})
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={customAccessoryName}
+                  onChange={(e) => setCustomAccessoryName(e.target.value)}
+                  placeholder="e.g. Shure SM58 Wireless Handheld Mic #2, Canare 20m XLR Cable, Speaker Stand"
+                  className={inputClass}
+                  required
+                />
+              )}
+            </div>
+
+            {/* Cost & Liability Grid */}
+            <div className="grid grid-cols-2 gap-3 p-3.5 bg-amber-50/60 rounded-2xl border border-amber-200/50">
+              <div>
+                <label className="font-bold text-amber-900 uppercase block mb-1 text-[11px]">
+                  Estimated Replacement Cost (₱)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-gray-500">₱</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="50"
+                    value={estimatedCost}
+                    onChange={(e) => setEstimatedCost(e.target.value)}
+                    placeholder="3500"
+                    className={inputClass + ' pl-8 bg-white font-bold text-rose-600'}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-amber-900 uppercase block mb-1 text-[11px]">
+                  Client Liability Determination
+                </label>
+                <select
+                  value={clientLiability}
+                  onChange={(e) => setClientLiability(e.target.value as any)}
+                  className={inputClass + ' bg-white font-semibold py-2.5'}
+                >
+                  <option value="Client Liable">Client Liable (Charge to Host)</option>
+                  <option value="Company Absorbed">Company Absorbed (Wear & Tear)</option>
+                  <option value="Under Investigation">Under Investigation / Discussion</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Description / Post Event Notes */}
+            <div>
+              <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
+                Incident Description & On-Site Circumstances
+              </label>
+              <textarea
+                rows={3}
+                value={incidentDetails}
+                onChange={(e) => setIncidentDetails(e.target.value)}
+                placeholder="Describe what happened on site (e.g. Guest dropped wireless mic during toast, dented mesh grill & cracked cartridge. Missing after pack-up...)"
+                className="w-full rounded-2xl border px-4 py-2.5 bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] border-transparent transition-colors"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full bg-rose-600 text-white font-semibold py-3.5 rounded-full hover:bg-rose-700 transition-colors cursor-pointer disabled:opacity-50 shadow-md"
+            >
+              {isSubmitting ? 'Submitting Incident...' : 'Save Damage / Lost Incident Log'}
+            </button>
+          </form>
+        </div>
+      </ModalOverlay>
+
+      {/* ========================================================================= */}
+      {/* MODAL 2: LOG BENCH MAINTENANCE ALERT                                      */}
+      {/* ========================================================================= */}
+      <ModalOverlay isOpen={showAddMaintenanceModal} onClose={() => setShowAddMaintenanceModal(false)}>
         <div className="bg-white rounded-[2rem] p-6 max-w-lg w-full shadow-2xl border border-[#24252c]/10 relative">
           <button
-            onClick={() => setShowAddAlertModal(false)}
+            onClick={() => setShowAddMaintenanceModal(false)}
             className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
           >
             <IconX className="w-5 h-5" />
           </button>
 
           <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">
-            Log Maintenance Alert
+            Log Bench Maintenance Alert
           </h3>
           <p className="text-xs text-[#24252c]/50 mb-4">
-            Input equipment repair notes, damage reports, or bench inspection logs.
+            Input workshop inspection notes, routine maintenance checks, or diagnostic repair tasks.
           </p>
 
-          <form onSubmit={handleCreateAlert} className="space-y-4 text-xs">
+          <form onSubmit={handleCreateMaintenance} className="space-y-4 text-xs">
             <div>
               <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
                 Target Equipment Model / Serial Unit
               </label>
               <select
-                value={selectedTarget}
-                onChange={(e) => setSelectedTarget(e.target.value)}
+                value={maintTarget}
+                onChange={(e) => setMaintTarget(e.target.value)}
                 className={inputClass + ' font-semibold py-3'}
               >
                 <option value="">Select Equipment Target...</option>
@@ -409,22 +1040,23 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
                   Alert Category
                 </label>
                 <select
-                  value={alertType}
-                  onChange={(e) => setAlertType(e.target.value)}
+                  value={maintType}
+                  onChange={(e) => setMaintType(e.target.value)}
                   className={inputClass + ' font-semibold py-3'}
                 >
                   <option value="Maintenance Required">Maintenance Required</option>
-                  <option value="Hardware Damage Log">Hardware Damage Log</option>
+                  <option value="Routine Inspection">Routine Inspection / Testing</option>
+                  <option value="Hardware Damage">Hardware Damage</option>
                 </select>
               </div>
 
               <div>
                 <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
-                  Alert Severity
+                  Severity
                 </label>
                 <select
-                  value={severity}
-                  onChange={(e) => setSeverity(e.target.value as any)}
+                  value={maintSeverity}
+                  onChange={(e) => setMaintSeverity(e.target.value as any)}
                   className={inputClass + ' font-semibold py-3'}
                 >
                   <option value="High">High</option>
@@ -436,13 +1068,13 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
 
             <div>
               <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
-                Diagnostic Issue Description
+                Diagnostic Notes / Maintenance Required
               </label>
               <textarea
                 rows={3}
-                value={details}
-                onChange={(e) => setDetails(e.target.value)}
-                placeholder="Describe crackling audio, blown bulb, worn XLR jack, or hardware damage..."
+                value={maintDetails}
+                onChange={(e) => setMaintDetails(e.target.value)}
+                placeholder="Describe crackling audio, blown bulb, worn XLR jack, firmware update needed..."
                 className="w-full rounded-2xl border px-4 py-2.5 bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] border-transparent transition-colors"
                 required
               />
@@ -453,9 +1085,84 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
               disabled={isSubmitting}
               className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer disabled:opacity-50"
             >
-              {isSubmitting ? 'Saving Alert...' : 'Log Maintenance Alert Record'}
+              {isSubmitting ? 'Saving...' : 'Log Bench Maintenance Record'}
             </button>
           </form>
+        </div>
+      </ModalOverlay>
+
+      {/* ========================================================================= */}
+      {/* MODAL 3: RESOLVE & CLOSE INCIDENT / ALERT                                  */}
+      {/* ========================================================================= */}
+      <ModalOverlay isOpen={showResolveModal} onClose={() => setShowResolveModal(false)}>
+        <div className="bg-white rounded-[2rem] p-6 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
+          <button
+            onClick={() => setShowResolveModal(false)}
+            className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+          >
+            <IconX className="w-5 h-5" />
+          </button>
+
+          <div className="flex items-center gap-2 mb-1">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-600">Resolve & Settle</span>
+          </div>
+
+          <h3 className="text-xl font-extrabold text-[var(--ink)]">
+            Close Incident / Alert
+          </h3>
+          <p className="text-xs text-[#24252c]/50 mb-4">
+            Mark item as repaired, client billed, or replaced in warehouse inventory.
+          </p>
+
+          {selectedItemForResolve && (
+            <div className="p-3 bg-[var(--mist)] rounded-2xl mb-4 text-xs space-y-1">
+              <p className="font-extrabold text-[var(--ink)]">{selectedItemForResolve.gear}</p>
+              <p className="text-[#24252c]/60">{selectedItemForResolve.details}</p>
+              {selectedItemForResolve.estimatedCost ? (
+                <p className="font-bold text-rose-600">
+                  Est. Cost: ₱{selectedItemForResolve.estimatedCost.toLocaleString()} ({selectedItemForResolve.clientLiability})
+                </p>
+              ) : null}
+            </div>
+          )}
+
+          <div className="space-y-4 text-xs">
+            <div>
+              <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
+                Resolution Settlement & Action Notes
+              </label>
+              <textarea
+                rows={3}
+                value={resolveOutcome}
+                onChange={(e) => setResolveOutcome(e.target.value)}
+                placeholder="e.g. Client reimbursed ₱3,500. Replacement mic unit ordered. / XLR cable resoldered and bench tested OK."
+                className="w-full rounded-2xl border px-4 py-2.5 bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] border-transparent transition-colors"
+              />
+            </div>
+
+            {selectedItemForResolve?.serialId && (
+              <label className="flex items-center gap-2 cursor-pointer font-medium text-[#24252c]/80">
+                <input
+                  type="checkbox"
+                  checked={restoreUnitOperational}
+                  onChange={(e) => setRestoreUnitOperational(e.target.checked)}
+                  className="rounded text-[#1090F8]"
+                />
+                Restore serial unit status to Operational & Available in Warehouse
+              </label>
+            )}
+
+            <button
+              type="button"
+              onClick={handleResolveConfirm}
+              disabled={isSubmitting}
+              className="w-full bg-[#1090F8] text-white font-semibold py-3.5 rounded-full hover:bg-[#1090F8]/90 transition-colors cursor-pointer disabled:opacity-50 shadow-md flex items-center justify-center gap-1.5"
+            >
+              <IconCheck className="w-4 h-4" />
+              {isSubmitting ? 'Updating Database...' : 'Confirm Resolution & Mark Resolved'}
+            </button>
+          </div>
         </div>
       </ModalOverlay>
     </div>

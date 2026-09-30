@@ -19,6 +19,7 @@ import type { AssignedBooking } from '../../data/crewBookings';
 import {
   fetchAssignedBookingsForCurrentCrew,
   fetchBookingPackingChecklist,
+  saveBookingPackingChecklist,
   getCurrentCrewAuth,
   fetchBookingCrewNotes,
   createBookingCrewNote,
@@ -119,20 +120,6 @@ export default function CrewBookingDetailPage({ go }: { go: (p: Page) => void })
 
         if (targetId) {
           const checklist = await fetchBookingPackingChecklist(targetId);
-          // Restore saved checklist verification status from localStorage
-          try {
-            const savedStr = localStorage.getItem(`binhi_crew_packing_${targetId}`);
-            if (savedStr) {
-              const savedChecked: Record<string, boolean> = JSON.parse(savedStr);
-              checklist.forEach((gear) => {
-                gear.units.forEach((u) => {
-                  if (savedChecked[u.unitId] !== undefined) {
-                    u.checked = savedChecked[u.unitId];
-                  }
-                });
-              });
-            }
-          } catch {}
           setGearItems(checklist);
 
           // Load notes for target booking from Supabase database
@@ -174,19 +161,6 @@ export default function CrewBookingDetailPage({ go }: { go: (p: Page) => void })
     setSelectedBookingId(newId);
     sessionStorage.setItem('crew_selected_booking_id', newId);
     const checklist = await fetchBookingPackingChecklist(newId);
-    try {
-      const savedStr = localStorage.getItem(`binhi_crew_packing_${newId}`);
-      if (savedStr) {
-        const savedChecked: Record<string, boolean> = JSON.parse(savedStr);
-        checklist.forEach((gear) => {
-          gear.units.forEach((u) => {
-            if (savedChecked[u.unitId] !== undefined) {
-              u.checked = savedChecked[u.unitId];
-            }
-          });
-        });
-      }
-    } catch {}
     setGearItems(checklist);
     loadNotesForBooking(newId);
     setEditingNoteId(null);
@@ -201,13 +175,9 @@ export default function CrewBookingDetailPage({ go }: { go: (p: Page) => void })
       }));
 
       if (booking) {
-        const checkedMap: Record<string, boolean> = {};
-        updated.forEach((g) => {
-          g.units.forEach((u) => {
-            checkedMap[u.unitId] = u.checked;
-          });
+        saveBookingPackingChecklist(booking.id, updated).catch((err) => {
+          console.error('Failed to sync checklist to database:', err);
         });
-        localStorage.setItem(`binhi_crew_packing_${booking.id}`, JSON.stringify(checkedMap));
       }
       return updated;
     });
@@ -221,13 +191,9 @@ export default function CrewBookingDetailPage({ go }: { go: (p: Page) => void })
       }));
 
       if (booking) {
-        const checkedMap: Record<string, boolean> = {};
-        updated.forEach((g) => {
-          g.units.forEach((u) => {
-            checkedMap[u.unitId] = verified;
-          });
+        saveBookingPackingChecklist(booking.id, updated).catch((err) => {
+          console.error('Failed to sync checklist to database:', err);
         });
-        localStorage.setItem(`binhi_crew_packing_${booking.id}`, JSON.stringify(checkedMap));
       }
       return updated;
     });

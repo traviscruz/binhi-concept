@@ -13,6 +13,7 @@ import {
   evaluateSlotFeasibility,
   getDayAvailabilityStatus,
   formatTimeAmPm,
+  calculateCrewArrivalTime,
   timeToMinutes,
   minutesToTime,
   getOperatingWindowForDate,
@@ -1082,7 +1083,9 @@ export default function CheckoutPage({
     return sum;
   }, 0);
 
-  const parsedPackagePrice = (pkg as any)?.rawPrice ?? (pkg as any)?.raw_price ?? (pkg?.price ? parseInt(String(pkg.price).replace(/[^\d]/g, ''), 10) || 0 : 0);
+  const maintenanceDeduction = Number(localStorage.getItem('binhi_package_maintenance_deduction') || 0);
+  const baseRawPackagePrice = (pkg as any)?.rawPrice ?? (pkg as any)?.raw_price ?? (pkg?.price ? parseInt(String(pkg.price).replace(/[^\d]/g, ''), 10) || 0 : 0);
+  const parsedPackagePrice = Math.max(0, baseRawPackagePrice - maintenanceDeduction);
 
   const packageAndAddonPrice = parsedPackagePrice + addonsCost;
   const subtotalBeforeDiscount = packageAndAddonPrice + transportFee;
@@ -1189,8 +1192,20 @@ export default function CheckoutPage({
                   <span className="font-bold text-[var(--ink)] block">{pkg.name}</span>
                   <span className="text-[#24252c]/50 text-[11px]">Standard Package Base Rate</span>
                 </div>
-                <span className="font-bold text-[var(--ink)]">₱{(Number(pkg.rawPrice) || 33500).toLocaleString()}</span>
+                <span className={`font-bold ${maintenanceDeduction > 0 ? 'line-through text-[#24252c]/40' : 'text-[var(--ink)]'}`}>
+                  ₱{(Number(pkg.rawPrice) || 33500).toLocaleString()}
+                </span>
               </div>
+
+              {maintenanceDeduction > 0 && (
+                <div className="flex items-center justify-between text-amber-800 bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-200">
+                  <span className="font-semibold text-[11px] flex items-center gap-1.5">
+                    <IconShield className="w-3 h-3 text-amber-700 inline shrink-0" />
+                    <span>Maintenance / Quarantine Discount</span>
+                  </span>
+                  <span className="font-bold text-[11px]">-₱{maintenanceDeduction.toLocaleString()}</span>
+                </div>
+              )}
 
               {selectedAddons.length > 0 ? (
                 <div className="pt-2 border-t border-[#24252c]/[0.06] space-y-1.5">
@@ -1439,8 +1454,8 @@ export default function CheckoutPage({
                 <div className="bg-[var(--mist)] rounded-2xl p-4 border border-[#24252c]/[0.06] space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-[#24252c]/[0.08] pb-2.5">
                     <div>
-                      <h4 className="text-xs font-extrabold uppercase tracking-wider text-[var(--ink)]">Event Schedule Window</h4>
-                      <p className="text-[11px] text-[#24252c]/60">Times outside operating hours are restricted and blocked.</p>
+                      <h4 className="text-xs font-extrabold uppercase tracking-wider text-[var(--ink)]">Event Schedule Window (Event Proper)</h4>
+                      <p className="text-[11px] text-[#24252c]/60">Select your actual event program time. Our crew arrives early for styling setup.</p>
                     </div>
                     {opWindow.isOpen ? (
                       <span className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 px-2.5 py-1 rounded-full self-start sm:self-auto">
@@ -1452,6 +1467,20 @@ export default function CheckoutPage({
                       </span>
                     )}
                   </div>
+
+                  {opWindow.isOpen && startTime && (
+                    <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200/90 px-3 py-2 rounded-xl text-xs">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-900 block">Binhi Styling &amp; Setup Arrival:</span>
+                        <span className="text-[11px] text-emerald-800">
+                          Our production crew arrives on-site early to assemble styling before program start
+                        </span>
+                      </div>
+                      <span className="font-mono font-extrabold text-xs text-emerald-950 bg-white px-2.5 py-1 rounded-lg border border-emerald-300 shrink-0">
+                        Crew Call Time: ~{formatTimeAmPm(calculateCrewArrivalTime(startTime, bookingSettings.default_turnaround_hours))}
+                      </span>
+                    </div>
+                  )}
 
                   {!opWindow.isOpen && (
                     <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">

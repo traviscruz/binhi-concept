@@ -965,4 +965,283 @@ export function getCustomerCancellationRejectedHtml(data: CancellationRejectionE
   });
 }
 
+/**
+ * 9. Data interface for Confirmed Booking Notifications
+ */
+export interface BookingConfirmationEmailData {
+  bookingId: string;
+  paymongoReference?: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone?: string;
+  packageName: string;
+  packageTag?: string;
+  eventType: string;
+  eventDate: string;
+  startTime?: string;
+  endTime?: string;
+  venueAddress: string;
+  totalCost: number | string;
+  depositAmount: number | string;
+  remainingBalance?: number | string;
+  paymentChannel?: string;
+  isFullyPaid?: boolean;
+  selectedAddons?: string[];
+  inclusions?: string[];
+  balancePaymentMethod?: string;
+  trackerUrl?: string;
+}
+
+/**
+ * 10. Template: Official Customer Booking Confirmation & Certificate of Reservation
+ * Sent to the customer immediately upon booking confirmation or deposit approval.
+ */
+export function getBookingConfirmationEmailHtml(data: BookingConfirmationEmailData): string {
+  const safeName = escapeHtml(data.customerName || 'Valued Client');
+  const safeRef = escapeHtml(data.paymongoReference || data.bookingId);
+  const safePkg = escapeHtml(data.packageName || 'Event Production Package');
+  const safeTag = data.packageTag ? escapeHtml(data.packageTag) : 'Sound, Lighting & Visual Staging';
+  const safeType = escapeHtml(data.eventType || 'Event Production');
+  const safeDate = escapeHtml(data.eventDate);
+  const safeStartTime = data.startTime ? escapeHtml(data.startTime) : '1:00 PM';
+  const safeEndTime = data.endTime ? escapeHtml(data.endTime) : '6:00 PM';
+  const safeVenue = escapeHtml(data.venueAddress || 'Selected Venue Location');
+  const safeChannel = escapeHtml(data.paymentChannel || 'PayMongo / Bank Payment');
+  const safeBalanceMethod = escapeHtml(data.balancePaymentMethod || 'Cash on Site / Event Day');
+
+  const totalNum = typeof data.totalCost === 'number' ? data.totalCost : parseFloat(String(data.totalCost).replace(/[^0-9.]/g, '')) || 0;
+  const depositNum = typeof data.depositAmount === 'number' ? data.depositAmount : parseFloat(String(data.depositAmount).replace(/[^0-9.]/g, '')) || 0;
+  const isFull = Boolean(data.isFullyPaid || depositNum >= totalNum);
+  const remainingNum = isFull ? 0 : Math.max(0, totalNum - depositNum);
+
+  const trackerLink = data.trackerUrl || `https://binhiconcept.ph/?page=booking-status&ref=${encodeURIComponent(safeRef)}`;
+
+  const bodyContent = `
+    <p class="text-muted" style="margin:0 0 16px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      Dear <strong class="text-ink" style="color:#24252C;">${safeName}</strong>,
+    </p>
+    <p class="text-muted" style="margin:0 0 22px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      We are thrilled to officially confirm your event production booking with <strong class="text-ink" style="color:#24252C;">BINHI Concept Lights &amp; Sounds</strong>. Your date has been locked into our master production calendar, and equipment assets have been allocated for your setup.
+    </p>
+
+    <!-- ── Official Confirmation Certificate Card ── -->
+    <div style="background-color:#ECFDF5; border:1.5px solid #A7F3D0; border-radius:14px; padding:22px; margin-bottom:24px; text-align:center;">
+      <div style="display:inline-block; width:36px; height:36px; border-radius:50%; background-color:#10B981; color:#FFFFFF; font-size:20px; font-weight:bold; line-height:36px; margin-bottom:10px;">
+        ✓
+      </div>
+      <div style="font-size:11px; font-weight:800; color:#065F46; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:4px;">
+        Official Certificate of Reservation
+      </div>
+      <div style="font-size:24px; font-weight:900; color:#047857; margin-bottom:6px; font-family:Arial,Helvetica,sans-serif;">
+        RESERVATION CONFIRMED
+      </div>
+      <div style="font-size:12px; color:#065F46; font-weight:600;">
+        Booking Reference: <strong style="font-family:monospace; font-size:14px; color:#064E3B;">#${safeRef}</strong>
+      </div>
+    </div>
+
+    <!-- ── Schedule & Venue Specifications ── -->
+    <div style="background-color:#F8FAFC; border:1px solid #E2E8F0; border-radius:10px; padding:18px 20px; margin-bottom:20px;">
+      <div style="font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:12px;">
+        📅 Event Schedule &amp; Venue Details
+      </div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:13px; font-family:Arial,Helvetica,sans-serif;">
+        <tr>
+          <td style="padding:5px 0; color:#64748B; width:35%;">Event Date:</td>
+          <td style="padding:5px 0; text-align:right; font-weight:700; color:#0F172A;">${safeDate}</td>
+        </tr>
+        <tr>
+          <td style="padding:5px 0; color:#64748B;">Event Proper Time:</td>
+          <td style="padding:5px 0; text-align:right; font-weight:700; color:#0F172A;">${safeStartTime} – ${safeEndTime}</td>
+        </tr>
+        <tr>
+          <td style="padding:5px 0; color:#64748B;">Crew Call Time:</td>
+          <td style="padding:5px 0; text-align:right; font-weight:600; color:#2563EB;">~2 Hours Prior to Event</td>
+        </tr>
+        <tr>
+          <td style="padding:5px 0; color:#64748B;">Event Type:</td>
+          <td style="padding:5px 0; text-align:right; font-weight:600; color:#0F172A;">${safeType}</td>
+        </tr>
+        <tr>
+          <td style="padding:5px 0; color:#64748B; vertical-align:top;">Venue Location:</td>
+          <td style="padding:5px 0; text-align:right; font-weight:600; color:#0F172A;">${safeVenue}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ── Package Inclusions & Production Summary ── -->
+    <div class="code-box" style="background-color:#ECEEF1; border:1px solid #E4E6EA; border-radius:10px; padding:18px 20px; margin-bottom:20px;">
+      <div style="font-size:11px; font-weight:700; color:#24252C; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:12px;">
+        📦 Package &amp; Equipment Inclusions
+      </div>
+      <div style="font-size:14px; font-weight:800; color:#24252C; margin-bottom:4px;">
+        ${safePkg}
+      </div>
+      <div style="font-size:11px; color:#6B7280; margin-bottom:12px;">
+        ${safeTag}
+      </div>
+
+      ${
+        Array.isArray(data.inclusions) && data.inclusions.length > 0
+          ? `
+        <div style="font-size:11px; font-weight:700; color:#374151; margin-bottom:6px;">Standard Inclusions:</div>
+        <ul style="margin:0 0 12px 0; padding-left:18px; font-size:12px; color:#4B5563; line-height:1.6;">
+          ${data.inclusions.map((inc) => `<li>${escapeHtml(inc)}</li>`).join('')}
+        </ul>
+      `
+          : ''
+      }
+
+      ${
+        Array.isArray(data.selectedAddons) && data.selectedAddons.length > 0
+          ? `
+        <div style="font-size:11px; font-weight:700; color:#374151; margin-bottom:6px;">Selected Add-ons &amp; Upgrades:</div>
+        <ul style="margin:0; padding-left:18px; font-size:12px; color:#4B5563; line-height:1.6;">
+          ${data.selectedAddons.map((addon) => `<li><strong>${escapeHtml(addon)}</strong></li>`).join('')}
+        </ul>
+      `
+          : ''
+      }
+    </div>
+
+    <!-- ── Financial Summary & Payment Breakdown ── -->
+    <div style="background-color:#FFFFFF; border:1.5px solid #E2E8F0; border-radius:10px; padding:18px 20px; margin-bottom:24px;">
+      <div style="font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:12px;">
+        💳 Payment &amp; Financial Ledger
+      </div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:13px; font-family:Arial,Helvetica,sans-serif;">
+        <tr>
+          <td style="padding:4px 0; color:#64748B;">Total Booking Cost:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:700; color:#0F172A;">₱${totalNum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#059669; font-weight:600;">Amount Paid / Deposit:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:700; color:#059669;">₱${depositNum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#64748B;">Payment Channel:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:600; color:#0F172A;">${safeChannel}</td>
+        </tr>
+        <tr style="border-top:1px solid #E2E8F0;">
+          <td style="padding:8px 0 4px 0; font-weight:700; color:#0F172A;">Remaining Balance:</td>
+          <td style="padding:8px 0 4px 0; text-align:right; font-weight:800; font-size:14px; color:${isFull ? '#059669' : '#D97706'};">
+            ${isFull ? '₱0.00 (FULLY PAID)' : `₱${remainingNum.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+          </td>
+        </tr>
+        ${
+          !isFull
+            ? `
+        <tr>
+          <td style="padding:2px 0; color:#64748B; font-size:11px;">Balance Settlement:</td>
+          <td style="padding:2px 0; text-align:right; font-size:11px; color:#475569;">${safeBalanceMethod}</td>
+        </tr>
+        `
+            : ''
+        }
+      </table>
+    </div>
+
+    <!-- ── Live Tracking CTA Button ── -->
+    <div style="text-align:center; margin:28px 0;">
+      <a
+        href="${trackerLink}"
+        target="_blank"
+        style="display:inline-block; background-color:#24252C; color:#FFFFFF; font-size:13px; font-weight:700; text-decoration:none; padding:14px 32px; border-radius:9999px; letter-spacing:0.3px;"
+      >
+        Track Booking &amp; Production Timeline →
+      </a>
+      <div style="font-size:11px; color:#9CA3AF; margin-top:8px;">
+        Monitor crew dispatch, gear rigging status, and digital sign-off anytime.
+      </div>
+    </div>
+
+    <!-- ── Production Notice & Support ── -->
+    <p class="text-muted" style="margin:20px 0 0 0; font-size:12px; color:#6B7280; line-height:1.6; font-family:Arial,Helvetica,sans-serif;">
+      Need to make adjustments, submit program itineraries, or coordinate venue ingress guidelines? Reply directly to this email or contact us at <a href="mailto:admin@binhiconcept.ph" style="color:#2563EB; text-decoration:none;">admin@binhiconcept.ph</a>.
+    </p>
+  `;
+
+  return renderEmailShell({
+    title: `Booking Confirmed: #${safeRef} - ${safeDate} - BINHI Concept`,
+    badgeText: 'BOOKING CONFIRMED',
+    headline: 'Official Event Booking Confirmation',
+    bodyContent,
+  });
+}
+
+/**
+ * 11. Template: Admin Alert - New Booking Confirmed
+ * Sent to System Administrators when a customer confirms a booking.
+ */
+export function getAdminNewBookingConfirmationAlertHtml(data: BookingConfirmationEmailData): string {
+  const safeName = escapeHtml(data.customerName || 'Client');
+  const safeRef = escapeHtml(data.paymongoReference || data.bookingId);
+  const safePkg = escapeHtml(data.packageName || 'Production Package');
+  const safeDate = escapeHtml(data.eventDate);
+  const safeVenue = escapeHtml(data.venueAddress || 'Venue');
+  const safeEmail = escapeHtml(data.customerEmail);
+  const safePhone = data.customerPhone ? escapeHtml(data.customerPhone) : 'N/A';
+  const totalNum = typeof data.totalCost === 'number' ? data.totalCost : parseFloat(String(data.totalCost).replace(/[^0-9.]/g, '')) || 0;
+  const depositNum = typeof data.depositAmount === 'number' ? data.depositAmount : parseFloat(String(data.depositAmount).replace(/[^0-9.]/g, '')) || 0;
+
+  const bodyContent = `
+    <p class="text-muted" style="margin:0 0 16px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      A new event production booking has been <strong class="text-ink" style="color:#24252C;">confirmed &amp; scheduled</strong> in the system.
+    </p>
+
+    <div style="background-color:#F0FDF4; border:1px solid #BBF7D0; border-radius:10px; padding:16px 18px; margin-bottom:20px;">
+      <div style="font-size:10px; font-weight:700; color:#15803D; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">
+        Confirmed Reservation
+      </div>
+      <div style="font-size:18px; font-weight:800; color:#166534;">
+        ${safeName} · #${safeRef}
+      </div>
+      <div style="font-size:12px; color:#14532D; margin-top:2px;">
+        ${safePkg} — Event Date: <strong>${safeDate}</strong>
+      </div>
+    </div>
+
+    <div class="code-box" style="background-color:#ECEEF1; border:1px solid #E4E6EA; border-radius:8px; padding:16px 18px; margin-bottom:20px; font-size:12px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Customer:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:700; color:#24252C;">${safeName}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Email:</td>
+          <td style="padding:4px 0; text-align:right; font-family:monospace; color:#24252C;">${safeEmail}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Contact:</td>
+          <td style="padding:4px 0; text-align:right; color:#24252C;">${safePhone}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Venue:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:600; color:#24252C;">${safeVenue}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Total Package Cost:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:700; color:#24252C;">₱${totalNum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Deposit Collected:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:700; color:#15803D;">₱${depositNum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        </tr>
+      </table>
+    </div>
+
+    <p class="text-muted" style="margin:20px 0 0 0; font-size:12px; color:#6B7280; line-height:1.6; font-family:Arial,Helvetica,sans-serif;">
+      Please assign physical equipment serials and stage crew in the Admin Dashboard.
+    </p>
+  `;
+
+  return renderEmailShell({
+    title: `[New Confirmed Booking] #${safeRef} - ${safeName} (${safeDate})`,
+    badgeText: 'NEW CONFIRMED BOOKING',
+    headline: 'New Event Booking Scheduled',
+    bodyContent,
+  });
+}
+
+
 

@@ -22,6 +22,7 @@ import {
   timeToMinutes,
   minutesToTime,
   formatTimeAmPm,
+  calculateCrewArrivalTime,
   getOperatingWindowForDate,
   DEFAULT_BOOKING_SETTINGS,
   type BookingSettings,
@@ -1015,7 +1016,7 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                         <div className="flex items-center gap-1.5">
                           <IconClock className="w-4 h-4 text-[#1090F8]" />
                           <span className="text-[11px] font-bold uppercase text-[var(--ink)] tracking-wider">
-                            Event Schedule Window
+                            Event Schedule Window (Event Proper)
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5">
@@ -1032,6 +1033,20 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                           </span>
                         </div>
                       </div>
+
+                      {rescheduleOpWindow.isOpen && newRescheduleStartTime && (
+                        <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200/90 px-3 py-2 rounded-xl text-xs">
+                          <div>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-900 block">Binhi Styling &amp; Setup Ingress:</span>
+                            <span className="text-[11px] text-emerald-800">
+                              Crew arrives on-site early to assemble styling before program start
+                            </span>
+                          </div>
+                          <span className="font-mono font-extrabold text-xs text-emerald-950 bg-white px-2.5 py-1 rounded-lg border border-emerald-300 shrink-0">
+                            Call Time: ~{formatTimeAmPm(calculateCrewArrivalTime(newRescheduleStartTime, bookingSettings.default_turnaround_hours))}
+                          </span>
+                        </div>
+                      )}
 
                       {/* Quick Preset Buttons */}
                       <div className="flex flex-wrap items-center gap-1.5 pt-1">

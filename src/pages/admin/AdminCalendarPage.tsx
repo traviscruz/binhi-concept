@@ -10,6 +10,7 @@ import {
   saveBookingSettings,
   getDayAvailabilityStatus,
   formatTimeAmPm,
+  calculateCrewArrivalTime,
   timeToMinutes,
   type BookingSettings,
   type ScheduleOverride,
@@ -360,9 +361,12 @@ export default function AdminCalendarPage({ go }: { go: (p: Page) => void }) {
                   <div key={b.id} className="space-y-3">
                     <div className="p-4 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.08] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="font-mono text-xs font-extrabold text-[#1090F8] bg-[#1090F8]/10 px-2.5 py-0.5 rounded-full">
-                            {formatTimeAmPm(b.start_time || '13:00')} – {formatTimeAmPm(b.end_time || '18:00')}
+                            Event Proper: {formatTimeAmPm(b.start_time || '13:00')} – {formatTimeAmPm(b.end_time || '18:00')}
+                          </span>
+                          <span className="font-mono text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                            Crew Setup Call Time: ~{formatTimeAmPm(calculateCrewArrivalTime(b.start_time || '13:00', bookingSettings.default_turnaround_hours))}
                           </span>
                           <span className="text-xs font-bold text-[var(--ink)]">{b.package_name}</span>
                         </div>
@@ -453,9 +457,20 @@ export default function AdminCalendarPage({ go }: { go: (p: Page) => void }) {
                 <span className="font-extrabold text-[#1090F8]">{formatDisplayDate(selectedBookingModal.event_date)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#24252c]/50">Schedule Window:</span>
-                <span className="font-mono font-extrabold text-emerald-700">
+                <span className="text-[#24252c]/50">Event Proper Window:</span>
+                <span className="font-mono font-extrabold text-[var(--ink)]">
                   {formatTimeAmPm(selectedBookingModal.start_time || '13:00')} – {formatTimeAmPm(selectedBookingModal.end_time || '18:00')}
+                </span>
+              </div>
+              <div className="flex justify-between items-center bg-emerald-50 border border-emerald-200/80 p-2.5 rounded-xl">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-emerald-900 block">Crew Arrival / Setup (Ingress):</span>
+                  <span className="text-[11px] text-emerald-800">
+                    Binhi crew arrives ~{bookingSettings.default_turnaround_hours}h early for staging
+                  </span>
+                </div>
+                <span className="font-mono font-extrabold text-xs text-emerald-950 bg-white px-2 py-1 rounded-lg border border-emerald-300">
+                  {formatTimeAmPm(calculateCrewArrivalTime(selectedBookingModal.start_time || '13:00', bookingSettings.default_turnaround_hours))}
                 </span>
               </div>
               <div className="flex justify-between">
@@ -500,11 +515,15 @@ export default function AdminCalendarPage({ go }: { go: (p: Page) => void }) {
               Easy Configuration
             </span>
             <h3 className="text-xl font-extrabold text-[var(--ink)] mt-0.5">
-              Operating Hours &amp; Booking Buffer Rules
+              Operating Hours &amp; Pre-Event Setup / Buffer Rules
             </h3>
             <p className="text-xs text-[#24252c]/60">
-              Set when the system accepts event setups and the rest/travel gap between events.
+              Set system operating hours and the required pre-event setup (ingress), transit, and turnaround gap.
             </p>
+          </div>
+
+          <div className="p-3 bg-blue-50/80 rounded-xl border border-blue-200 text-blue-950 text-[11px] leading-relaxed">
+            <strong>Note on Event Times:</strong> Customers pick their <strong>actual event start &amp; end time</strong> (Event Proper). The system uses the <strong>Pre-Event Setup &amp; Turnaround Gap</strong> below to ensure the Binhi crew has sufficient time to travel and arrive on-site early to set up before the party starts.
           </div>
 
           {settingsSuccessNotice && (
@@ -527,7 +546,7 @@ export default function AdminCalendarPage({ go }: { go: (p: Page) => void }) {
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="font-extrabold text-sm text-[var(--ink)]">1. Daily Operating Hours</h4>
-                  <p className="text-[11px] text-[#24252c]/55">Customers cannot book earlier than Open or later than Close.</p>
+                  <p className="text-[11px] text-[#24252c]/55">Earliest start and latest closing time for event operations.</p>
                 </div>
               </div>
 
@@ -596,12 +615,12 @@ export default function AdminCalendarPage({ go }: { go: (p: Page) => void }) {
               </div>
             </div>
 
-            {/* 2. Buffer Gap Between Bookings */}
+            {/* 2. Pre-Event Setup & Turnaround Gap */}
             <div className="p-4 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.06] space-y-3">
               <div>
-                <h4 className="font-extrabold text-sm text-[var(--ink)]">2. Minimum Rest &amp; Turnaround Gap</h4>
+                <h4 className="font-extrabold text-sm text-[var(--ink)]">2. Pre-Event Setup &amp; Turnaround Gap</h4>
                 <p className="text-[11px] text-[#24252c]/55">
-                  How much time the crew needs after an event ends before starting the next.
+                  How much time the Binhi crew needs before event start (for on-site staging/ingress) &amp; between consecutive bookings.
                 </p>
               </div>
 
