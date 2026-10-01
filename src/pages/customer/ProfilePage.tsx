@@ -5,6 +5,7 @@ import { OtpInput } from '../../components/shared/OtpInput';
 import { IconShield, IconX, IconEye, IconEyeOff, IconUser, IconLock, IconTicket, IconArrow } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { supabase } from '../../utils/supabase';
+import { sendOtp, verifyOtp } from '../../utils/smsService';
 import { validatePassword } from '../../utils/passwordValidation';
 import { PasswordChecklist } from '../../components/shared/PasswordChecklist';
 import { fetchUserLoyaltyData } from '../../utils/loyaltyService';
@@ -22,6 +23,8 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
   const [email, setEmail] = useState('');
   const [countryCode, setCountryCode] = useState('+63');
   const [phoneDigits, setPhoneDigits] = useState('');
+  const [savedPhoneDigits, setSavedPhoneDigits] = useState('');
+  const [isEditingPhone, setIsEditingPhone] = useState(false);
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [userTier, setUserTier] = useState('Standard Host');
   const [loyaltyPoints, setLoyaltyPoints] = useState(0);
@@ -39,8 +42,12 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
 
   // Modals & Statuses
   const [showPhoneModal, setShowPhoneModal] = useState(false);
-  const [phoneOtpToken, setPhoneOtpToken] = useState('');
+  const [phoneOtpCode, setPhoneOtpCode] = useState('');
+  const [phoneHmacToken, setPhoneHmacToken] = useState('');
+  const [sendingPhoneOtp, setSendingPhoneOtp] = useState(false);
   const [verifyingPhone, setVerifyingPhone] = useState(false);
+  const [phoneModalError, setPhoneModalError] = useState('');
+  const [phoneModalInfo, setPhoneModalInfo] = useState('');
   const [showPasswordOtpModal, setShowPasswordOtpModal] = useState(false);
   const [passwordOtpToken, setPasswordOtpToken] = useState('');
   
@@ -85,7 +92,11 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
         if (profile) {
           if (profile.first_name) setFirstName(profile.first_name);
           if (profile.last_name) setLastName(profile.last_name);
-          if (profile.phone) setPhoneDigits(parseDigits(profile.phone));
+          if (profile.phone) {
+            const digits = parseDigits(profile.phone);
+            setPhoneDigits(digits);
+            setSavedPhoneDigits(digits);
+          }
           if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
           if (profile.is_phone_verified !== undefined) setIsPhoneVerified(profile.is_phone_verified);
         }
@@ -233,19 +244,102 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
     }
   };
 
-  // Phone Verification Handler (Mock OTP -> Database persist)
-  const handleConfirmPhoneVerification = async () => {
+  // ── Phone Verification Handlers (PhilSMS OTP via Supabase Edge Function) ──
+  const handleStartPhoneVerification = async () => {
     if (phoneDigits.length !== 10 || !phoneDigits.startsWith('9')) {
-      setProfileErrorMsg('Mobile phone number must be a valid 10-digit PH number starting with 9 (e.g. 9171234567).');
+      setProfileErrorMsg('Please enter a valid 10-digit mobile number starting with 9 first (e.g. 9171234567).');
+      return;
+    }
+
+    setProfileErrorMsg('');
+    setPhoneModalError('');
+    setPhoneModalInfo('');
+    setPhoneOtpCode('');
+    setShowPhoneModal(true);
+    setSendingPhoneOtp(true);
+
+    try {
+      const fullPhone = `${countryCode}${phoneDigits}`;
+      const res = await sendOtp(fullPhone, 'profile_phone_verification');
+
+      if (res.success && res.token) {
+        setPhoneHmacToken(res.token);
+        if (res.simulated) {
+          setPhoneModalInfo(
+            `Simulated OTP Mode: Use verification code ${res.simulatedCode || '123456'} (or check edge function logs).`
+          );
+        } else {
+          setPhoneModalInfo(`A 6-digit verification code has been dispatched via SMS to +63 ${phoneDigits}.`);
+        }
+      } else {
+        setPhoneModalError(res.error || 'Failed to dispatch verification SMS. Please try again.');
+      }
+    } catch (err: any) {
+      console.error('[ProfilePage] Error sending phone OTP:', err);
+      setPhoneModalError(err?.message || 'Network error sending verification code.');
+    } finally {
+      setSendingPhoneOtp(false);
+    }
+  };
+
+  const handleResendPhoneOtp = async () => {
+    if (phoneDigits.length !== 10 || !phoneDigits.startsWith('9')) return;
+
+    setPhoneModalError('');
+    setPhoneOtpCode('');
+    setSendingPhoneOtp(true);
+
+    try {
+      const fullPhone = `${countryCode}${phoneDigits}`;
+      const res = await sendOtp(fullPhone, 'profile_phone_verification');
+
+      if (res.success && res.token) {
+        setPhoneHmacToken(res.token);
+        if (res.simulated) {
+          setPhoneModalInfo(
+            `Simulated OTP Mode: Use new verification code ${res.simulatedCode || '123456'}.`
+          );
+        } else {
+          setPhoneModalInfo('A new verification code has been sent to your phone!');
+        }
+      } else {
+        setPhoneModalError(res.error || 'Failed to resend verification code.');
+      }
+    } catch (err: any) {
+      setPhoneModalError(err?.message || 'Error resending code.');
+    } finally {
+      setSendingPhoneOtp(false);
+    }
+  };
+
+  const handleConfirmPhoneVerification = async () => {
+    if (phoneOtpCode.trim().length !== 6) {
+      setPhoneModalError('Please enter the full 6-digit verification code.');
+      return;
+    }
+
+    if (!phoneHmacToken) {
+      setPhoneModalError('Verification session expired. Please request a new code.');
       return;
     }
 
     setVerifyingPhone(true);
+    setPhoneModalError('');
+
     const formattedPhone = `${countryCode} ${phoneDigits}`;
+    const fullPhone = `${countryCode}${phoneDigits}`;
 
     try {
+      const res = await verifyOtp(fullPhone, phoneOtpCode.trim(), phoneHmacToken);
+
+      if (!res.valid) {
+        setPhoneModalError(res.error || 'Incorrect or expired verification code. Please try again.');
+        setVerifyingPhone(false);
+        return;
+      }
+
+      // Validated! Persist to Supabase Database
       if (userId) {
-        // Update public.profiles table in Supabase
         await supabase.from('profiles').upsert({
           id: userId,
           phone: formattedPhone,
@@ -253,20 +347,24 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
           updated_at: new Date().toISOString(),
         });
 
-        // Update Auth metadata
         await supabase.auth.updateUser({
           data: { phone: formattedPhone },
         });
       }
 
       setIsPhoneVerified(true);
+      setSavedPhoneDigits(phoneDigits);
+      setIsEditingPhone(false);
       setShowPhoneModal(false);
-      setPhoneOtpToken('');
-      setProfileSuccessMsg('Phone number verified and updated successfully!');
-      setTimeout(() => setProfileSuccessMsg(''), 4000);
+      setPhoneOtpCode('');
+      setPhoneHmacToken('');
+      setPhoneModalError('');
+      setPhoneModalInfo('');
+      setProfileSuccessMsg(`Phone number +63 ${phoneDigits} successfully verified!`);
+      setTimeout(() => setProfileSuccessMsg(''), 4500);
     } catch (err: any) {
-      console.error('Failed to verify phone:', err);
-      setProfileErrorMsg(err?.message || 'Failed to verify phone number.');
+      console.error('[ProfilePage] Failed to verify phone:', err);
+      setPhoneModalError(err?.message || 'Failed to verify phone number.');
     } finally {
       setVerifyingPhone(false);
     }
@@ -285,6 +383,9 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
     setProfileSuccessMsg('');
 
     const formattedPhone = phoneDigits ? `${countryCode} ${phoneDigits}` : '';
+    // Only mark unverified if the user changed the previously verified phone number
+    const isNewPhone = isPhoneVerified && phoneDigits !== savedPhoneDigits;
+    const finalPhoneVerified = isNewPhone ? false : isPhoneVerified;
 
     try {
       // Update Supabase Auth metadata
@@ -308,14 +409,22 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
           full_name: `${firstName.trim()} ${lastName.trim()}`,
           phone: formattedPhone,
           avatar_url: avatarUrl,
-          is_phone_verified: isPhoneVerified,
+          is_phone_verified: finalPhoneVerified,
           updated_at: new Date().toISOString(),
         });
       }
 
+      setIsPhoneVerified(finalPhoneVerified);
+      setSavedPhoneDigits(phoneDigits);
+      setIsEditingPhone(false);
       setProfileLoading(false);
-      setProfileSuccessMsg('Profile details updated successfully!');
-      setTimeout(() => setProfileSuccessMsg(''), 4000);
+
+      if (isNewPhone) {
+        setProfileSuccessMsg('Profile updated! Since your mobile number changed, please click "Verify Now" to verify your new number.');
+      } else {
+        setProfileSuccessMsg('Profile details updated successfully!');
+      }
+      setTimeout(() => setProfileSuccessMsg(''), 4500);
     } catch (err: any) {
       setProfileErrorMsg(err?.message || 'Failed to update profile details.');
       setProfileLoading(false);
@@ -600,33 +709,49 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
                   {isPhoneVerified ? (
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
-                        Verified
+                        Verified {isEditingPhone && <span className="text-[9px] text-amber-600 font-semibold">(Editing)</span>}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsPhoneVerified(false);
-                          setProfileSuccessMsg('Phone unlocked. Enter your new number and click "Verify Now".');
-                          setTimeout(() => setProfileSuccessMsg(''), 4000);
-                        }}
-                        className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 hover:bg-[#1090F8]/20 border border-[#1090F8]/20 px-2.5 py-0.5 rounded-full transition-colors cursor-pointer"
-                      >
-                        Edit Phone
-                      </button>
+                      {isEditingPhone ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditingPhone(false);
+                            setPhoneDigits(savedPhoneDigits);
+                          }}
+                          className="text-[10px] font-bold text-[#24252c]/60 hover:text-[var(--ink)] bg-[#EEEEEE] hover:bg-[#E0E0E0] px-2.5 py-0.5 rounded-full transition-colors cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditingPhone(true);
+                            setProfileSuccessMsg('Phone unlocked. Update your number below and click "Save Personal Details".');
+                            setTimeout(() => setProfileSuccessMsg(''), 4000);
+                          }}
+                          className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 hover:bg-[#1090F8]/20 border border-[#1090F8]/20 px-2.5 py-0.5 rounded-full transition-colors cursor-pointer"
+                        >
+                          Edit Phone
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <button
                       type="button"
-                      onClick={() => {
-                        if (phoneDigits.length !== 10 || !phoneDigits.startsWith('9')) {
-                          setProfileErrorMsg('Please enter a valid 10-digit mobile number starting with 9 first.');
-                          return;
-                        }
-                        setShowPhoneModal(true);
-                      }}
-                      className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-full hover:bg-rose-100 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                      onClick={handleStartPhoneVerification}
+                      disabled={sendingPhoneOtp}
+                      className="group relative text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-300 hover:border-rose-400 px-3 py-1 rounded-full transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-sm"
+                      title="Click to verify this mobile number via SMS OTP"
                     >
-                      Unverified — Verify Now
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                      </span>
+                      <span>Unverified</span>
+                      <span className="font-semibold text-rose-700 bg-rose-200/70 group-hover:bg-rose-200 px-1.5 py-0.5 rounded-full text-[9px] transition-colors flex items-center gap-0.5">
+                        {sendingPhoneOtp ? 'Sending...' : 'Click to verify ↗'}
+                      </span>
                     </button>
                   )}
                 </div>
@@ -639,12 +764,17 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
                     inputMode="numeric"
                     maxLength={10}
                     value={phoneDigits}
-                    readOnly={isPhoneVerified}
+                    readOnly={isPhoneVerified && !isEditingPhone}
                     onChange={(e) => setPhoneDigits(e.target.value.replace(/\D/g, '').slice(0, 10))}
                     placeholder="917 123 4567"
-                    className={inputClass + ` flex-1 ${isPhoneVerified ? 'cursor-not-allowed opacity-90' : ''}`}
+                    className={inputClass + ` flex-1 ${isPhoneVerified && !isEditingPhone ? 'cursor-not-allowed opacity-90' : ''}`}
                   />
                 </div>
+                {isEditingPhone && phoneDigits !== savedPhoneDigits && (
+                  <p className="text-[11px] text-amber-600 font-medium ml-4 mt-1">
+                    * Saving a new number will require SMS OTP verification.
+                  </p>
+                )}
                 {phoneDigits.length > 0 && (phoneDigits.length < 10 || !phoneDigits.startsWith('9')) && (
                   <p className="text-[11px] text-rose-500 ml-4 mt-1">
                     Phone number must be 10 digits starting with 9 (e.g. 9171234567).
@@ -837,20 +967,38 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
             <span className="w-12 h-12 rounded-full bg-[#1090F8]/10 text-[#1090F8] font-bold text-lg flex items-center justify-center mx-auto mb-3">
               <IconShield className="w-6 h-6" />
             </span>
-            <h3 className="text-2xl font-extrabold text-[var(--ink)]">Verify Phone Number</h3>
+            <h3 className="text-2xl font-extrabold text-[var(--ink)]">Verify Mobile Number</h3>
             <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
-              Verification SMS code sent to <strong className="text-[var(--ink)]">+63 {phoneDigits}</strong>.
+              We sent a 6-digit verification code via SMS to{' '}
+              <strong className="text-[var(--ink)]">+63 {phoneDigits}</strong>.
             </p>
           </div>
 
+          {phoneModalInfo && (
+            <div className="mb-4 p-3 rounded-xl text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 font-medium">
+              {phoneModalInfo}
+            </div>
+          )}
+
+          {phoneModalError && (
+            <div className="mb-4 p-3 rounded-xl text-xs bg-rose-50 border border-rose-200 text-rose-700 font-medium">
+              {phoneModalError}
+            </div>
+          )}
+
           <div className="my-6">
-            <OtpInput value={phoneOtpToken} onChange={(val) => setPhoneOtpToken(val)} />
+            <OtpInput
+              value={phoneOtpCode}
+              onChange={(val) => setPhoneOtpCode(val)}
+              onResend={handleResendPhoneOtp}
+              disabled={verifyingPhone || sendingPhoneOtp}
+            />
           </div>
 
           <button
             type="button"
             onClick={handleConfirmPhoneVerification}
-            disabled={verifyingPhone}
+            disabled={verifyingPhone || phoneOtpCode.length < 6 || !phoneHmacToken}
             className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors text-xs cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {verifyingPhone ? (

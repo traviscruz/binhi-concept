@@ -22,6 +22,7 @@ import {
   DEFAULT_BOOKING_SETTINGS,
 } from '../../utils/bookingEngine';
 import { supabase } from '../../lib/supabase';
+import { sendOtp, verifyOtp } from '../../utils/smsService';
 import { createPaymongoCheckoutSession } from '../../utils/paymongoPayment';
 import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
 import { validateVoucherCode, recordVoucherUsage } from '../../utils/voucherService';
@@ -77,6 +78,7 @@ export default function CheckoutPage({
   const [email, setEmail] = useState('');
   const [countryCode] = useState('+63');
   const [phoneDigits, setPhoneDigits] = useState('');
+  const [savedVerifiedPhone, setSavedVerifiedPhone] = useState('');
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
 
   // Helper to format ISO YYYY-MM-DD for HTML5 date input
@@ -244,8 +246,11 @@ export default function CheckoutPage({
   // ── Error & Modal States ──────────────────────────────────────────────────
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [phoneOtpToken, setPhoneOtpToken] = useState('');
+  const [phoneHmacToken, setPhoneHmacToken] = useState('');
+  const [sendingPhoneOtp, setSendingPhoneOtp] = useState(false);
   const [verifyingPhone, setVerifyingPhone] = useState(false);
   const [phoneModalError, setPhoneModalError] = useState('');
+  const [phoneModalInfo, setPhoneModalInfo] = useState('');
   const [step1Error, setStep1Error] = useState('');
   const [step2Error, setStep2Error] = useState('');
   const [step3Error, setStep3Error] = useState('');
@@ -702,7 +707,13 @@ export default function CheckoutPage({
           if (profile.first_name) setFirstName(profile.first_name);
           if (profile.last_name) setLastName(profile.last_name);
           if (profile.email) setEmail(profile.email);
-          if (profile.phone) setPhoneDigits(parseDigits(profile.phone));
+          if (profile.phone) {
+            const digits = parseDigits(profile.phone);
+            setPhoneDigits(digits);
+            if (profile.is_phone_verified) {
+              setSavedVerifiedPhone(digits);
+            }
+          }
           if (profile.is_phone_verified !== undefined) {
             setIsPhoneVerified(profile.is_phone_verified);
           }
@@ -727,18 +738,94 @@ export default function CheckoutPage({
     };
   }, []);
 
-  // ── Phone Verification Callback ───────────────────────────────────────────
+  // ── Real SMS OTP Phone Verification Callbacks ───────────────────────────
+  const handleStartPhoneVerification = async () => {
+    setStep1Error('');
+    if (phoneDigits.length !== 10 || !phoneDigits.startsWith('9')) {
+      setStep1Error('Please enter a valid 10-digit Philippine mobile number starting with 9 (e.g. 9171234567).');
+      return;
+    }
+
+    setPhoneModalError('');
+    setPhoneModalInfo('');
+    setPhoneOtpToken('');
+    setSendingPhoneOtp(true);
+
+    try {
+      const fullPhone = `${countryCode}${phoneDigits}`;
+      const res = await sendOtp(fullPhone, 'checkout_phone_verification');
+
+      if (res.success && res.token) {
+        setPhoneHmacToken(res.token);
+        if (res.simulated) {
+          setPhoneModalInfo(`Simulated OTP Mode: Use verification code ${res.simulatedCode || '123456'}.`);
+        } else {
+          setPhoneModalInfo(`A 6-digit verification code has been dispatched via SMS to +63 ${phoneDigits}.`);
+        }
+        setShowPhoneModal(true);
+      } else {
+        setStep1Error(res.error || 'Failed to dispatch verification SMS. Please try again.');
+      }
+    } catch (err: any) {
+      console.error('[CheckoutPage] Error sending phone OTP:', err);
+      setStep1Error(err?.message || 'Network error sending verification code.');
+    } finally {
+      setSendingPhoneOtp(false);
+    }
+  };
+
+  const handleResendPhoneOtp = async () => {
+    if (phoneDigits.length !== 10 || !phoneDigits.startsWith('9')) return;
+
+    setPhoneModalError('');
+    setPhoneOtpToken('');
+    setSendingPhoneOtp(true);
+
+    try {
+      const fullPhone = `${countryCode}${phoneDigits}`;
+      const res = await sendOtp(fullPhone, 'checkout_phone_verification');
+
+      if (res.success && res.token) {
+        setPhoneHmacToken(res.token);
+        if (res.simulated) {
+          setPhoneModalInfo(`Simulated OTP Mode: Use new verification code ${res.simulatedCode || '123456'}.`);
+        } else {
+          setPhoneModalInfo('A new verification code has been dispatched to your mobile phone!');
+        }
+      } else {
+        setPhoneModalError(res.error || 'Failed to resend verification code.');
+      }
+    } catch (err: any) {
+      setPhoneModalError(err?.message || 'Error resending code.');
+    } finally {
+      setSendingPhoneOtp(false);
+    }
+  };
+
   const handleConfirmPhoneVerification = async () => {
     setPhoneModalError('');
-    if (phoneDigits.length !== 10 || !phoneDigits.startsWith('9')) {
-      setPhoneModalError('Mobile phone number must be a valid 10-digit PH number starting with 9 (e.g. 9171234567).');
+    if (phoneOtpToken.trim().length !== 6) {
+      setPhoneModalError('Please enter the full 6-digit verification code.');
+      return;
+    }
+
+    if (!phoneHmacToken) {
+      setPhoneModalError('Verification session expired. Please request a new code.');
       return;
     }
 
     setVerifyingPhone(true);
     const formattedPhone = `${countryCode} ${phoneDigits}`;
+    const fullPhone = `${countryCode}${phoneDigits}`;
 
     try {
+      const res = await verifyOtp(fullPhone, phoneOtpToken.trim(), phoneHmacToken);
+      if (!res.valid) {
+        setPhoneModalError(res.error || 'Incorrect or expired verification code. Please try again.');
+        setVerifyingPhone(false);
+        return;
+      }
+
       if (userId) {
         await supabase.from('profiles').upsert({
           id: userId,
@@ -753,13 +840,16 @@ export default function CheckoutPage({
       }
 
       setIsPhoneVerified(true);
+      setSavedVerifiedPhone(phoneDigits);
       setShowPhoneModal(false);
       setPhoneOtpToken('');
+      setPhoneHmacToken('');
       setStep1Error('');
       setPhoneModalError('');
-    } catch (err) {
-      console.error('Failed to verify phone:', err);
-      setPhoneModalError('Failed to update phone verification status in database.');
+      setPhoneModalInfo('');
+    } catch (err: any) {
+      console.error('[CheckoutPage] Failed to verify phone:', err);
+      setPhoneModalError(err?.message || 'Failed to verify phone number.');
     } finally {
       setVerifyingPhone(false);
     }
@@ -817,7 +907,8 @@ export default function CheckoutPage({
       return;
     }
     if (!isPhoneVerified) {
-      setStep1Error('Mobile phone number MUST be verified before proceeding with your booking.');
+      setStep1Error('Mobile phone number MUST be verified via SMS OTP before proceeding with your booking.');
+      handleStartPhoneVerification();
       return;
     }
     if (!eventDate) {
@@ -1301,23 +1392,25 @@ export default function CheckoutPage({
                       Checking verification...
                     </span>
                   ) : isPhoneVerified ? (
-                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                      Verified
+                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
+                      Verified ✓
                     </span>
                   ) : (
                     <button
                       type="button"
-                      onClick={() => {
-                        if (phoneDigits.length !== 10 || !phoneDigits.startsWith('9')) {
-                          setStep1Error('Please enter a valid 10-digit mobile number starting with 9 (e.g. 9171234567) before verifying.');
-                          return;
-                        }
-                        setPhoneModalError('');
-                        setShowPhoneModal(true);
-                      }}
-                      className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-full hover:bg-rose-100 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                      onClick={handleStartPhoneVerification}
+                      disabled={sendingPhoneOtp || phoneDigits.length !== 10 || !phoneDigits.startsWith('9')}
+                      className="group relative text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-300 hover:border-rose-400 px-3 py-1 rounded-full transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-sm disabled:opacity-50"
+                      title="Click to verify this mobile number via SMS OTP"
                     >
-                      Unverified — Verify Now
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                      </span>
+                      <span>Unverified</span>
+                      <span className="font-semibold text-rose-700 bg-rose-200/70 group-hover:bg-rose-200 px-1.5 py-0.5 rounded-full text-[9px] transition-colors flex items-center gap-0.5">
+                        {sendingPhoneOtp ? 'Sending...' : 'Click to verify ↗'}
+                      </span>
                     </button>
                   )}
                 </div>
@@ -1332,7 +1425,15 @@ export default function CheckoutPage({
                     maxLength={10}
                     value={phoneDigits}
                     readOnly={isPhoneVerified}
-                    onChange={(e) => setPhoneDigits(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    onChange={(e) => {
+                      const nextDigits = e.target.value.replace(/\D/g, '').slice(0, 10);
+                      setPhoneDigits(nextDigits);
+                      if (nextDigits !== savedVerifiedPhone) {
+                        setIsPhoneVerified(false);
+                      } else if (savedVerifiedPhone && nextDigits === savedVerifiedPhone) {
+                        setIsPhoneVerified(true);
+                      }
+                    }}
                     placeholder="917 123 4567"
                     className={`w-full rounded-full border border-transparent px-4 py-3 text-sm bg-[var(--mist)] text-[var(--ink)] font-medium ${
                       isPhoneVerified ? 'cursor-not-allowed opacity-90' : 'focus:outline-none focus:border-[#1090F8]'
@@ -1345,8 +1446,23 @@ export default function CheckoutPage({
                     Must be 10 digits starting with 9 (e.g. 9171234567).
                   </p>
                 )}
-                <p className="text-[11px] text-[#24252c]/50 mt-1 ml-2">
-                  Need to change phone?{' '}
+                {!isPhoneVerified && !profileLoading && (
+                  <div className="mt-2.5 p-3 rounded-2xl bg-amber-50/90 border border-amber-200 text-amber-900 text-xs flex items-center justify-between gap-3">
+                    <span className="text-[11px] leading-snug">
+                      <strong>Verification Required:</strong> You cannot proceed to booking without verifying your Philippine mobile number (+63 {phoneDigits || '9XXXXXXXXX'}) via SMS OTP.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleStartPhoneVerification}
+                      disabled={sendingPhoneOtp || phoneDigits.length !== 10 || !phoneDigits.startsWith('9')}
+                      className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] px-3.5 py-1.5 rounded-full transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
+                    >
+                      {sendingPhoneOtp ? 'Sending...' : 'Verify Now'}
+                    </button>
+                  </div>
+                )}
+                <p className="text-[11px] text-[#24252c]/50 mt-1.5 ml-2">
+                  Need to update your registered phone number?{' '}
                   <a
                     href="?page=profile"
                     target="_blank"
@@ -1741,10 +1857,23 @@ export default function CheckoutPage({
             <button
               type="button"
               onClick={handleNextStep1}
-              className="w-full bg-[var(--ink)] text-white text-sm font-semibold py-4 rounded-full hover:bg-[var(--ink-soft)] transition-colors inline-flex items-center justify-center gap-2 shadow-md cursor-pointer"
+              className={`w-full text-white text-sm font-semibold py-4 rounded-full transition-all inline-flex items-center justify-center gap-2 shadow-md cursor-pointer ${
+                !isPhoneVerified
+                  ? 'bg-[#24252c]/85 hover:bg-[#24252c]'
+                  : 'bg-[var(--ink)] hover:bg-[var(--ink-soft)]'
+              }`}
             >
-              <span>Next: Logistics & Transport Fee</span>
-              <IconArrow className="w-4 h-4" />
+              {!isPhoneVerified ? (
+                <>
+                  <IconShield className="w-4 h-4 text-amber-300" />
+                  <span>Verify Phone to Continue Booking</span>
+                </>
+              ) : (
+                <>
+                  <span>Next: Logistics & Transport Fee</span>
+                  <IconArrow className="w-4 h-4" />
+                </>
+              )}
             </button>
           </div>
         )}
@@ -2281,7 +2410,7 @@ export default function CheckoutPage({
         )}
       </div>
 
-      {/* ── Mock Phone Verification Modal ── */}
+      {/* ── Real SMS Phone Verification Modal ── */}
       <ModalOverlay isOpen={showPhoneModal} onClose={() => setShowPhoneModal(false)}>
         <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
           <button
@@ -2298,9 +2427,15 @@ export default function CheckoutPage({
             </span>
             <h3 className="text-2xl font-extrabold text-[var(--ink)]">Verify Phone Number</h3>
             <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
-              Verification SMS code sent to <strong className="text-[var(--ink)]">+63 {phoneDigits}</strong>
+              We dispatched a 6-digit verification SMS code to <strong className="text-[var(--ink)]">+63 {phoneDigits}</strong>
             </p>
           </div>
+
+          {phoneModalInfo && (
+            <div className="mb-4 p-3 rounded-xl text-xs bg-blue-50 border border-blue-200 text-blue-800 font-medium">
+              {phoneModalInfo}
+            </div>
+          )}
 
           {phoneModalError && (
             <div className="mb-4 p-3 rounded-xl text-xs bg-rose-50 border border-rose-200 text-rose-700 font-semibold">
@@ -2312,18 +2447,31 @@ export default function CheckoutPage({
             <OtpInput value={phoneOtpToken} onChange={(val) => setPhoneOtpToken(val)} />
           </div>
 
-          <button
-            type="button"
-            onClick={handleConfirmPhoneVerification}
-            disabled={verifyingPhone}
-            className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors text-xs cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {verifyingPhone ? (
-              <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-            ) : (
-              'Confirm & Verify Phone Number'
-            )}
-          </button>
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={handleConfirmPhoneVerification}
+              disabled={verifyingPhone || phoneOtpToken.trim().length !== 6}
+              className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors text-xs cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm"
+            >
+              {verifyingPhone ? (
+                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+              ) : (
+                'Confirm & Verify Phone Number'
+              )}
+            </button>
+
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={handleResendPhoneOtp}
+                disabled={sendingPhoneOtp}
+                className="text-xs font-semibold text-[#1090F8] hover:underline disabled:opacity-50 cursor-pointer"
+              >
+                {sendingPhoneOtp ? 'Sending code...' : "Didn't receive code? Resend SMS"}
+              </button>
+            </div>
+          </div>
         </div>
       </ModalOverlay>
 

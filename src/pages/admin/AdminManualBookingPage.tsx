@@ -12,6 +12,7 @@ import {
 } from '../../utils/logistics';
 import { logAuditEvent } from '../../utils/auditLogger';
 import { sendBookingConfirmationEmails } from '../../utils/emailService';
+import { sendBookingConfirmationSms } from '../../utils/smsService';
 import {
   fetchBookingSettings,
   fetchScheduleOverrides,
@@ -672,6 +673,22 @@ export default function AdminManualBookingPage({ go }: { go: (p: Page) => void }
           inclusions: selectedPkg.inclusions,
           balancePaymentMethod: finalMethod,
         }).catch((e) => console.warn('Manual booking confirmation email notice:', e));
+      }
+
+      // Dispatch automated booking confirmation SMS
+      const targetPhone = phoneDigits.trim() ? `+63 ${phoneDigits.trim()}` : '';
+      if (targetPhone) {
+        sendBookingConfirmationSms({
+          phone: targetPhone,
+          customerPhone: targetPhone,
+          customerName: fullCustomerName,
+          bookingId: bookingPayload.paymongo_reference_number,
+          eventDate: eventDate,
+          packageName: selectedPkg.name,
+          totalCost: totalCost,
+          depositAmount: amountDueToday,
+          venueAddress: venueAddress,
+        }).catch((e) => console.warn('Manual booking confirmation SMS notice:', e));
       }
 
       setSuccessBookingData({

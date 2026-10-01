@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase';
 import { formatDisplayDate } from '../../utils/bookingService';
 import { retrievePaymongoCheckoutSession } from '../../utils/paymongoPayment';
 import { sendBookingConfirmationEmails } from '../../utils/emailService';
+import { sendBookingConfirmationSms } from '../../utils/smsService';
 
 export default function PaymentResultPage({
   type,
@@ -166,6 +167,30 @@ export default function PaymentResultPage({
                 }
               } catch (e) {
                 console.warn('Booking confirmation email attempt note:', e);
+              }
+            }
+
+            // Dispatch automated customer confirmation SMS to verified phone number
+            const targetPhone = bookingData?.customer_phone || customerPhone;
+            if (targetPhone) {
+              try {
+                const smsSentKey = `binhi_conf_sms_sent_${cleanRef || bookingData?.id}`;
+                if (!sessionStorage.getItem(smsSentKey)) {
+                  sessionStorage.setItem(smsSentKey, 'true');
+                  sendBookingConfirmationSms({
+                    phone: targetPhone,
+                    customerPhone: targetPhone,
+                    customerName: bookingData?.customer_name || customerName || 'Valued Client',
+                    bookingId: bookingData?.id || cleanRef || ref,
+                    eventDate: formatDisplayDate(bookingData?.event_date || eventDate),
+                    packageName: bookingData?.package_name || packageName || 'Production Package',
+                    totalCost: bookingData?.total_cost || totalAmount || 0,
+                    depositAmount: bookingData?.deposit_amount || paidAmount || 0,
+                    venueAddress: bookingData?.venue_address || venue || 'Selected Venue Location',
+                  }).catch((e) => console.warn('Booking confirmation SMS notice:', e));
+                }
+              } catch (e) {
+                console.warn('Booking confirmation SMS attempt note:', e);
               }
             }
           } else {
