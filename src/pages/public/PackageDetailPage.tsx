@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 
 import type { Page } from '../../types';
 import { FEATURED_PACKAGES, type PackageData } from '../../data/packages';
@@ -7,6 +7,7 @@ import { PhotoCarousel } from '../../components/shared/PhotoCarousel';
 import { IconArrow, IconCheck, IconTicket, IconHeart, IconX, IconShield } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { PackageReviewsSection } from '../../components/shared/PackageReviewsSection';
+import { CrossSellPromotions, generateSmartAddonBundles, type CrossSellBundle } from '../../components/shared/CrossSellPromotions';
 import { supabase } from '../../lib/supabase';
 import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
 import {
@@ -152,7 +153,6 @@ export default function PackageDetailPage({
     loadEngineData();
   }, []);
 
-  // Live inventory add-ons & maintenance state
   const [addonModels, setAddonModels] = useState<AddonModel[]>([]);
   const [addonsLoading, setAddonsLoading] = useState(true);
   const [showAddonModal, setShowAddonModal] = useState(false);
@@ -160,8 +160,14 @@ export default function PackageDetailPage({
   const [inclusionsMaintenanceMap, setInclusionsMaintenanceMap] = useState<
     Record<string, { inRepairCount: number; deductedAmount: number; modelName: string }>
   >({});
+  const [selectedBundleIds, setSelectedBundleIds] = useState<string[]>([]);
 
   const ADDON_PREVIEW_COUNT = 3;
+
+  // ── Smart Dynamic Frequently Paired Bundles (Real DB Inventory Only) ───────
+  const smartBundles = useMemo(() => {
+    return generateSmartAddonBundles(addonModels);
+  }, [addonModels]);
 
   // ── Fetch available inventory & compute maintenance deductions ──────────────
   useEffect(() => {
@@ -293,16 +299,64 @@ export default function PackageDetailPage({
       }
       return { ...prev, [modelId]: qty };
     });
+
+    // Auto-update bundle selections if quantity is lowered below bundle requirement
+    setSelectedBundleIds((prev) =>
+      prev.filter((bId) => {
+        const b = smartBundles.find((bundle) => bundle.id === bId);
+        if (!b) return false;
+        const bItem = b.items.find((it) => it.modelId === modelId);
+        if (bItem && qty < bItem.qty) {
+          return false;
+        }
+        return true;
+      })
+    );
   };
 
   const getQty = (modelId: string) => addonSelections[modelId] ?? 0;
 
+  // ── Smart Bundle Toggle Handler ───────────────────────────────────────────
+  const handleToggleBundle = (bundle: CrossSellBundle) => {
+    const isSelected = selectedBundleIds.includes(bundle.id);
+    if (isSelected) {
+      // Remove bundle and zero out its items
+      setSelectedBundleIds((prev) => prev.filter((id) => id !== bundle.id));
+      setAddonSelections((prev) => {
+        const next = { ...prev };
+        bundle.items.forEach((item) => {
+          delete next[item.modelId];
+        });
+        return next;
+      });
+    } else {
+      // Select bundle and set item quantities
+      setSelectedBundleIds((prev) => [...prev, bundle.id]);
+      setAddonSelections((prev) => {
+        const next = { ...prev };
+        bundle.items.forEach((item) => {
+          next[item.modelId] = Math.max(next[item.modelId] || 0, item.qty);
+        });
+        return next;
+      });
+    }
+  };
+
   // ── Totals ────────────────────────────────────────────────────────────────
-  const addonsTotal = addonModels.reduce((sum, m) => {
+  const activeBundles = useMemo(() => {
+    return smartBundles.filter((b) => selectedBundleIds.includes(b.id));
+  }, [smartBundles, selectedBundleIds]);
+
+  const totalBundleSavings = useMemo(() => {
+    return activeBundles.reduce((sum, b) => sum + b.savings, 0);
+  }, [activeBundles]);
+
+  const rawAddonsTotal = addonModels.reduce((sum, m) => {
     const qty = getQty(m.modelId);
     return sum + qty * m.rentalRate;
   }, 0);
 
+  const addonsTotal = Math.max(0, rawAddonsTotal - totalBundleSavings);
   const adjustedPackagePrice = Math.max(0, pkg.rawPrice - totalMaintenanceDeduction);
   const totalPrice = adjustedPackagePrice + addonsTotal;
 
@@ -557,6 +611,16 @@ export default function PackageDetailPage({
                   Optional Equipment Add-ons
                 </label>
 
+                {/* Smart Frequently Paired Upgrades (Bundle & Save) */}
+                {!addonsLoading && (
+                  <CrossSellPromotions
+                    bundles={smartBundles}
+                    selectedBundleIds={selectedBundleIds}
+                    onToggleBundle={handleToggleBundle}
+                    compact={true}
+                  />
+                )}
+
                 {/* Loading skeleton */}
                 {addonsLoading && (
                   <div className="space-y-2">
@@ -618,6 +682,18 @@ export default function PackageDetailPage({
                     </button>
                   </div>
 
+                  {/* Smart Frequently Paired Upgrades inside Modal */}
+                  {!addonsLoading && smartBundles.length > 0 && (
+                    <div className="mb-4">
+                      <CrossSellPromotions
+                        bundles={smartBundles}
+                        selectedBundleIds={selectedBundleIds}
+                        onToggleBundle={handleToggleBundle}
+                        compact={false}
+                      />
+                    </div>
+                  )}
+
                   {/* Selected summary bar */}
                   {Object.keys(addonSelections).length > 0 && (
                     <div className="mb-4 px-3 py-2 bg-[#1090F8]/5 border border-[#1090F8]/15 rounded-xl flex items-center justify-between">
@@ -675,7 +751,17 @@ export default function PackageDetailPage({
                 {addonsTotal > 0 && (
                   <div className="flex items-center justify-between text-xs text-[#24252c]/50">
                     <span>Optional Add-ons Total</span>
-                    <span>+₱{addonsTotal.toLocaleString()}</span>
+                    <span>+₱{rawAddonsTotal.toLocaleString()}</span>
+                  </div>
+                )}
+
+                {totalBundleSavings > 0 && (
+                  <div className="flex items-center justify-between text-xs text-emerald-700 font-medium bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200">
+                    <span className="flex items-center gap-1.5">
+                      <IconCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>Bundle &amp; Save Special Discount (20% Off)</span>
+                    </span>
+                    <span className="font-bold">-₱{totalBundleSavings.toLocaleString()}</span>
                   </div>
                 )}
 

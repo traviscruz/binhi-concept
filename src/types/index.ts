@@ -8,6 +8,10 @@ export type Page =
   | 'about'
   | 'contact'
   | 'testimonials'
+  | 'affiliates'
+  | 'partner-login'
+  | 'partner-dashboard'
+  | 'partner-profile'
   | 'login'
   | 'signup'
   | 'forgot'
@@ -43,6 +47,7 @@ export type Page =
   | 'admin-vouchers'
   | 'admin-loyalty'
   | 'admin-reviews'
+  | 'admin-affiliates'
   | 'admin-audit-logs'
   | 'admin-profile'
   | 'crew-assigned-bookings'
@@ -50,7 +55,7 @@ export type Page =
   | 'crew-setup-teardown'
   | 'crew-profile'
 
-export type UserRole = 'customer' | 'inventory_manager' | 'admin' | 'crew'
+export type UserRole = 'customer' | 'inventory_manager' | 'admin' | 'crew' | 'partner'
 
 export interface User {
   id: string

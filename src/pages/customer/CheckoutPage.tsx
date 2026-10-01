@@ -32,6 +32,15 @@ import {
   type LogisticsConfig,
   DEFAULT_LOGISTICS_CONFIG,
 } from '../../utils/logistics';
+import {
+  validateReferralCode,
+  recordAffiliateReferral,
+  type AffiliatePartner,
+} from '../../utils/affiliateService';
+import {
+  CrossSellPromotions,
+  type CrossSellBundle,
+} from '../../components/shared/CrossSellPromotions';
 
 interface TransportRuleOption {
   id: string;
@@ -93,7 +102,9 @@ export default function CheckoutPage({
   };
 
   // ── Event Info State ───────────────────────────────────────────────────────
-  const [eventType, setEventType] = useState('Birthday / Debut Celebration');
+  const [eventType, setEventType] = useState(() => {
+    return sessionStorage.getItem('binhi_checkout_event_type') || 'Birthday / Debut Celebration';
+  });
   const [eventDate, setEventDate] = useState(() => {
     const saved = localStorage.getItem('binhi_selected_event_date');
     return saved ? formatIsoDate(saved) : formatIsoDate(initialDate);
@@ -103,7 +114,9 @@ export default function CheckoutPage({
   const [venueCoords, setVenueCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [bookingSettings, setBookingSettings] = useState<BookingSettings>(DEFAULT_BOOKING_SETTINGS);
   const [scheduleOverrides, setScheduleOverrides] = useState<ScheduleOverride[]>([]);
-  const [eventDescription, setEventDescription] = useState('');
+  const [eventDescription, setEventDescription] = useState(() => {
+    return sessionStorage.getItem('binhi_checkout_event_desc') || '';
+  });
   const [dbBookings, setDbBookings] = useState<DBBooking[]>([]);
 
   useEffect(() => {
@@ -176,7 +189,8 @@ export default function CheckoutPage({
   const [transportLoading, setTransportLoading] = useState(true);
   const [venueAddress, setVenueAddress] = useState('');
   const [isLocationValid, setIsLocationValid] = useState(true);
-  const [selectedAddons] = useState<string[]>(initialAddons);
+  const [selectedAddons, setSelectedAddons] = useState<string[]>(initialAddons);
+  const [selectedBundles, setSelectedBundles] = useState<CrossSellBundle[]>([]);
   const [receiptUploaded, setReceiptUploaded] = useState(false);
   const [paymentType, setPaymentType] = useState<'deposit' | 'full'>('deposit');
 
@@ -200,45 +214,105 @@ export default function CheckoutPage({
     loadLogistics();
   }, []);
 
-  // ── Promo Code State ───────────────────────────────────────────────────────
+  // ── Dual Stackable Promo & Affiliate Partner State ──────────────────────────
   const [promoOpen, setPromoOpen] = useState(false);
   const [promoInput, setPromoInput] = useState('');
-  const [appliedPromo, setAppliedPromo] = useState<{
+  const [appliedVoucher, setAppliedVoucher] = useState<{
     code: string;
     description: string;
     discountType: 'percentage' | 'fixed';
     discountValue: number;
   } | null>(null);
+  const [appliedAffiliate, setAppliedAffiliate] = useState<AffiliatePartner | null>(null);
   const [promoError, setPromoError] = useState('');
+  const [affiliateNotice, setAffiliateNotice] = useState<string>('');
+
+  // Auto-detect referral code from URL query parameter ?ref=... or sessionStorage
+  useEffect(() => {
+    async function autoApplyReferral() {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const queryRef = urlParams.get('ref');
+        const storedRef = sessionStorage.getItem('binhi_ref_code');
+        const codeToTry = (queryRef || storedRef || '').trim().toUpperCase();
+
+        if (codeToTry && !appliedAffiliate) {
+          const partnerRes = await validateReferralCode(codeToTry);
+          if (partnerRes.valid && partnerRes.affiliate) {
+            const p = partnerRes.affiliate;
+            const discRate = p.clientDiscountRate ?? 5;
+            setAppliedAffiliate(p);
+            setPromoOpen(true);
+            setAffiliateNotice(`Partner referral active: ${discRate}% discount applied via ${p.partnerName} (${p.businessName || 'Event Partner'})!`);
+            sessionStorage.setItem('binhi_ref_code', p.referralCode);
+          }
+        }
+      } catch (e) {
+        console.warn('Auto referral check notice:', e);
+      }
+    }
+    autoApplyReferral();
+  }, []);
 
   const handleApplyPromo = async () => {
     setPromoError('');
     const cleaned = promoInput.trim().toUpperCase();
     if (!cleaned) {
-      setPromoError('Please enter a promo code.');
+      setPromoError('Please enter a voucher or partner referral code.');
       return;
     }
 
-    const result = await validateVoucherCode(cleaned);
-    if (result.valid && result.voucher) {
-      setAppliedPromo({
-        code: result.voucher.code,
+    // 1. First test if it's a standard marketing voucher
+    const voucherRes = await validateVoucherCode(cleaned);
+    if (voucherRes.valid && voucherRes.voucher) {
+      setAppliedVoucher({
+        code: voucherRes.voucher.code,
         description:
-          result.voucher.description ||
-          `${result.voucher.discount_value}${result.voucher.discount_type === 'percentage' ? '%' : '₱'} Discount`,
-        discountType: result.voucher.discount_type,
-        discountValue: result.voucher.discount_value,
+          voucherRes.voucher.description ||
+          `${voucherRes.voucher.discount_value}${voucherRes.voucher.discount_type === 'percentage' ? '%' : '₱'} Discount`,
+        discountType: voucherRes.voucher.discount_type,
+        discountValue: voucherRes.voucher.discount_value,
       });
       setPromoInput('');
-    } else {
-      setPromoError(result.error || `"${cleaned}" is not a valid promo code.`);
+      return;
     }
+
+    // 2. If not standard voucher, test if it's an Affiliate Partner Referral Code
+    const affiliateRes = await validateReferralCode(cleaned);
+    if (affiliateRes.valid && affiliateRes.affiliate) {
+      const p = affiliateRes.affiliate;
+      const discRate = p.clientDiscountRate ?? 5;
+      setAppliedAffiliate(p);
+      setPromoInput('');
+      setAffiliateNotice(`Partner referral active: ${discRate}% partner discount applied via ${p.partnerName}!`);
+      sessionStorage.setItem('binhi_ref_code', p.referralCode);
+      return;
+    }
+
+    setPromoError(voucherRes.error || affiliateRes.message || `"${cleaned}" is not a valid voucher or partner code.`);
   };
 
-  const handleRemovePromo = () => {
-    setAppliedPromo(null);
+  const handleRemoveVoucher = () => {
+    setAppliedVoucher(null);
     setPromoError('');
-    setPromoInput('');
+  };
+
+  const handleRemoveAffiliate = () => {
+    setAppliedAffiliate(null);
+    setPromoError('');
+    setAffiliateNotice('');
+    sessionStorage.removeItem('binhi_ref_code');
+  };
+
+  const handleToggleBundle = (bundle: CrossSellBundle) => {
+    setSelectedBundles((prev) => {
+      const exists = prev.some((b) => b.id === bundle.id);
+      if (exists) {
+        return prev.filter((b) => b.id !== bundle.id);
+      } else {
+        return [...prev, bundle];
+      }
+    });
   };
 
   // ── Error & Modal States ──────────────────────────────────────────────────
@@ -951,25 +1025,42 @@ export default function CheckoutPage({
         return acc;
       }, 0);
 
+      const currentBundlesCost = selectedBundles.reduce((acc, b) => acc + b.bundlePrice, 0);
+      const combinedAddonStrings = [
+        ...selectedAddons,
+        ...selectedBundles.map((b) => `Bundle: ${b.title} (₱${b.bundlePrice.toLocaleString()})`),
+      ];
+
       const currentPkgPrice = (pkg as any)?.rawPrice ?? (pkg as any)?.raw_price ?? (pkg?.price ? parseInt(String(pkg.price).replace(/[^\d]/g, ''), 10) || 0 : 0);
 
-      const subtotalBeforeDiscount = currentPkgPrice + currentAddonsCost + fee;
-      let currentDiscount = 0;
-      if (appliedPromo) {
-        if (appliedPromo.discountType === 'percentage') {
-          currentDiscount = Math.round((subtotalBeforeDiscount * appliedPromo.discountValue) / 100);
+      const subtotalBeforeDiscount = currentPkgPrice + currentAddonsCost + currentBundlesCost + fee;
+      
+      let voucherDiscountAmount = 0;
+      if (appliedVoucher) {
+        if (appliedVoucher.discountType === 'percentage') {
+          voucherDiscountAmount = Math.round((subtotalBeforeDiscount * appliedVoucher.discountValue) / 100);
         } else {
-          currentDiscount = Math.min(appliedPromo.discountValue, subtotalBeforeDiscount);
+          voucherDiscountAmount = Math.min(appliedVoucher.discountValue, subtotalBeforeDiscount);
         }
       }
 
-      const calculatedTotalCost = Math.max(0, subtotalBeforeDiscount - currentDiscount);
+      let affiliateDiscountAmount = 0;
+      if (appliedAffiliate) {
+        const affiliateRate = appliedAffiliate.clientDiscountRate ?? 5;
+        affiliateDiscountAmount = Math.round((subtotalBeforeDiscount * affiliateRate) / 100);
+      }
+
+      const totalDiscounts = Math.min(subtotalBeforeDiscount, voucherDiscountAmount + affiliateDiscountAmount);
+      const calculatedTotalCost = Math.max(0, subtotalBeforeDiscount - totalDiscounts);
       const calculatedDepositRequired = Math.round(calculatedTotalCost * 0.5);
       const isFull = paymentType === 'full';
       const calculatedPayAmount = isFull ? calculatedTotalCost : calculatedDepositRequired;
       const calculatedRemainingBalance = isFull ? 0 : calculatedTotalCost - calculatedDepositRequired;
 
-      const promoSuffix = appliedPromo ? ` [Promo: ${appliedPromo.code} -₱${currentDiscount.toLocaleString()}]` : '';
+      const promoSuffixParts: string[] = [];
+      if (appliedVoucher) promoSuffixParts.push(`Voucher: ${appliedVoucher.code} (-₱${voucherDiscountAmount.toLocaleString()})`);
+      if (appliedAffiliate) promoSuffixParts.push(`Partner: ${appliedAffiliate.referralCode} (-₱${affiliateDiscountAmount.toLocaleString()})`);
+      const promoSuffix = promoSuffixParts.length > 0 ? ` [${promoSuffixParts.join(' + ')}]` : '';
 
       const params = {
         amount: calculatedPayAmount,
@@ -992,21 +1083,28 @@ export default function CheckoutPage({
 
       // Save pending booking record into Supabase database bookings table
       try {
+        const affiliateCommission = appliedAffiliate
+          ? Math.round(calculatedTotalCost * ((appliedAffiliate.commissionRate || 5) / 100))
+          : 0;
+
+        const descriptionNotes: string[] = [];
+        if (eventDescription) descriptionNotes.push(eventDescription);
+        if (appliedVoucher) descriptionNotes.push(`[Voucher: ${appliedVoucher.code} (-₱${voucherDiscountAmount.toLocaleString()})]`);
+        if (appliedAffiliate) descriptionNotes.push(`[Affiliate Partner: ${appliedAffiliate.referralCode} - ${appliedAffiliate.partnerName} (-₱${affiliateDiscountAmount.toLocaleString()})]`);
+
         await supabase.from('bookings').insert({
           user_id: userId || null,
           package_id: pkg.id,
           package_name: pkg.name,
           package_price: currentPkgPrice,
-          addons_cost: currentAddonsCost,
+          addons_cost: currentAddonsCost + currentBundlesCost,
           event_type: eventType,
           event_date: eventDate,
           start_time: startTime,
           end_time: endTime,
           venue_lat: venueCoords?.lat || null,
           venue_lng: venueCoords?.lng || null,
-          event_description: appliedPromo
-            ? `${eventDescription}\n[Promo Code: ${appliedPromo.code} (-₱${currentDiscount.toLocaleString()})]`
-            : eventDescription,
+          event_description: descriptionNotes.join('\n'),
           venue_address: venueAddress,
           region_rule_id: selectedRuleId,
           transport_fee: fee,
@@ -1020,15 +1118,36 @@ export default function CheckoutPage({
           customer_email: email || '',
           customer_phone: phoneDigits ? `+63 ${phoneDigits}` : '',
           guest_count: 100,
-          selected_addons: selectedAddons,
+          selected_addons: combinedAddonStrings,
+          affiliate_id: appliedAffiliate?.id || null,
+          affiliate_code: appliedAffiliate?.referralCode || null,
+          affiliate_discount_amount: affiliateDiscountAmount,
+          affiliate_commission_amount: affiliateCommission,
         });
 
         // Record 1 usage for the applied voucher code
-        if (appliedPromo?.code) {
+        if (appliedVoucher?.code) {
           try {
-            await recordVoucherUsage(appliedPromo.code);
+            await recordVoucherUsage(appliedVoucher.code);
           } catch (vErr) {
             console.warn('Note recording voucher usage:', vErr);
+          }
+        }
+
+        // Record affiliate referral tracking
+        if (appliedAffiliate) {
+          try {
+            await recordAffiliateReferral({
+              affiliateId: appliedAffiliate.id,
+              bookingRef: refNum,
+              clientName: `${firstName} ${lastName}`.trim() || 'Valued Customer',
+              contractAmount: calculatedTotalCost,
+              discountApplied: affiliateDiscountAmount,
+              commissionEarned: affiliateCommission,
+              packageName: pkg.name,
+            });
+          } catch (aErr) {
+            console.warn('Note recording affiliate referral:', aErr);
           }
         }
       } catch (dbErr) {
@@ -1043,6 +1162,13 @@ export default function CheckoutPage({
             localStorage.setItem(`binhi_cs_${refNum}`, result.checkout_id);
           } catch { }
         }
+        try {
+          sessionStorage.removeItem('binhi_checkout_event_desc');
+          sessionStorage.removeItem('binhi_checkout_event_type');
+          localStorage.removeItem('binhi_selected_event_date');
+          localStorage.removeItem('binhi_selected_start_time');
+          localStorage.removeItem('binhi_selected_end_time');
+        } catch { }
         window.location.href = result.checkout_url;
       } else {
         throw new Error('No checkout_url returned from Edge Function create-checkout-session.');
@@ -1062,6 +1188,11 @@ export default function CheckoutPage({
       return;
     }
 
+    try {
+      sessionStorage.removeItem('binhi_checkout_event_desc');
+      sessionStorage.removeItem('binhi_checkout_event_type');
+    } catch { }
+
     setBookingSuccessModal(true);
   };
 
@@ -1073,7 +1204,7 @@ export default function CheckoutPage({
   const isFreeTransportApplied = transportCalc.isFree;
   const locationRegionName = currentSelectedRule ? currentSelectedRule.region : 'Selected Location';
 
-  // Real add-on cost calculation from selected equipment items
+  // Real add-on & bundle cost calculation
   const addonsCost = selectedAddons.reduce((sum, itemStr) => {
     const match = String(itemStr).match(/₱([\d,]+)/);
     if (match && match[1]) {
@@ -1083,23 +1214,32 @@ export default function CheckoutPage({
     return sum;
   }, 0);
 
+  const bundlesCost = selectedBundles.reduce((sum, b) => sum + b.bundlePrice, 0);
+
   const maintenanceDeduction = Number(localStorage.getItem('binhi_package_maintenance_deduction') || 0);
   const baseRawPackagePrice = (pkg as any)?.rawPrice ?? (pkg as any)?.raw_price ?? (pkg?.price ? parseInt(String(pkg.price).replace(/[^\d]/g, ''), 10) || 0 : 0);
   const parsedPackagePrice = Math.max(0, baseRawPackagePrice - maintenanceDeduction);
 
-  const packageAndAddonPrice = parsedPackagePrice + addonsCost;
+  const packageAndAddonPrice = parsedPackagePrice + addonsCost + bundlesCost;
   const subtotalBeforeDiscount = packageAndAddonPrice + transportFee;
 
-  let discountAmount = 0;
-  if (appliedPromo) {
-    if (appliedPromo.discountType === 'percentage') {
-      discountAmount = Math.round((subtotalBeforeDiscount * appliedPromo.discountValue) / 100);
+  let voucherDiscountAmount = 0;
+  if (appliedVoucher) {
+    if (appliedVoucher.discountType === 'percentage') {
+      voucherDiscountAmount = Math.round((subtotalBeforeDiscount * appliedVoucher.discountValue) / 100);
     } else {
-      discountAmount = Math.min(appliedPromo.discountValue, subtotalBeforeDiscount);
+      voucherDiscountAmount = Math.min(appliedVoucher.discountValue, subtotalBeforeDiscount);
     }
   }
 
-  const totalCost = Math.max(0, subtotalBeforeDiscount - discountAmount);
+  let affiliateDiscountAmount = 0;
+  if (appliedAffiliate) {
+    const affiliateRate = appliedAffiliate.clientDiscountRate ?? 5;
+    affiliateDiscountAmount = Math.round((subtotalBeforeDiscount * affiliateRate) / 100);
+  }
+
+  const totalDiscountAmount = Math.min(subtotalBeforeDiscount, voucherDiscountAmount + affiliateDiscountAmount);
+  const totalCost = Math.max(0, subtotalBeforeDiscount - totalDiscountAmount);
   const depositRequired = Math.round(totalCost * 0.5);
   const balanceDueOnEventDate = totalCost - depositRequired;
   const isFullPayment = paymentType === 'full';
@@ -1221,6 +1361,20 @@ export default function CheckoutPage({
               ) : (
                 <div className="pt-1.5 text-[11px] text-[#24252c]/50">
                   No optional equipment add-ons selected.
+                </div>
+              )}
+
+              {selectedBundles.length > 0 && (
+                <div className="pt-2 border-t border-[#24252c]/[0.06] space-y-1.5">
+                  <span className="text-[10px] font-extrabold text-amber-600 uppercase tracking-wider block">
+                    Selected Production Upgrades ({selectedBundles.length})
+                  </span>
+                  {selectedBundles.map((b) => (
+                    <div key={b.id} className="flex justify-between text-[#24252c]/80 text-[11px] font-medium pl-1">
+                      <span>• {b.title}</span>
+                      <span className="font-bold text-[var(--ink)]">+₱{b.bundlePrice.toLocaleString()}</span>
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -1371,7 +1525,11 @@ export default function CheckoutPage({
                 </label>
                 <select
                   value={eventType}
-                  onChange={(e) => setEventType(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setEventType(val);
+                    sessionStorage.setItem('binhi_checkout_event_type', val);
+                  }}
                   className="w-full rounded-full border border-transparent px-4 py-3 text-sm bg-[var(--mist)] text-[var(--ink)] font-semibold focus:outline-none focus:border-[#1090F8]"
                   required
                 >
@@ -1732,11 +1890,36 @@ export default function CheckoutPage({
                 rows={3}
                 required
                 value={eventDescription}
-                onChange={(e) => setEventDescription(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setEventDescription(val);
+                  sessionStorage.setItem('binhi_checkout_event_desc', val);
+                }}
                 placeholder="Tell us about your event schedule, venue layout, acoustic expectations, music preferences, or special staging requests..."
                 className="w-full rounded-2xl border border-transparent p-4 text-sm bg-[var(--mist)] text-[var(--ink)] focus:outline-none focus:border-[#1090F8]"
               />
             </div>
+
+            {/* Affiliate Partner Referral Notice (if applied) */}
+            {affiliateNotice && (
+              <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-center justify-between text-xs animate-fadeIn">
+                <div className="flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-emerald-200 flex items-center justify-center text-emerald-800 font-bold shrink-0">
+                    <IconCheck className="w-3 h-3 stroke-[3]" />
+                  </span>
+                  <span className="font-bold">{affiliateNotice}</span>
+                </div>
+                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">
+                  5% OFF APPLIED
+                </span>
+              </div>
+            )}
+
+            {/* Cross-Selling Upgrades (Criterion J: Production Bundles) */}
+            <CrossSellPromotions
+              selectedBundleIds={selectedBundles.map((b) => b.id)}
+              onToggleBundle={handleToggleBundle}
+            />
 
             <button
               type="button"
@@ -1996,10 +2179,16 @@ export default function CheckoutPage({
                   <span className="font-bold text-[#1090F8]">+₱{transportFee.toLocaleString()}</span>
                 )}
               </div>
-              {discountAmount > 0 && (
+              {voucherDiscountAmount > 0 && (
                 <div className="flex justify-between text-emerald-600 font-semibold">
-                  <span>Promo Discount ({appliedPromo?.code})</span>
-                  <span>-₱{discountAmount.toLocaleString()}</span>
+                  <span>Voucher Discount ({appliedVoucher?.code})</span>
+                  <span>-₱{voucherDiscountAmount.toLocaleString()}</span>
+                </div>
+              )}
+              {affiliateDiscountAmount > 0 && (
+                <div className="flex justify-between text-emerald-600 font-semibold">
+                  <span>Partner Referral ({appliedAffiliate?.referralCode})</span>
+                  <span>-₱{affiliateDiscountAmount.toLocaleString()}</span>
                 </div>
               )}
               <div className="pt-2 border-t border-[#24252c]/[0.08] flex justify-between items-center text-sm">
@@ -2117,7 +2306,7 @@ export default function CheckoutPage({
               </div>
             </div>
 
-            {/* ── Collapsible Promo Code Trigger ── */}
+            {/* ── Collapsible Promo & Affiliate Referral Code Trigger (Dual / Stackable) ── */}
             <div className="rounded-xl border border-[#24252c]/[0.08] bg-white overflow-hidden shadow-xs">
               <button
                 type="button"
@@ -2127,12 +2316,20 @@ export default function CheckoutPage({
                 <div className="flex items-center gap-2">
                   <IconTicket className="w-4 h-4 text-[#1090F8]" />
                   <span className="text-xs font-semibold text-[var(--ink)]">
-                    {appliedPromo ? (
+                    {appliedVoucher && appliedAffiliate ? (
                       <span className="text-emerald-600 font-bold">
-                        Voucher Applied: {appliedPromo.code} (-₱{discountAmount.toLocaleString()})
+                        Voucher ({appliedVoucher.code}) + Partner ({appliedAffiliate.referralCode}) Applied (-₱{totalDiscountAmount.toLocaleString()})
+                      </span>
+                    ) : appliedVoucher ? (
+                      <span className="text-emerald-600 font-bold">
+                        Voucher Applied: {appliedVoucher.code} (-₱{voucherDiscountAmount.toLocaleString()})
+                      </span>
+                    ) : appliedAffiliate ? (
+                      <span className="text-emerald-600 font-bold">
+                        Partner Referral Active: {appliedAffiliate.referralCode} (-₱{affiliateDiscountAmount.toLocaleString()})
                       </span>
                     ) : (
-                      'Have a voucher code?'
+                      'Have a voucher or partner / affiliate code?'
                     )}
                   </span>
                 </div>
@@ -2142,21 +2339,53 @@ export default function CheckoutPage({
               </button>
 
               {promoOpen && (
-                <div className="px-4 pb-4 pt-1 border-t border-[#24252c]/[0.06] bg-[var(--mist)]/30 space-y-2 animate-blur-in">
-                  {appliedPromo ? (
-                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs">
-                      <span className="text-emerald-800 font-bold">
-                        {appliedPromo.code} — {appliedPromo.description}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleRemovePromo}
-                        className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer ml-2"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ) : (
+                <div className="px-4 pb-4 pt-1 border-t border-[#24252c]/[0.06] bg-[var(--mist)]/30 space-y-3 animate-blur-in">
+                  {/* Applied Codes Chips */}
+                  <div className="space-y-2 pt-1">
+                    {appliedVoucher && (
+                      <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md uppercase">Voucher</span>
+                          <span className="text-emerald-950 font-bold">
+                            {appliedVoucher.code} ({appliedVoucher.description})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleRemoveVoucher}
+                          className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer ml-2 shrink-0"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+
+                    {appliedAffiliate && (
+                      <div className="flex items-center justify-between p-2.5 rounded-xl bg-blue-50 border border-blue-200 text-xs">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold bg-blue-100 text-[#1090F8] px-2 py-0.5 rounded-md uppercase">Partner</span>
+                            <span className="text-blue-950 font-bold">
+                              {appliedAffiliate.referralCode} ({appliedAffiliate.clientDiscountRate ?? 5}% Discount)
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-blue-700 font-medium mt-0.5 ml-0.5">
+                            Referred by {appliedAffiliate.partnerName} ({appliedAffiliate.businessName || 'Affiliate Partner'})
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleRemoveAffiliate}
+                          className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer ml-2 shrink-0"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Input Box for adding codes (can add both voucher and affiliate code) */}
+                  {(!appliedVoucher || !appliedAffiliate) && (
                     <div>
                       <div className="flex gap-2">
                         <input
@@ -2166,7 +2395,13 @@ export default function CheckoutPage({
                             setPromoInput(e.target.value.toUpperCase());
                             setPromoError('');
                           }}
-                          placeholder="Enter voucher code"
+                          placeholder={
+                            !appliedVoucher && !appliedAffiliate
+                              ? 'Enter voucher or partner referral code'
+                              : !appliedVoucher
+                              ? 'Enter voucher code to stack discount'
+                              : 'Enter partner referral code to stack discount'
+                          }
                           className="flex-1 rounded-lg border border-[#24252c]/15 px-3 py-2 text-xs bg-white text-[var(--ink)] font-mono font-bold uppercase placeholder:font-sans placeholder:font-normal focus:outline-none focus:border-[#1090F8]"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
@@ -2183,6 +2418,9 @@ export default function CheckoutPage({
                           Apply
                         </button>
                       </div>
+                      <p className="text-[10px] text-[#24252c]/50 mt-1.5 ml-0.5">
+                        Tip: You can stack both a promotional campaign voucher AND an affiliate partner code together!
+                      </p>
                       {promoError && (
                         <p className="text-[11px] font-medium text-rose-600 mt-1">
                           {promoError}
@@ -2203,8 +2441,15 @@ export default function CheckoutPage({
 
               {addonsCost > 0 && (
                 <div className="flex justify-between text-[#24252c]/70">
-                  <span>Add-ons ({selectedAddons.length})</span>
+                  <span>Equipment Add-ons ({selectedAddons.length})</span>
                   <span className="font-semibold text-[var(--ink)]">+₱{addonsCost.toLocaleString()}</span>
+                </div>
+              )}
+
+              {selectedBundles.length > 0 && (
+                <div className="flex justify-between text-amber-700">
+                  <span>Production Upgrades ({selectedBundles.length})</span>
+                  <span className="font-semibold">+₱{bundlesCost.toLocaleString()}</span>
                 </div>
               )}
 
@@ -2217,10 +2462,17 @@ export default function CheckoutPage({
                 )}
               </div>
 
-              {discountAmount > 0 && (
+              {voucherDiscountAmount > 0 && (
                 <div className="flex justify-between text-emerald-600 font-semibold">
-                  <span>Promo Discount ({appliedPromo?.code})</span>
-                  <span>-₱{discountAmount.toLocaleString()}</span>
+                  <span>Voucher Discount ({appliedVoucher?.code})</span>
+                  <span>-₱{voucherDiscountAmount.toLocaleString()}</span>
+                </div>
+              )}
+
+              {affiliateDiscountAmount > 0 && (
+                <div className="flex justify-between text-emerald-600 font-semibold">
+                  <span>Partner Referral Discount ({appliedAffiliate?.referralCode} · {appliedAffiliate?.partnerName})</span>
+                  <span>-₱{affiliateDiscountAmount.toLocaleString()}</span>
                 </div>
               )}
 

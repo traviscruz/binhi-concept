@@ -10,6 +10,9 @@ import {
   getCustomerCancellationRejectedHtml,
   getBookingConfirmationEmailHtml,
   getAdminNewBookingConfirmationAlertHtml,
+  getPartnerOtpEmailHtml,
+  getPartnerApprovalEmailHtml,
+  getPartnerRejectionEmailHtml,
   type InquiryEmailData,
   type InquiryReplyEmailData,
   type RescheduleRequestEmailData,
@@ -19,6 +22,9 @@ import {
   type CancellationRefundEmailData,
   type CancellationRejectionEmailData,
   type BookingConfirmationEmailData,
+  type PartnerOtpEmailData,
+  type PartnerApprovalEmailData,
+  type PartnerRejectionEmailData,
 } from './emailTemplates';
 import { supabase } from '../lib/supabase';
 
@@ -385,5 +391,54 @@ export async function sendBookingConfirmationEmails(
 
   return { customerSent, adminSent };
 }
+
+/**
+ * Sends a real 6-digit OTP verification email to an affiliate partner during registration or login.
+ */
+export async function sendPartnerOtpEmail(data: PartnerOtpEmailData): Promise<SendEmailResponse> {
+  const isReg = data.type === 'registration';
+  const html = getPartnerOtpEmailHtml(data);
+  const subject = isReg
+    ? `${data.otpCode} is your BINHI Partner Registration verification code`
+    : `${data.otpCode} is your BINHI Partner Portal security code`;
+
+  return await sendEmail({
+    to: data.email,
+    subject,
+    html,
+    replyTo: getAdminEmail(),
+  });
+}
+
+/**
+ * Sends an official Partner Account Approved notification email with active promo code and benefits.
+ */
+export async function sendPartnerApprovalEmail(data: PartnerApprovalEmailData): Promise<SendEmailResponse> {
+  const html = getPartnerApprovalEmailHtml(data);
+  const subject = `Congratulations! Your BINHI Partner Account is Approved (Promo Code: ${data.referralCode})`;
+
+  return await sendEmail({
+    to: data.email,
+    subject,
+    html,
+    replyTo: getAdminEmail(),
+  });
+}
+
+/**
+ * Sends an official Partner Application Rejection / Status notice email.
+ */
+export async function sendPartnerRejectionEmail(data: PartnerRejectionEmailData): Promise<SendEmailResponse> {
+  const html = getPartnerRejectionEmailHtml(data);
+  const subject = 'Update regarding your BINHI Concept Partner Program application';
+
+  return await sendEmail({
+    to: data.email,
+    subject,
+    html,
+    replyTo: getAdminEmail(),
+  });
+}
+
 
 

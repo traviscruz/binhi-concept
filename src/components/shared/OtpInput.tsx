@@ -23,6 +23,14 @@ export function OtpInput({ value = '', onChange, onResend, disabled = false }: O
   const refs = useRef<(HTMLInputElement | null)[]>([]);
 
   useEffect(() => {
+    const arr = Array(LENGTH).fill('');
+    for (let i = 0; i < Math.min(value.length, LENGTH); i++) {
+      arr[i] = value[i];
+    }
+    setDigits(arr);
+  }, [value]);
+
+  useEffect(() => {
     if (seconds <= 0) return;
     const t = setTimeout(() => setSeconds((s) => s - 1), 1000);
     return () => clearTimeout(t);

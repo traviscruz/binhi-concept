@@ -60,8 +60,14 @@ import CrewBookingDetailPage from './pages/crew/CrewBookingDetailPage';
 import CrewSetupTeardownPage from './pages/crew/CrewSetupTeardownPage';
 import CrewProfilePage from './pages/crew/CrewProfilePage';
 import AdminReviewsPage from './pages/admin/AdminReviewsPage';
+import AdminAffiliatesPage from './pages/admin/AdminAffiliatesPage';
 import AdminAuditLogsPage from './pages/admin/AdminAuditLogsPage';
 import AdminProfilePage from './pages/admin/AdminProfilePage';
+import AffiliatesPage from './pages/public/AffiliatesPage';
+import PartnerLoginPage from './pages/public/PartnerLoginPage';
+import { PartnerLayout } from './components/layout/PartnerLayout';
+import PartnerDashboardPage from './pages/partner/PartnerDashboardPage';
+import PartnerProfilePage from './pages/partner/PartnerProfilePage';
 import { FEATURED_PACKAGES, type PackageData } from './data/packages';
 import { supabase } from './lib/supabase';
 import { fetchWishlistFromDb, toggleWishlistDb, syncLocalWishlistToDb, getLocalWishlistIds } from './utils/wishlistService';
@@ -301,19 +307,20 @@ export default function App() {
 
   const isInventoryPage = page.startsWith('inventory-');
   const isAdminPage = page.startsWith('admin-');
-
   const isCrewPage = page.startsWith('crew-');
+  const isPartnerPage = page === 'partner-dashboard' || page === 'partner-profile';
 
   const isAuthOrCheckout =
     page === 'checkout' ||
     page === 'login' ||
     page === 'signup' ||
     page === 'forgot' ||
-    page === 'otp';
+    page === 'otp' ||
+    page === 'partner-login';
 
-  const showPublicHeader = !isAuthOrCheckout && !isCustomerSession && !isInventoryPage && !isAdminPage && !isCrewPage;
-  const showCustomerHeader = !isAuthOrCheckout && isCustomerSession && !isInventoryPage && !isAdminPage && !isCrewPage;
-  const showFooter = !isAuthOrCheckout && !isCustomerSession && !isInventoryPage && !isAdminPage && !isCrewPage;
+  const showPublicHeader = !isAuthOrCheckout && !isCustomerSession && !isInventoryPage && !isAdminPage && !isCrewPage && !isPartnerPage;
+  const showCustomerHeader = !isAuthOrCheckout && isCustomerSession && !isInventoryPage && !isAdminPage && !isCrewPage && !isPartnerPage;
+  const showFooter = !isAuthOrCheckout && !isCustomerSession && !isInventoryPage && !isAdminPage && !isCrewPage && !isPartnerPage;
 
   if (isInventoryPage) {
     return (
@@ -345,6 +352,7 @@ export default function App() {
         {page === 'admin-vouchers' && <AdminVouchersPage go={go} />}
         {page === 'admin-loyalty' && <AdminLoyaltyPage go={go} />}
         {page === 'admin-reviews' && <AdminReviewsPage go={go} />}
+        {page === 'admin-affiliates' && <AdminAffiliatesPage go={go} />}
         {page === 'admin-audit-logs' && <AdminAuditLogsPage go={go} />}
         {page === 'admin-profile' && <AdminProfilePage go={go} />}
       </AdminLayout>
@@ -359,6 +367,15 @@ export default function App() {
         {page === 'crew-setup-teardown' && <CrewSetupTeardownPage go={go} />}
         {page === 'crew-profile' && <CrewProfilePage go={go} />}
       </CrewLayout>
+    );
+  }
+
+  if (isPartnerPage) {
+    return (
+      <PartnerLayout page={page} go={go}>
+        {page === 'partner-dashboard' && <PartnerDashboardPage go={go} />}
+        {page === 'partner-profile' && <PartnerProfilePage go={go} />}
+      </PartnerLayout>
     );
   }
 
@@ -433,6 +450,8 @@ export default function App() {
         {page === 'about' && <AboutPage go={go} />}
         {page === 'contact' && <ContactPage />}
         {page === 'testimonials' && <TestimonialsPage />}
+        {page === 'affiliates' && <AffiliatesPage go={go} />}
+        {page === 'partner-login' && <PartnerLoginPage go={go} />}
         {page === 'login' && <LoginPage go={go} />}
         {page === 'signup' && <RegisterPage go={go} />}
         {page === 'forgot' && <ForgotPasswordPage go={go} />}

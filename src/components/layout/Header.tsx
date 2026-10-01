@@ -57,6 +57,7 @@ export function Header({
           {navItem('Packages', 'packages')}
           {navItem('Custom Setup', 'custom-package')}
           {navItem('Equipment', 'equipment')}
+          {navItem('Partners', 'affiliates')}
           {navItem('About', 'about')}
           {navItem('Contact', 'contact')}
         </nav>

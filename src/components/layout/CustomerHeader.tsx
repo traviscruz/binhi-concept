@@ -181,6 +181,7 @@ export function CustomerHeader({
           {navItem('Wishlist', 'wishlist', wishlistCount)}
           {navItem('Rewards', 'loyalty')}
           {navItem('Review', 'review-submit')}
+          {navItem('Partners', 'affiliates')}
           <button
             type="button"
             onClick={() => setShowCalendarModal(true)}

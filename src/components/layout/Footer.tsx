@@ -33,6 +33,7 @@ export function Footer({ go }: { go: (p: Page) => void }) {
               <button onClick={() => go('landing')} className="text-left text-[#24252c]/70 hover:text-[var(--ink)] transition-colors">Home</button>
               <button onClick={() => go('packages')} className="text-left text-[#24252c]/70 hover:text-[var(--ink)] transition-colors">Packages</button>
               <button onClick={() => go('equipment')} className="text-left text-[#24252c]/70 hover:text-[var(--ink)] transition-colors">Equipment Catalog</button>
+              <button onClick={() => go('affiliates')} className="text-left text-[#24252c]/70 hover:text-[var(--ink)] transition-colors">Partners & Affiliates</button>
               <button onClick={() => go('about')} className="text-left text-[#24252c]/70 hover:text-[var(--ink)] transition-colors">About & Process</button>
               <button onClick={() => go('contact')} className="text-left text-[#24252c]/70 hover:text-[var(--ink)] transition-colors">Contact</button>
             </div>

@@ -231,6 +231,15 @@ export default function LoginPage({ go }: { go: (p: Page) => void }) {
             Create one
           </button>
         </div>
+        <div className="pt-2 border-t border-[#24252c]/[0.04]">
+          <button
+            type="button"
+            onClick={() => go('partner-login')}
+            className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 hover:underline inline-flex items-center gap-1.5"
+          >
+            Are you a Partner / Affiliate? Sign in here
+          </button>
+        </div>
       </div>
 
       {/* MANDATORY FIRST-TIME PASSWORD CHANGE MODAL */}

@@ -1243,5 +1243,193 @@ export function getAdminNewBookingConfirmationAlertHtml(data: BookingConfirmatio
   });
 }
 
+export interface PartnerOtpEmailData {
+  email: string;
+  partnerName?: string;
+  otpCode: string;
+  type: 'registration' | 'login';
+}
+
+/**
+ * Branded OTP Verification Email for BINHI Partner Registration & Portal Login
+ */
+export function getPartnerOtpEmailHtml(data: PartnerOtpEmailData): string {
+  const isReg = data.type === 'registration';
+  const safeName = escapeHtml(data.partnerName || 'Partner / Coordinator');
+  const safeEmail = escapeHtml(data.email);
+  const safeCode = escapeHtml(data.otpCode);
+
+  const title = isReg
+    ? `${safeCode} is your BINHI Partner Program verification code`
+    : `${safeCode} is your BINHI Partner Portal sign-in code`;
+
+  const badgeText = isReg ? 'PARTNER REGISTRATION VERIFICATION' : 'PARTNER PORTAL AUTHENTICATION';
+  const headline = isReg ? 'Verify Your Coordinator Email' : 'Sign In to Your Partner Portal';
+
+  const bodyContent = `
+    <p class="text-ink" style="margin:0 0 16px 0; font-size:14px; line-height:1.6; color:#24252C; font-family:Arial,Helvetica,sans-serif;">
+      Hello <strong>${safeName}</strong>,
+    </p>
+    <p class="text-muted" style="margin:0 0 20px 0; font-size:13px; line-height:1.6; color:#6B7280; font-family:Arial,Helvetica,sans-serif;">
+      ${
+        isReg
+          ? 'Thank you for joining the <strong>BINHI Concept Partner Program</strong>. Use the 6-digit verification code below to verify your email address and activate your partner portal.'
+          : 'You requested security authentication to access your <strong>BINHI Concept Partner Portal</strong>. Enter the 6-digit verification code below to complete your sign-in.'
+      }
+    </p>
+
+    <!-- OTP Code Display Card -->
+    <div style="background: linear-gradient(135deg, #F0F7FF 0%, #E6F0FA 100%); border: 2px solid #BAE0FD; border-radius: 12px; padding: 24px 20px; text-align: center; margin: 24px 0;">
+      <div style="font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #0284C7; margin-bottom: 8px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        Your 6-Digit Verification Code
+      </div>
+      <div style="font-family: 'Courier New', Courier, monospace; font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #0C4A6E; line-height: 1.2;">
+        ${safeCode}
+      </div>
+      <div style="font-size: 11px; color: #0369A1; margin-top: 10px; font-family: Arial, sans-serif;">
+        This code expires in 10 minutes. Please do not share it with anyone.
+      </div>
+    </div>
+
+    <div class="code-box" style="background-color:#ECEEF1; border:1px solid #E4E6EA; border-radius:8px; padding:12px 16px; margin:20px 0; font-size:11px; color:#6B7280; font-family:Arial,sans-serif;">
+      <strong style="color:#24252C;">Security Notice:</strong> If you did not request this verification code, please ignore this email or contact <a href="mailto:admin@binhiconcept.ph" style="color:#1090F8; text-decoration:none;">admin@binhiconcept.ph</a> immediately.
+    </div>
+  `;
+
+  return renderEmailShell({
+    title,
+    badgeText,
+    headline,
+    bodyContent,
+  });
+}
+
+export interface PartnerApprovalEmailData {
+  partnerName: string;
+  email: string;
+  referralCode: string;
+  commissionRate: number;
+  clientDiscountRate: number;
+  loginUrl?: string;
+  approvedBy?: string;
+}
+
+export interface PartnerRejectionEmailData {
+  partnerName: string;
+  email: string;
+  reason?: string;
+}
+
+/**
+ * Branded Email Notification when an Affiliate Partner Registration is Approved by Admin
+ */
+export function getPartnerApprovalEmailHtml(data: PartnerApprovalEmailData): string {
+  const safeName = escapeHtml(data.partnerName || 'Partner / Coordinator');
+  const safeCode = escapeHtml(data.referralCode);
+  const commRate = data.commissionRate || 5;
+  const discRate = data.clientDiscountRate || 5;
+  const loginUrl = escapeHtml(data.loginUrl || `${window.location.origin}/partner-login`);
+
+  const title = `Congratulations! Your BINHI Partner Account is Approved (${safeCode})`;
+  const badgeText = 'PARTNER REGISTRATION APPROVED';
+  const headline = 'Welcome to BINHI Partner Network!';
+
+  const bodyContent = `
+    <p class="text-ink" style="margin:0 0 16px 0; font-size:14px; line-height:1.6; color:#24252C; font-family:Arial,Helvetica,sans-serif;">
+      Hello <strong>${safeName}</strong>,
+    </p>
+    <p class="text-muted" style="margin:0 0 20px 0; font-size:13px; line-height:1.6; color:#6B7280; font-family:Arial,Helvetica,sans-serif;">
+      Great news! Your application to join the <strong>BINHI Concept Affiliate &amp; Coordinator Program</strong> has been reviewed and <span style="color:#059669; font-weight:700;">APPROVED</span> by our administration team.
+    </p>
+
+    <!-- Partner Program Benefits Box -->
+    <div style="background: linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%); border: 2px solid #A7F3D0; border-radius: 12px; padding: 24px 20px; text-align: center; margin: 24px 0;">
+      <div style="font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #047857; margin-bottom: 8px; font-family: Arial, sans-serif;">
+        Your Official Client Promo Code
+      </div>
+      <div style="font-family: 'Courier New', Courier, monospace; font-size: 32px; font-weight: 900; letter-spacing: 6px; color: #064E3B; line-height: 1.2;">
+        ${safeCode}
+      </div>
+      <div style="font-size: 12px; color: #065F46; margin-top: 10px; font-family: Arial, sans-serif; font-weight: 600;">
+        Clients get <strong>${discRate}% OFF</strong> · You earn <strong>${commRate}% Commission</strong>
+      </div>
+    </div>
+
+    <!-- Quick Overview Table -->
+    <div class="divider" style="border-top: 1px solid #E4E6EA; margin: 20px 0; padding-top: 16px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding: 6px 0; font-size: 12px; color: #6B7280; font-family: Arial, sans-serif;">Commission Rate:</td>
+          <td align="right" style="padding: 6px 0; font-size: 12px; font-weight: 700; color: #059669; font-family: Arial, sans-serif;">${commRate}% per confirmed event</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; font-size: 12px; color: #6B7280; font-family: Arial, sans-serif;">Client Checkout Discount:</td>
+          <td align="right" style="padding: 6px 0; font-size: 12px; font-weight: 700; color: #2563EB; font-family: Arial, sans-serif;">${discRate}% OFF instant discount</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; font-size: 12px; color: #6B7280; font-family: Arial, sans-serif;">Payout Method:</td>
+          <td align="right" style="padding: 6px 0; font-size: 12px; font-weight: 700; color: #24252C; font-family: Arial, sans-serif;">Direct GCash / Maya / Bank Disbursals</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Sign In CTA Button -->
+    <div style="text-align: center; margin: 28px 0 20px 0;">
+      <a href="${loginUrl}" style="background-color: #24252C; color: #FFFFFF; font-size: 13px; font-weight: 700; text-decoration: none; padding: 14px 28px; border-radius: 9999px; display: inline-block; font-family: Arial, sans-serif; letter-spacing: 0.5px;">
+        Sign In to Your Partner Portal &rarr;
+      </a>
+    </div>
+
+    <div class="code-box" style="background-color:#ECEEF1; border:1px solid #E4E6EA; border-radius:8px; padding:12px 16px; margin:20px 0; font-size:11px; color:#6B7280; font-family:Arial,sans-serif;">
+      <strong style="color:#24252C;">Need Support?</strong> If you have any questions regarding your client referrals or equipment staging inquiries, contact our team at <a href="mailto:admin@binhiconcept.ph" style="color:#1090F8; text-decoration:none;">admin@binhiconcept.ph</a>.
+    </div>
+  `;
+
+  return renderEmailShell({
+    title,
+    badgeText,
+    headline,
+    bodyContent,
+  });
+}
+
+/**
+ * Branded Email Notification when an Affiliate Partner Registration is Rejected
+ */
+export function getPartnerRejectionEmailHtml(data: PartnerRejectionEmailData): string {
+  const safeName = escapeHtml(data.partnerName || 'Applicant');
+  const safeReason = escapeHtml(data.reason || 'Information provided did not meet our current partner program requirements.');
+
+  const title = 'Update on your BINHI Partner Program Application';
+  const badgeText = 'PARTNER APPLICATION STATUS';
+  const headline = 'Partner Application Update';
+
+  const bodyContent = `
+    <p class="text-ink" style="margin:0 0 16px 0; font-size:14px; line-height:1.6; color:#24252C; font-family:Arial,Helvetica,sans-serif;">
+      Hello <strong>${safeName}</strong>,
+    </p>
+    <p class="text-muted" style="margin:0 0 20px 0; font-size:13px; line-height:1.6; color:#6B7280; font-family:Arial,Helvetica,sans-serif;">
+      Thank you for your interest in joining the <strong>BINHI Concept Partner Program</strong>. After careful review of your application, we are unable to approve your coordinator account at this time.
+    </p>
+
+    <div style="background-color: #FEF2F2; border: 1px solid #FECACA; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 12px; color: #991B1B; font-family: Arial, sans-serif;">
+      <strong>Note from Administration:</strong><br>
+      ${safeReason}
+    </div>
+
+    <p class="text-muted" style="margin:0 0 20px 0; font-size:12px; line-height:1.6; color:#6B7280; font-family:Arial,Helvetica,sans-serif;">
+      If you believe this was an error or if your business details have changed, you may reply to this email or reapply in the future.
+    </p>
+  `;
+
+  return renderEmailShell({
+    title,
+    badgeText,
+    headline,
+    bodyContent,
+  });
+}
+
+
 
 
