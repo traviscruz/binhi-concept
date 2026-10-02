@@ -59,6 +59,12 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
   const [pkgRecommendedFor, setPkgRecommendedFor] = useState('');
   const [setupTimeDigits, setSetupTimeDigits] = useState(''); // Digits only (Hours outside)
   const [crewSizeDigits, setCrewSizeDigits] = useState(''); // Digits only (Technicians outside)
+  const [pkgVenueSize, setPkgVenueSize] = useState('');
+  const [pkgGuestCapacity, setPkgGuestCapacity] = useState('');
+  const [pkgGuestMin, setPkgGuestMin] = useState('');
+  const [pkgGuestMax, setPkgGuestMax] = useState('');
+  const [pkgAcousticCoverage, setPkgAcousticCoverage] = useState('');
+  const [pkgPowerReq, setPkgPowerReq] = useState('');
 
   // Inventory Selection & Qty Mapping ({ [modelId]: { checked: boolean; qty: number } })
   const [selectedItems, setSelectedItems] = useState<{ [modelId: string]: { checked: boolean; qty: number } }>({});
@@ -91,10 +97,15 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
           photos: item.photos || [],
           inclusions: item.inclusions || [],
           recommendedFor: item.recommended_for || [],
-          specs: item.specs || {
-            powerReq: '',
-            setupTime: '',
-            crewSize: '',
+          specs: {
+            powerReq: item.specs?.powerReq || '',
+            setupTime: item.specs?.setupTime || '',
+            crewSize: item.specs?.crewSize || '',
+            venueSize: item.specs?.venueSize || '',
+            guestCapacity: item.specs?.guestCapacity || '',
+            guestMin: item.specs?.guestMin !== undefined ? Number(item.specs.guestMin) : 20,
+            guestMax: item.specs?.guestMax !== undefined ? Number(item.specs.guestMax) : 500,
+            acousticCoverage: item.specs?.acousticCoverage || '',
           },
         }));
         setPackages(formatted);
@@ -328,6 +339,13 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
     const crewMatch = (pkg.specs?.crewSize || '').match(/\d+/);
     setCrewSizeDigits(crewMatch ? crewMatch[0] : '');
 
+    setPkgVenueSize(pkg.specs?.venueSize || '');
+    setPkgGuestCapacity(pkg.specs?.guestCapacity || '');
+    setPkgGuestMin(pkg.specs?.guestMin !== undefined ? String(pkg.specs.guestMin) : '');
+    setPkgGuestMax(pkg.specs?.guestMax !== undefined ? String(pkg.specs.guestMax) : '');
+    setPkgAcousticCoverage(pkg.specs?.acousticCoverage || '');
+    setPkgPowerReq(pkg.specs?.powerReq || '');
+
     const initialMap: { [itemId: string]: { checked: boolean; qty: number } } = {};
     equipmentList.forEach((eq) => {
       const maxStock = eq.availableUnits > 0 ? eq.availableUnits : 1;
@@ -359,6 +377,12 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
     setPkgRecommendedFor('');
     setSetupTimeDigits('');
     setCrewSizeDigits('');
+    setPkgVenueSize('');
+    setPkgGuestCapacity('');
+    setPkgGuestMin('');
+    setPkgGuestMax('');
+    setPkgAcousticCoverage('');
+    setPkgPowerReq('');
     setSelectedItems({});
     setSelectedCategoryTab('All');
     setShowCreateModal(true);
@@ -437,6 +461,20 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
       const setupTimeText = setupTimeDigits ? `${setupTimeDigits} Hours` : '';
       const crewSizeText = crewSizeDigits ? `${crewSizeDigits} Technicians` : '';
 
+      const parsedGuestMin = pkgGuestMin ? parseInt(pkgGuestMin) : 20;
+      const parsedGuestMax = pkgGuestMax ? parseInt(pkgGuestMax) : 500;
+
+      const specsPayload: any = {
+        setupTime: setupTimeText,
+        crewSize: crewSizeText,
+        powerReq: pkgPowerReq.trim(),
+        venueSize: pkgVenueSize.trim(),
+        guestCapacity: pkgGuestCapacity.trim(),
+        acousticCoverage: pkgAcousticCoverage.trim(),
+        guestMin: parsedGuestMin,
+        guestMax: parsedGuestMax,
+      };
+
       const dbPayload = {
         package_id: targetPkgId,
         name: pkgName.trim(),
@@ -448,10 +486,7 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
         photos: finalPhotos,
         inclusions: generatedInclusions,
         recommended_for: recommendedList,
-        specs: {
-          setupTime: setupTimeText,
-          crewSize: crewSizeText,
-        },
+        specs: specsPayload,
         items: mappedItemsData,
         updated_at: new Date().toISOString(),
       };
@@ -957,9 +992,10 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
                   <span className="w-5 h-5 rounded-full bg-[#1090F8] text-white text-[10px] flex items-center justify-center font-bold">
                     2
                   </span>
-                  Public Page: Recommended For & Tech Specs
+                  Public Page: Venue Sizing, Guest Calibration & Tech Specs
                 </h3>
 
+                {/* Recommended Event Types */}
                 <div>
                   <label className="font-semibold uppercase text-[#24252c]/50 block mb-1 text-[10px]">
                     Recommended For / Ideal Event Types (Comma-Separated)
@@ -973,6 +1009,103 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
                   <p className="text-[10px] text-[#24252c]/50 mt-1">Separate multiple event types with commas.</p>
                 </div>
 
+                {/* Venue Size & Target Crowd Capacity */}
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="font-semibold uppercase text-[#24252c]/50 block mb-1 text-[10px]">
+                      Recommended Venue Size
+                    </label>
+                    <input
+                      value={pkgVenueSize}
+                      onChange={(e) => setPkgVenueSize(e.target.value)}
+                      placeholder="e.g. 30 – 100 sq.m or 100 – 250 sq.m"
+                      className={inputClass}
+                    />
+                    <p className="text-[10px] text-[#24252c]/50 mt-1">Displayed in the public Recommended For footprint card.</p>
+                  </div>
+
+                  <div>
+                    <label className="font-semibold uppercase text-[#24252c]/50 block mb-1 text-[10px]">
+                      Target Crowd Capacity
+                    </label>
+                    <input
+                      value={pkgGuestCapacity}
+                      onChange={(e) => setPkgGuestCapacity(e.target.value)}
+                      placeholder="e.g. 20 – 80 Guests or 80 – 200 Guests"
+                      className={inputClass}
+                    />
+                    <p className="text-[10px] text-[#24252c]/50 mt-1">Recommended crowd scale for optimum sound SPL.</p>
+                  </div>
+                </div>
+
+                {/* Booking Slider Dynamic Bounds (Min & Max) */}
+                <div className="bg-white/80 p-4 rounded-xl border border-[#24252c]/[0.06] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#1090F8]">
+                      Dynamic Booking Guest Slider Limits (Min & Max)
+                    </span>
+                    <span className="text-[10px] text-[#24252c]/50">
+                      Engineering Reference Calibration
+                    </span>
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="font-semibold uppercase text-[#24252c]/50 block mb-1 text-[10px]">
+                        Slider Min Guests (Starting / Minimum)
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={pkgGuestMin}
+                        onChange={(e) => setPkgGuestMin(e.target.value.replace(/\D/g, ''))}
+                        placeholder="e.g. 20, 50, 100"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <label className="font-semibold uppercase text-[#24252c]/50 block mb-1 text-[10px]">
+                        Slider Max Guests (Upper Limit)
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={pkgGuestMax}
+                        onChange={(e) => setPkgGuestMax(e.target.value.replace(/\D/g, ''))}
+                        placeholder="e.g. 100, 250, 500"
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Acoustic Coverage & Power Requirements */}
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="font-semibold uppercase text-[#24252c]/50 block mb-1 text-[10px]">
+                      Acoustic Sound Field Coverage
+                    </label>
+                    <input
+                      value={pkgAcousticCoverage}
+                      onChange={(e) => setPkgAcousticCoverage(e.target.value)}
+                      placeholder="e.g. Intimate Indoor & Patio Acoustic Coverage"
+                      className={inputClass}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-semibold uppercase text-[#24252c]/50 block mb-1 text-[10px]">
+                      Power Requirement Demand
+                    </label>
+                    <input
+                      value={pkgPowerReq}
+                      onChange={(e) => setPkgPowerReq(e.target.value)}
+                      placeholder="e.g. 220V 15A Single Phase"
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+
+                {/* Operational Duration & Crew Size */}
                 <div className="grid sm:grid-cols-2 gap-4">
                   {/* Setup Duration (Digits only, Hours outside) */}
                   <div>

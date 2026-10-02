@@ -549,20 +549,28 @@ export default function CustomPackagePage({
                 ) : null}
               </div>
 
-              {/* Guest Count */}
-              <div>
-                <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 mb-1">
-                  <span>Guest Count</span>
+              {/* Guest & Venue Reference */}
+              <div className="p-3 rounded-xl bg-white/70 border border-[#24252c]/[0.06]">
+                <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-[#24252c]/50 mb-1">
+                  <span>Guest & Venue Reference</span>
                   <span className="text-[#1090F8] font-bold">{guestCount} Guests</span>
                 </div>
                 <input
                   type="range"
                   min="20"
-                  max="400"
+                  max="500"
                   value={guestCount}
                   onChange={(e) => setGuestCount(Number(e.target.value))}
-                  className="w-full accent-[#1090F8]"
+                  className="w-full accent-[#1090F8] cursor-pointer"
                 />
+                <div className="flex justify-between text-[9px] text-[#24252c]/40 font-mono mt-1">
+                  <span>Min: 20</span>
+                  <span>Standard: 100</span>
+                  <span>Max: 500+</span>
+                </div>
+                <p className="text-[9px] text-[#24252c]/50 mt-1.5 italic">
+                  * Note: For technical crew calibration (acoustic coverage & cable runs).
+                </p>
               </div>
 
               {/* Selected Equipment Summary */}

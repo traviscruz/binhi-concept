@@ -131,11 +131,17 @@ export default function PackageDetailPage({
   const [selectedDate, setSelectedDate] = useState(() => {
     return getDefaultEventDate(localStorage.getItem('binhi_selected_event_date'));
   });
-  const [guestCount, setGuestCount] = useState(100);
+  const [guestCount, setGuestCount] = useState(() => pkg.specs?.guestMin || 50);
   const [addonSelections, setAddonSelections] = useState<AddonSelection>({});
   const [dbBookings, setDbBookings] = useState<DBBooking[]>([]);
   const [bookingSettings, setBookingSettings] = useState<BookingSettings>(DEFAULT_BOOKING_SETTINGS);
   const [scheduleOverrides, setScheduleOverrides] = useState<ScheduleOverride[]>([]);
+
+  useEffect(() => {
+    if (pkg.specs?.guestMin) {
+      setGuestCount(pkg.specs.guestMin);
+    }
+  }, [pkg.id, pkg.specs?.guestMin]);
 
   useEffect(() => {
     async function loadEngineData() {
@@ -495,15 +501,44 @@ export default function PackageDetailPage({
               </div>
             </div>
 
-            <div className="bg-white rounded-[2rem] p-6 md:p-8 border border-[#24252c]/[0.08]">
-              <div className="flex items-center justify-between mb-6">
+            <div className="bg-white rounded-[2rem] p-6 md:p-8 border border-[#24252c]/[0.08] space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h3 className="text-xl font-extrabold text-[var(--ink)]">Recommended For What Events</h3>
-                  <p className="text-xs text-[#24252c]/50 mt-1">Tailored acoustic, lighting & visual staging for specific event formats.</p>
+                  <p className="text-xs text-[#24252c]/50 mt-1">Tailored acoustic, lighting & visual staging for specific venue sizes & event formats.</p>
                 </div>
-                <span className="text-xs font-semibold text-[#1090F8] bg-[#1090F8]/10 px-3 py-1.5 rounded-full">
-                  Ideal Fits
+                <span className="text-xs font-semibold text-[#1090F8] bg-[#1090F8]/10 px-3 py-1.5 rounded-full self-start sm:self-auto">
+                  Ideal Capacity Fit
                 </span>
+              </div>
+
+              {/* Recommended Venue Size & Audience Footprint Card */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.06]">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-[#24252c]/50 block">Recommended Venue Size</span>
+                  <div className="text-sm font-extrabold text-[var(--ink)] mt-0.5 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#1090F8]" />
+                    <span>{pkg.specs?.venueSize || '50 – 150 sq.m'}</span>
+                  </div>
+                  <span className="text-[10px] text-[#24252c]/50">Floor space coverage</span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-[#24252c]/50 block">Target Crowd Capacity</span>
+                  <div className="text-sm font-extrabold text-[var(--ink)] mt-0.5 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    <span>{pkg.specs?.guestCapacity || '50 – 150 Guests'}</span>
+                  </div>
+                  <span className="text-[10px] text-[#24252c]/50">Ideal listening audience</span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-[#24252c]/50 block">Acoustic Sound Field</span>
+                  <div className="text-xs font-bold text-[var(--ink)] mt-0.5 truncate" title={pkg.specs?.acousticCoverage || 'Full Sound Reinforcement'}>
+                    {pkg.specs?.acousticCoverage || 'Full Sound Reinforcement'}
+                  </div>
+                  <span className="text-[10px] text-[#24252c]/50">Calibrated SPL throw</span>
+                </div>
               </div>
 
               <div className="grid sm:grid-cols-2 gap-4">
@@ -536,14 +571,24 @@ export default function PackageDetailPage({
 
             <div className="bg-[var(--ink)] text-white rounded-[2rem] p-6 md:p-8">
               <h3 className="text-xl font-bold mb-4">Technical Specs & Requirements</h3>
-              <div className="grid sm:grid-cols-2 gap-4 text-center">
-                <div className="bg-white/10 rounded-xl p-4">
-                  <div className="text-xs text-white/50 uppercase tracking-wider">Setup Time</div>
-                  <div className="text-sm font-bold mt-1">{pkg.specs?.setupTime || '2.5 Hours'}</div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                <div className="bg-white/10 rounded-xl p-3.5">
+                  <div className="text-[10px] text-white/50 uppercase tracking-wider">Setup Time</div>
+                  <div className="text-xs sm:text-sm font-bold mt-1">{pkg.specs?.setupTime || '2.5 Hours'}</div>
                 </div>
-                <div className="bg-white/10 rounded-xl p-4">
-                  <div className="text-xs text-white/50 uppercase tracking-wider">Crew Size</div>
-                  <div className="text-sm font-bold mt-1">{pkg.specs?.crewSize || '3 Technicians'}</div>
+                <div className="bg-white/10 rounded-xl p-3.5">
+                  <div className="text-[10px] text-white/50 uppercase tracking-wider">Crew Size</div>
+                  <div className="text-xs sm:text-sm font-bold mt-1">{pkg.specs?.crewSize || '3 Technicians'}</div>
+                </div>
+                <div className="bg-white/10 rounded-xl p-3.5">
+                  <div className="text-[10px] text-white/50 uppercase tracking-wider">Venue Size</div>
+                  <div className="text-xs sm:text-sm font-bold mt-1">{pkg.specs?.venueSize || '100–250 sq.m'}</div>
+                </div>
+                <div className="bg-white/10 rounded-xl p-3.5">
+                  <div className="text-[10px] text-white/50 uppercase tracking-wider">Power Demand</div>
+                  <div className="text-xs sm:text-sm font-bold mt-1 truncate" title={pkg.specs?.powerReq || '220V Single Phase'}>
+                    {pkg.specs?.powerReq || '220V Single Phase'}
+                  </div>
                 </div>
               </div>
             </div>
@@ -587,19 +632,27 @@ export default function PackageDetailPage({
                 ) : null}
               </div>
 
-              <div className="mb-5">
-                <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 mb-1">
-                  <span>Guest Count</span>
-                  <span className="text-[#1090F8] font-bold">{guestCount} Guests</span>
+              {/* Dynamic Guest & Venue Reference Slider */}
+              <div className="mb-5 p-3.5 rounded-2xl bg-white border border-[#24252c]/[0.06] shadow-2xs">
+                <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 mb-1">
+                  <span>Guest & Venue Reference</span>
+                  <span className="text-[#1090F8] font-extrabold text-sm">{guestCount} Guests</span>
                 </div>
                 <input
                   type="range"
-                  min="20"
-                  max="400"
+                  min={pkg.specs?.guestMin || 20}
+                  max={pkg.specs?.guestMax || 400}
                   value={guestCount}
                   onChange={(e) => setGuestCount(Number(e.target.value))}
-                  className="w-full accent-[#1090F8]"
+                  className="w-full accent-[#1090F8] cursor-pointer"
                 />
+                <div className="flex justify-between text-[10px] text-[#24252c]/40 font-mono mt-1">
+                  <span>Min: {pkg.specs?.guestMin || 20} Guests</span>
+                  <span>Max Limit: {pkg.specs?.guestMax || 400}+ Guests</span>
+                </div>
+                <p className="text-[10px] text-[#24252c]/50 mt-2 italic leading-relaxed">
+                  * Note: Guest count & venue size are for engineering crew calibration (acoustic coverage & cable runs) and do not affect base rental pricing.
+                </p>
               </div>
 
               {/* ── Optional Equipment Add-ons ── */}
