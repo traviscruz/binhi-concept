@@ -18,6 +18,7 @@ import {
   type ScheduleOverride,
   DEFAULT_BOOKING_SETTINGS,
 } from '../../utils/bookingEngine';
+import { fetchCrewAvailabilityRecords } from '../../utils/crewAvailabilityService';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -142,6 +143,7 @@ export default function PackageDetailPage({
           fetchDbBookedDates(),
           fetchBookingSettings(),
           fetchScheduleOverrides(),
+          fetchCrewAvailabilityRecords(),
         ]);
         setDbBookings(bookings);
         setBookingSettings(settings);
@@ -582,6 +584,10 @@ export default function PackageDetailPage({
                   <p className="text-[11px] font-bold text-rose-600 mt-1 ml-2">
                     Reserved Date: All available operational windows are booked.
                   </p>
+                ) : getDayAvailabilityStatus(selectedDate, dbBookings, bookingSettings, scheduleOverrides).status === 'closed' ? (
+                  <p className="text-[11px] font-bold text-rose-600 mt-1 ml-2">
+                    No bookings allowed on this date (Crew technician is off-duty / on leave). Please select another date.
+                  </p>
                 ) : getDayAvailabilityStatus(selectedDate, dbBookings, bookingSettings, scheduleOverrides).status === 'slots_available' ? (
                   <p className="text-[11px] font-bold text-amber-700 mt-1 ml-2 flex items-center gap-1">
                     <IconCheck className="w-3.5 h-3.5 text-amber-600 inline shrink-0" />
@@ -776,12 +782,24 @@ export default function PackageDetailPage({
                 </div>
               </div>
 
-              <button
-                onClick={handleStartBookingWithDiscount}
-                className="w-full bg-[var(--ink)] text-white text-sm font-semibold py-4 rounded-full hover:bg-[var(--ink-soft)] transition-colors inline-flex items-center justify-center gap-2 shadow-md cursor-pointer"
-              >
-                Proceed to Book This Setup <IconArrow className="w-4 h-4" />
-              </button>
+              {(() => {
+                const dayStatus = getDayAvailabilityStatus(selectedDate, dbBookings, bookingSettings, scheduleOverrides);
+                const isDateBlocked = isPastDate(selectedDate) || dayStatus.status === 'closed' || dayStatus.status === 'fully_booked';
+
+                return (
+                  <button
+                    onClick={handleStartBookingWithDiscount}
+                    disabled={isDateBlocked}
+                    className={`w-full text-sm font-semibold py-4 rounded-full transition-all inline-flex items-center justify-center gap-2 shadow-md ${
+                      isDateBlocked
+                        ? 'bg-zinc-300 text-zinc-500 cursor-not-allowed opacity-60'
+                        : 'bg-[var(--ink)] text-white hover:bg-[var(--ink-soft)] cursor-pointer'
+                    }`}
+                  >
+                    {isDateBlocked ? 'Date Unavailable for Booking' : 'Proceed to Book This Setup'} <IconArrow className="w-4 h-4" />
+                  </button>
+                );
+              })()}
 
               {isCustomer && toggleWishlist && (
                 <button

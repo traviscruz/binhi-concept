@@ -203,7 +203,9 @@ export function BookingRescheduleCalendar({
 
           let cellClass =
             'bg-white text-[#24252c]/80 font-semibold cursor-pointer hover:bg-[#1090F8]/15 hover:text-[#1090F8] shadow-2xs';
+          let cellStyle: React.CSSProperties | undefined = undefined;
           let badgeText = '';
+          let isSlotsHalf = false;
 
           if (isSelected) {
             cellClass =
@@ -222,14 +224,16 @@ export function BookingRescheduleCalendar({
           } else if (isFullyBooked) {
             cellClass = 'bg-[var(--ink)] text-white font-semibold shadow-2xs cursor-not-allowed opacity-85 select-none';
             badgeText = isToday ? 'No Slots' : 'Booked';
+          } else if (hasSlotsAvailable) {
+            isSlotsHalf = true;
+            cellClass =
+              'border border-emerald-500/40 font-bold cursor-pointer hover:scale-[1.04] hover:shadow-md hover:border-emerald-400 transition-all shadow-xs relative overflow-hidden';
+            cellStyle = { background: 'linear-gradient(135deg, #24252C 0%, #065F46 55%, #059669 100%)' };
+            badgeText = 'Slots Open';
           } else if (isToday) {
             cellClass =
               'text-[#1090F8] font-bold bg-[#1090F8]/15 cursor-pointer hover:bg-[#1090F8]/25 shadow-2xs border border-[#1090F8]/30';
             badgeText = 'Today';
-          } else if (hasSlotsAvailable) {
-            cellClass =
-              'bg-amber-500/10 text-amber-900 font-bold cursor-pointer hover:bg-amber-500/20 shadow-2xs border border-amber-500/20';
-            badgeText = `${dayStatus.bookingCount} Booked`;
           }
 
           const handleClick = () => {
@@ -241,6 +245,7 @@ export function BookingRescheduleCalendar({
             <div
               key={day}
               onClick={handleClick}
+              style={cellStyle}
               title={
                 isSelected
                   ? `Selected New Date: ${formattedIso}`
@@ -253,14 +258,20 @@ export function BookingRescheduleCalendar({
                   : isFullyBooked
                   ? isToday ? 'No time slots left today' : 'Date Fully Booked / Unavailable'
                   : hasSlotsAvailable
-                  ? `${dayStatus.bookingCount} existing booking(s) - Time slots still available!`
+                  ? `${dayStatus.bookingCount} Booked • Slots Open (${formattedIso}) - Multiple slots available!`
                   : `Select ${formattedIso}`
               }
-              className={`aspect-square rounded-xl text-xs flex flex-col items-center justify-center relative transition-all ${cellClass}`}
+              className={`aspect-square rounded-lg sm:rounded-xl text-[10px] sm:text-xs flex flex-col items-center justify-center relative transition-all ${cellClass}`}
             >
-              <span className="leading-none">{day}</span>
+              <span className={`leading-none ${isSlotsHalf ? 'font-black text-[10px] sm:text-[11.5px] text-white drop-shadow-xs z-10' : ''}`}>
+                {day}
+              </span>
               {badgeText && (
-                <span className="text-[7px] font-extrabold uppercase tracking-tight opacity-90 mt-0.5">
+                <span className={`text-[5.5px] sm:text-[7px] font-extrabold uppercase tracking-tight opacity-90 mt-0.5 leading-none ${
+                  isSlotsHalf
+                    ? 'text-emerald-100 font-extrabold bg-emerald-500/30 border border-emerald-400/30 px-0.5 sm:px-1 py-0.2 rounded-full shadow-2xs z-10'
+                    : ''
+                }`}>
                   {badgeText}
                 </span>
               )}
@@ -270,26 +281,30 @@ export function BookingRescheduleCalendar({
 
         {/* Trailing empty cells */}
         {Array.from({ length: Math.max(0, 42 - (firstDayIndex + daysInMonth)) }).map((_, i) => (
-          <div key={`trail-${i}`} className="aspect-square rounded-xl bg-transparent opacity-0 pointer-events-none" />
+          <div key={`trail-${i}`} className="aspect-square rounded-lg sm:rounded-xl bg-transparent opacity-0 pointer-events-none" />
         ))}
       </div>
 
-      {/* Legend Bar without stroke */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5 pt-3 text-[10px] text-[#24252c]/70">
+      {/* Legend Bar responsive grid */}
+      <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center justify-between gap-1.5 sm:gap-2.5 pt-2.5 sm:pt-3 text-[9.5px] sm:text-[10px] text-[#24252c]/70 border-t border-[#24252c]/[0.06]">
         <span className="flex items-center gap-1.5 font-semibold text-[var(--ink)]">
-          <span className="w-2.5 h-2.5 rounded-md bg-[var(--ink)]" /> Booked / Unavailable
+          <span className="w-2.5 h-2.5 rounded-md bg-[var(--ink)] shrink-0" /> Booked / Unavailable
         </span>
         <span className="flex items-center gap-1.5 font-semibold text-blue-900">
-          <span className="w-2.5 h-2.5 rounded-md bg-blue-100" /> Original Date
+          <span className="w-2.5 h-2.5 rounded-md bg-blue-100 shrink-0" /> Original Date
         </span>
         <span className="flex items-center gap-1.5 font-bold text-[#1090F8]">
-          <span className="w-2.5 h-2.5 rounded-md bg-[#1090F8]" /> Selected New Date
+          <span className="w-2.5 h-2.5 rounded-md bg-[#1090F8] shrink-0" /> Selected New Date
         </span>
-        <span className="flex items-center gap-1.5 font-bold text-amber-800">
-          <span className="w-2.5 h-2.5 rounded-md bg-amber-500/20 border border-amber-500/40" /> Slots Open
+        <span className="flex items-center gap-1.5 font-bold text-emerald-700">
+          <span
+            className="w-2.5 h-2.5 rounded-md border border-emerald-500/40 shadow-2xs shrink-0"
+            style={{ background: 'linear-gradient(135deg, #24252C 0%, #065F46 55%, #059669 100%)' }}
+          />
+          1 Booked • Slots Open
         </span>
         <span className="flex items-center gap-1.5 text-[#24252c]/60">
-          <span className="w-2.5 h-2.5 rounded-md bg-white shadow-2xs" /> Open / Available
+          <span className="w-2.5 h-2.5 rounded-md bg-white shadow-2xs shrink-0" /> Open / Available
         </span>
       </div>
     </div>

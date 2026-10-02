@@ -24,6 +24,8 @@ export interface BookingSettings {
   same_venue_radius_km?: number;
   same_venue_transit_minutes?: number;
   max_travel_radius_km: number;
+  min_crew_required?: number;
+  require_full_crew_roster?: boolean;
   updated_at?: string;
 }
 
@@ -48,6 +50,8 @@ export const DEFAULT_BOOKING_SETTINGS: BookingSettings = {
   same_venue_radius_km: 0.5,
   same_venue_transit_minutes: 10,
   max_travel_radius_km: 60.0,
+  min_crew_required: 1,
+  require_full_crew_roster: true,
 };
 
 // ── Time Utility Functions ──────────────────────────────────────────────────
@@ -106,7 +110,16 @@ const OVERRIDES_STORAGE_KEY = 'binhi_booking_overrides_config';
 // ── Database Operations ─────────────────────────────────────────────────────
 
 export async function fetchBookingSettings(): Promise<BookingSettings> {
-  // 1. Fetch directly from Supabase public.booking_settings table
+  // 1. Check cached settings in localStorage first
+  let cachedSettings: Partial<BookingSettings> = {};
+  try {
+    const cached = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (cached) {
+      cachedSettings = JSON.parse(cached);
+    }
+  } catch (_) {}
+
+  // 2. Fetch directly from Supabase public.booking_settings table
   try {
     const { data, error } = await supabase
       .from('booking_settings')
@@ -124,14 +137,22 @@ export async function fetchBookingSettings(): Promise<BookingSettings> {
         id: data.id || 'default',
         default_open_time: defaultOpen,
         default_close_time: defaultClose,
-        teardown_buffer_minutes: Number(data.teardown_buffer_minutes ?? 60),
-        setup_buffer_minutes: Number(data.setup_buffer_minutes ?? 90),
-        default_turnaround_hours: Number(data.default_turnaround_hours ?? 3.0),
-        avg_transit_speed_kmh: Number(data.avg_transit_speed_kmh ?? 25.0),
-        traffic_contingency_minutes: Number(data.traffic_contingency_minutes ?? 20),
-        same_venue_radius_km: Number(data.same_venue_radius_km ?? 0.5),
-        same_venue_transit_minutes: Number(data.same_venue_transit_minutes ?? 10),
-        max_travel_radius_km: Number(data.max_travel_radius_km ?? 60.0),
+        teardown_buffer_minutes: Number(data.teardown_buffer_minutes ?? cachedSettings.teardown_buffer_minutes ?? 60),
+        setup_buffer_minutes: Number(data.setup_buffer_minutes ?? cachedSettings.setup_buffer_minutes ?? 90),
+        default_turnaround_hours: Number(data.default_turnaround_hours ?? cachedSettings.default_turnaround_hours ?? 3.0),
+        avg_transit_speed_kmh: Number(data.avg_transit_speed_kmh ?? cachedSettings.avg_transit_speed_kmh ?? 25.0),
+        traffic_contingency_minutes: Number(data.traffic_contingency_minutes ?? cachedSettings.traffic_contingency_minutes ?? 20),
+        same_venue_radius_km: Number(data.same_venue_radius_km ?? cachedSettings.same_venue_radius_km ?? 0.5),
+        same_venue_transit_minutes: Number(data.same_venue_transit_minutes ?? cachedSettings.same_venue_transit_minutes ?? 10),
+        max_travel_radius_km: Number(data.max_travel_radius_km ?? cachedSettings.max_travel_radius_km ?? 60.0),
+        min_crew_required:
+          data.min_crew_required !== undefined && data.min_crew_required !== null
+            ? Number(data.min_crew_required)
+            : (cachedSettings.min_crew_required !== undefined ? Number(cachedSettings.min_crew_required) : 1),
+        require_full_crew_roster:
+          data.require_full_crew_roster !== undefined && data.require_full_crew_roster !== null
+            ? Boolean(data.require_full_crew_roster)
+            : (cachedSettings.require_full_crew_roster !== undefined ? Boolean(cachedSettings.require_full_crew_roster) : false),
         updated_at: data.updated_at,
       };
 
@@ -144,24 +165,30 @@ export async function fetchBookingSettings(): Promise<BookingSettings> {
     console.warn('Network exception while fetching booking_settings:', err);
   }
 
-  // 2. Check localStorage cached settings
-  try {
-    const cached = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (cached) {
-      return { ...DEFAULT_BOOKING_SETTINGS, ...JSON.parse(cached) };
-    }
-  } catch (_) {}
+  // 3. Fallback to localStorage cached settings if present
+  if (Object.keys(cachedSettings).length > 0) {
+    return { ...DEFAULT_BOOKING_SETTINGS, ...cachedSettings };
+  }
 
   return DEFAULT_BOOKING_SETTINGS;
 }
 
 export async function saveBookingSettings(settings: Partial<BookingSettings>): Promise<boolean> {
+  let cachedSettings: Partial<BookingSettings> = {};
+  try {
+    const cached = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (cached) cachedSettings = JSON.parse(cached);
+  } catch (_) {}
+
   const merged: BookingSettings = {
     ...DEFAULT_BOOKING_SETTINGS,
+    ...cachedSettings,
     ...settings,
-    id: 'default',
-    default_open_time: settings.default_open_time ? normalizeTimeString(settings.default_open_time, '08:00') : DEFAULT_BOOKING_SETTINGS.default_open_time,
-    default_close_time: settings.default_close_time ? normalizeTimeString(settings.default_close_time, '23:00') : DEFAULT_BOOKING_SETTINGS.default_close_time,
+    id: settings.id || cachedSettings.id || 'default',
+    default_open_time: settings.default_open_time ? normalizeTimeString(settings.default_open_time, '08:00') : (cachedSettings.default_open_time || DEFAULT_BOOKING_SETTINGS.default_open_time),
+    default_close_time: settings.default_close_time ? normalizeTimeString(settings.default_close_time, '23:00') : (cachedSettings.default_close_time || DEFAULT_BOOKING_SETTINGS.default_close_time),
+    min_crew_required: settings.min_crew_required !== undefined ? Number(settings.min_crew_required) : (cachedSettings.min_crew_required !== undefined ? Number(cachedSettings.min_crew_required) : 1),
+    require_full_crew_roster: settings.require_full_crew_roster !== undefined ? Boolean(settings.require_full_crew_roster) : (cachedSettings.require_full_crew_roster !== undefined ? Boolean(cachedSettings.require_full_crew_roster) : false),
     updated_at: new Date().toISOString(),
   };
 
@@ -172,12 +199,19 @@ export async function saveBookingSettings(settings: Partial<BookingSettings>): P
     console.warn('LocalStorage save warning:', lsErr);
   }
 
-  // 2. Attempt Supabase upsert
+  // 2. Attempt Supabase upsert/update
   try {
+    const { data: existingRow } = await supabase
+      .from('booking_settings')
+      .select('id')
+      .limit(1)
+      .maybeSingle();
+
+    const targetId = existingRow?.id || 'default';
     const payload: any = {
-      id: 'default',
-      default_open_time: `${merged.default_open_time}:00`,
-      default_close_time: `${merged.default_close_time}:00`,
+      id: targetId,
+      default_open_time: `${merged.default_open_time.slice(0, 5)}:00`,
+      default_close_time: `${merged.default_close_time.slice(0, 5)}:00`,
       teardown_buffer_minutes: merged.teardown_buffer_minutes,
       setup_buffer_minutes: merged.setup_buffer_minutes,
       default_turnaround_hours: merged.default_turnaround_hours,
@@ -186,12 +220,15 @@ export async function saveBookingSettings(settings: Partial<BookingSettings>): P
       same_venue_radius_km: merged.same_venue_radius_km,
       same_venue_transit_minutes: merged.same_venue_transit_minutes,
       max_travel_radius_km: merged.max_travel_radius_km,
+      min_crew_required: Number(merged.min_crew_required),
+      require_full_crew_roster: Boolean(merged.require_full_crew_roster),
       updated_at: merged.updated_at,
     };
 
-    const { error } = await supabase.from('booking_settings').upsert(payload);
-    if (error) {
-      console.warn('Note: booking_settings DB sync warning (cached locally):', error.message || error);
+    if (existingRow?.id) {
+      await supabase.from('booking_settings').update(payload).eq('id', existingRow.id);
+    } else {
+      await supabase.from('booking_settings').upsert(payload);
     }
   } catch (err) {
     console.warn('Database save caught gracefully:', err);
@@ -257,7 +294,53 @@ export function getOperatingWindowForDate(
     };
   }
 
-  // 2. Standard operating hours directly from booking_settings default_open_time & default_close_time
+  // 2. Check technical crew staffing requirement for this date
+  try {
+    const rawAvailability = localStorage.getItem('binhi_crew_availability');
+    if (rawAvailability) {
+      const records: any[] = JSON.parse(rawAvailability);
+      const dayLeaves = records.filter(
+        (r) => r.date === dateIso && (r.status === 'on_leave' || r.status === 'unavailable')
+      );
+
+      // Deduplicate by technician identifier to prevent duplicate rows for the same person from counting twice
+      const uniqueAbsentTechs = new Set<string>();
+      dayLeaves.forEach((r) => {
+        const key = (r.crewName || r.crew_name || r.crewId || r.crew_id || '').toLowerCase().trim();
+        if (key) uniqueAbsentTechs.add(key);
+      });
+      const uniqueLeavesCount = uniqueAbsentTechs.size;
+
+      const storedCount = Number(localStorage.getItem('binhi_active_crew_count'));
+      const activeCrewCount = !isNaN(storedCount) && storedCount > 0 ? storedCount : Math.max(2, uniqueLeavesCount + 1);
+      const availableCrewCount = Math.max(0, activeCrewCount - uniqueLeavesCount);
+
+      const requireFullRoster = settings.require_full_crew_roster === true;
+      const minRequired = settings.min_crew_required !== undefined ? Number(settings.min_crew_required) : 1;
+
+      // Condition A: If requireFullRoster is enabled, ANY missing crew member (1+ leaves) blocks the date
+      if (requireFullRoster && uniqueLeavesCount > 0) {
+        return {
+          isOpen: false,
+          openTime: '00:00',
+          closeTime: '00:00',
+          reason: `No Bookings Allowed: Full crew presence required (${uniqueLeavesCount} technician absent / on leave).`,
+        };
+      }
+
+      // Condition B: If available crew count drops below the dynamic min_crew_required threshold
+      if (availableCrewCount < minRequired) {
+        return {
+          isOpen: false,
+          openTime: '00:00',
+          closeTime: '00:00',
+          reason: `No Bookings Allowed: Insufficient crew (${availableCrewCount}/${minRequired} required technicians available).`,
+        };
+      }
+    }
+  } catch {}
+
+  // 3. Standard operating hours directly from booking_settings default_open_time & default_close_time
   return {
     isOpen: true,
     openTime: normalizeTimeString(settings.default_open_time, '08:00'),
@@ -500,6 +583,7 @@ export function getDayAvailabilityStatus(
   label: string;
   badgeClass: string;
   bookingCount: number;
+  reason?: string;
 } {
   const op = getOperatingWindowForDate(dateIso, settings, overrides);
   if (!op.isOpen) {
@@ -508,6 +592,7 @@ export function getDayAvailabilityStatus(
       label: 'Closed',
       badgeClass: 'bg-zinc-800 text-zinc-400 border border-zinc-700',
       bookingCount: 0,
+      reason: op.reason,
     };
   }
 

@@ -14,6 +14,7 @@ import {
   type ScheduleOverride,
   DEFAULT_BOOKING_SETTINGS,
 } from '../../utils/bookingEngine';
+import { fetchCrewAvailabilityRecords } from '../../utils/crewAvailabilityService';
 import { supabase } from '../../lib/supabase';
 
 function IconChevronLeft({ className = 'w-3.5 h-3.5' }: { className?: string }) {
@@ -173,6 +174,7 @@ export default function LandingPage({
           fetchDbBookedDates(),
           fetchBookingSettings(),
           fetchScheduleOverrides(),
+          fetchCrewAvailabilityRecords(),
         ]);
         setDbBookings(bookings);
         setBookingSettings(settings);
@@ -301,13 +303,15 @@ export default function LandingPage({
                   const isToday = formattedIso === todayIso;
 
                   let cellClass = 'bg-[var(--mist)] text-[#24252c]/80 hover:bg-[#1090F8]/10 hover:text-[#1090F8] cursor-pointer';
+                  let cellStyle: React.CSSProperties | undefined = undefined;
 
                   if (isPast) {
                     cellClass = 'bg-gray-100 text-gray-400 font-medium cursor-not-allowed opacity-40';
                   } else if (dayStatus.status === 'fully_booked' || dayStatus.status === 'closed') {
                     cellClass = 'bg-[var(--ink)] text-white font-bold shadow-xs cursor-not-allowed opacity-80';
                   } else if (dayStatus.status === 'slots_available') {
-                    cellClass = 'bg-amber-50 border border-amber-300 text-amber-900 font-bold hover:bg-amber-100 cursor-pointer shadow-2xs';
+                    cellClass = 'border border-emerald-500/40 font-bold hover:scale-[1.04] hover:shadow-md hover:border-emerald-400 cursor-pointer shadow-xs relative overflow-hidden';
+                    cellStyle = { background: 'linear-gradient(135deg, #24252C 0%, #065F46 55%, #059669 100%)' };
                   } else if (isToday) {
                     cellClass = 'border-2 border-[#1090F8] text-[#1090F8] font-extrabold bg-[#1090F8]/10 cursor-pointer hover:bg-[#1090F8]/20 shadow-xs';
                   }
@@ -320,26 +324,33 @@ export default function LandingPage({
                     go('packages');
                   };
 
+                  const isSlotsHalf = dayStatus.status === 'slots_available';
+
                   return (
                     <div
                       key={day}
                       onClick={handleClick}
+                      style={cellStyle}
                       title={
                         isPast
                           ? 'Past Date'
                           : dayStatus.status === 'fully_booked'
                           ? 'Fully Booked: No operational slots remaining'
                           : dayStatus.status === 'slots_available'
-                          ? `${dayStatus.bookingCount} Booking(s) • Additional time slots available!`
+                          ? `${dayStatus.bookingCount} Booked • Slots Open (${formattedIso}) - Multiple slots available! Exact timings validated during checkout.`
                           : isToday
                           ? 'Today (Available)'
                           : `Available ${formattedIso}`
                       }
-                      className={`aspect-square rounded-lg text-[11px] flex flex-col items-center justify-center relative transition-all group ${cellClass}`}
+                      className={`aspect-square rounded-lg sm:rounded-xl text-[10px] sm:text-xs flex flex-col items-center justify-center relative transition-all group ${cellClass}`}
                     >
-                      <span>{day}</span>
-                      {dayStatus.status === 'slots_available' && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 absolute bottom-1 animate-pulse" />
+                      <span className={`leading-none ${isSlotsHalf ? 'font-black text-[10px] sm:text-[11.5px] text-white drop-shadow-xs z-10' : ''}`}>
+                        {day}
+                      </span>
+                      {isSlotsHalf && (
+                        <span className="text-[5.5px] sm:text-[6.5px] font-extrabold uppercase tracking-tight text-emerald-100 bg-emerald-500/30 border border-emerald-400/30 px-0.5 sm:px-1 py-0.2 rounded-full shadow-2xs mt-0.5 z-10">
+                          Slots
+                        </span>
                       )}
                       {dayStatus.status === 'fully_booked' && (
                         <span className="w-1.5 h-1.5 rounded-full bg-rose-500 absolute bottom-1" />
@@ -350,14 +361,21 @@ export default function LandingPage({
 
                 {/* Trailing blank cells to enforce fixed 42-cell layout for all months */}
                 {Array.from({ length: Math.max(0, 42 - (firstDayIndex + daysInMonth)) }).map((_, i) => (
-                  <div key={`trail-${i}`} className="aspect-square rounded-lg bg-transparent opacity-0 pointer-events-none" />
+                  <div key={`trail-${i}`} className="aspect-square rounded-lg sm:rounded-xl bg-transparent opacity-0 pointer-events-none" />
                 ))}
               </div>
 
-              <div className="flex items-center justify-between mt-4 pt-3 border-t border-[#24252c]/[0.06] text-[10px] text-[#24252c]/60">
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--ink)]" /> Booked Event</span>
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full border-2 border-[#1090F8] bg-[#1090F8]/20" /> Today</span>
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--mist)] border border-[#24252c]/10" /> Available</span>
+              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center justify-between gap-1.5 sm:gap-2 mt-3.5 sm:mt-4 pt-2.5 sm:pt-3 border-t border-[#24252c]/[0.06] text-[9.5px] sm:text-[10px] text-[#24252c]/60">
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--ink)] shrink-0" /> Booked</span>
+                <span className="flex items-center gap-1.5 font-bold text-emerald-700">
+                  <span
+                    className="w-2.5 h-2.5 rounded-md border border-emerald-500/40 shadow-2xs inline-block shrink-0"
+                    style={{ background: 'linear-gradient(135deg, #24252C 0%, #065F46 55%, #059669 100%)' }}
+                  />
+                  1 Booked • Slots Open
+                </span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full border-2 border-[#1090F8] bg-[#1090F8]/20 shrink-0" /> Today</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--mist)] border border-[#24252c]/10 shrink-0" /> Available</span>
               </div>
             </div>
             <h3 className="font-semibold mt-6 text-base">See real availability, not "let me check"</h3>

@@ -42,6 +42,7 @@ import {
   CrossSellPromotions,
   type CrossSellBundle,
 } from '../../components/shared/CrossSellPromotions';
+import { fetchCrewAvailabilityRecords } from '../../utils/crewAvailabilityService';
 
 interface TransportRuleOption {
   id: string;
@@ -133,11 +134,12 @@ export default function CheckoutPage({
         console.warn('Failed loading booking_settings:', err);
       }
 
-      // 2. Fetch bookings and schedule overrides
+      // 2. Fetch bookings, schedule overrides, and crew availability
       try {
         const [data, overrides] = await Promise.all([
           fetchDbBookedDates(),
           fetchScheduleOverrides(),
+          fetchCrewAvailabilityRecords(),
         ]);
         setDbBookings(data);
         setScheduleOverrides(overrides);
@@ -1701,8 +1703,8 @@ export default function CheckoutPage({
                     Fully Booked: All operational windows for this day are reserved. Please select another date.
                   </p>
                 ) : getDayAvailabilityStatus(eventDate, dbBookings, bookingSettings, scheduleOverrides).status === 'closed' ? (
-                  <p className="text-[11px] font-bold text-zinc-600 mt-1 ml-2">
-                    Closed: System does not accept bookings on this date.
+                  <p className="text-[11px] font-bold text-rose-600 mt-1 ml-2">
+                    Service Closed / Crew Unavailable: Technical crew is not available or date is blacked out on this date. Please select another date.
                   </p>
                 ) : null}
               </div>

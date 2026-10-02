@@ -5,7 +5,7 @@ import { IconCheck, IconX, IconShield, IconPrinter } from '../../components/shar
 import { supabase } from '../../lib/supabase';
 import { formatDisplayDate } from '../../utils/bookingService';
 import { retrievePaymongoCheckoutSession } from '../../utils/paymongoPayment';
-import { sendBookingConfirmationEmails } from '../../utils/emailService';
+import { sendBookingConfirmationEmails, sendDownpaymentSecuredReviewEmails } from '../../utils/emailService';
 import { sendBookingConfirmationSms } from '../../utils/smsService';
 
 export default function PaymentResultPage({
@@ -120,6 +120,11 @@ export default function PaymentResultPage({
               updated_at: new Date().toISOString(),
             };
 
+            if (!isBalance) {
+              // Mark new reservation as pending admin technical review
+              updatePayload.status = 'pending_approval';
+            }
+
             if (isFull || isBalance) {
               updatePayload.is_fully_paid = true;
               updatePayload.remaining_balance = 0;
@@ -139,31 +144,54 @@ export default function PaymentResultPage({
                 .eq('paymongo_reference_number', cleanRef);
             }
 
-            // Dispatch automated customer confirmation and admin alert email
+            // Dispatch automated customer confirmation or under-review alert email
             const targetEmail = bookingData?.customer_email || customerEmail;
             if (targetEmail && targetEmail.includes('@')) {
               try {
                 const emailSentKey = `binhi_conf_email_sent_${cleanRef || bookingData?.id}`;
                 if (!sessionStorage.getItem(emailSentKey)) {
                   sessionStorage.setItem(emailSentKey, 'true');
-                  sendBookingConfirmationEmails({
-                    bookingId: bookingData?.id || cleanRef || ref,
-                    paymongoReference: cleanRef || bookingData?.paymongo_reference_number || ref,
-                    customerName: bookingData?.customer_name || customerName || 'Valued Client',
-                    customerEmail: targetEmail,
-                    customerPhone: bookingData?.customer_phone || customerPhone,
-                    packageName: bookingData?.package_name || packageName || 'Production Package',
-                    eventType: bookingData?.event_type || 'Event Production',
-                    eventDate: formatDisplayDate(bookingData?.event_date || eventDate),
-                    startTime: bookingData?.start_time ? String(bookingData.start_time).slice(0, 5) : '1:00 PM',
-                    endTime: bookingData?.end_time ? String(bookingData.end_time).slice(0, 5) : '6:00 PM',
-                    venueAddress: bookingData?.venue_address || venue || 'Selected Venue Location',
-                    totalCost: bookingData?.total_cost || totalAmount || 0,
-                    depositAmount: bookingData?.deposit_amount || paidAmount || 0,
-                    paymentChannel: resolvedChannel,
-                    isFullyPaid: Boolean(isFull),
-                    selectedAddons: Array.isArray(bookingData?.selected_addons) ? bookingData.selected_addons : [],
-                  }).catch((e) => console.warn('Booking confirmation email notice:', e));
+
+                  if (isBalance) {
+                    sendBookingConfirmationEmails({
+                      bookingId: bookingData?.id || cleanRef || ref,
+                      paymongoReference: cleanRef || bookingData?.paymongo_reference_number || ref,
+                      customerName: bookingData?.customer_name || customerName || 'Valued Client',
+                      customerEmail: targetEmail,
+                      customerPhone: bookingData?.customer_phone || customerPhone,
+                      packageName: bookingData?.package_name || packageName || 'Production Package',
+                      eventType: bookingData?.event_type || 'Event Production',
+                      eventDate: formatDisplayDate(bookingData?.event_date || eventDate),
+                      startTime: bookingData?.start_time ? String(bookingData.start_time).slice(0, 5) : '1:00 PM',
+                      endTime: bookingData?.end_time ? String(bookingData.end_time).slice(0, 5) : '6:00 PM',
+                      venueAddress: bookingData?.venue_address || venue || 'Selected Venue Location',
+                      totalCost: bookingData?.total_cost || totalAmount || 0,
+                      depositAmount: bookingData?.deposit_amount || paidAmount || 0,
+                      paymentChannel: resolvedChannel,
+                      isFullyPaid: Boolean(isFull),
+                      selectedAddons: Array.isArray(bookingData?.selected_addons) ? bookingData.selected_addons : [],
+                    }).catch((e) => console.warn('Booking confirmation email notice:', e));
+                  } else {
+                    // Send Downpayment Secured & Reservation Under Review notice
+                    sendDownpaymentSecuredReviewEmails({
+                      bookingId: bookingData?.id || cleanRef || ref,
+                      paymongoReference: cleanRef || bookingData?.paymongo_reference_number || ref,
+                      customerName: bookingData?.customer_name || customerName || 'Valued Client',
+                      customerEmail: targetEmail,
+                      customerPhone: bookingData?.customer_phone || customerPhone,
+                      packageName: bookingData?.package_name || packageName || 'Production Package',
+                      eventType: bookingData?.event_type || 'Event Production',
+                      eventDate: formatDisplayDate(bookingData?.event_date || eventDate),
+                      startTime: bookingData?.start_time ? String(bookingData.start_time).slice(0, 5) : '1:00 PM',
+                      endTime: bookingData?.end_time ? String(bookingData.end_time).slice(0, 5) : '6:00 PM',
+                      venueAddress: bookingData?.venue_address || venue || 'Selected Venue Location',
+                      totalCost: bookingData?.total_cost || totalAmount || 0,
+                      depositAmount: bookingData?.deposit_amount || paidAmount || 0,
+                      paymentChannel: resolvedChannel,
+                      isFullyPaid: Boolean(isFull),
+                      selectedAddons: Array.isArray(bookingData?.selected_addons) ? bookingData.selected_addons : [],
+                    }).catch((e) => console.warn('Downpayment review email notice:', e));
+                  }
                 }
               } catch (e) {
                 console.warn('Booking confirmation email attempt note:', e);
@@ -254,20 +282,22 @@ export default function PaymentResultPage({
             </div>
 
             <div className="print:hidden">
-              <MonoBadge icon={IconShield}>PayMongo Payment Confirmed</MonoBadge>
+              <MonoBadge icon={IconShield}>
+                {isBalanceSettlement ? 'PayMongo Payment Confirmed' : 'Downpayment Secured · Under Review'}
+              </MonoBadge>
               <h1 className="text-2xl font-extrabold text-[var(--ink)] mt-2">
                 {isBalanceSettlement
                   ? 'Remaining Balance Settled!'
                   : isFullyPaid
                   ? 'Full Payment Completed!'
-                  : '50% Deposit Paid!'}
+                  : 'Downpayment Received & Secured!'}
               </h1>
               <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
                 {isBalanceSettlement
                   ? 'Your remaining 50% balance has been successfully processed via PayMongo Checkout. Your booking is now 100% Fully Settled with zero remaining balance!'
                   : isFullyPaid
-                  ? 'Your 100% full payment has been successfully processed via PayMongo Checkout. Your event production schedule is secured and fully settled with zero remaining balance!'
-                  : 'Your 50% reservation deposit has been successfully processed via PayMongo Checkout. Your event production schedule is now locked in our system!'}
+                  ? 'Your 100% payment has been secured. Our lead engineering team is verifying venue electrical specifications & crew schedule before final confirmation.'
+                  : 'Your reservation downpayment has been secured via PayMongo. Our staging team is conducting a technical & crew availability review. You will receive an official confirmation within 24 hours.'}
               </p>
             </div>
 

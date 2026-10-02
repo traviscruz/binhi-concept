@@ -10,6 +10,10 @@ import {
   getCustomerCancellationRejectedHtml,
   getBookingConfirmationEmailHtml,
   getAdminNewBookingConfirmationAlertHtml,
+  getDownpaymentUnderReviewEmailHtml,
+  getAdminNewBookingPendingReviewAlertHtml,
+  getBookingApprovedEmailHtml,
+  getBookingDeclinedRefundedEmailHtml,
   getPartnerOtpEmailHtml,
   getPartnerApprovalEmailHtml,
   getPartnerRejectionEmailHtml,
@@ -22,6 +26,7 @@ import {
   type CancellationRefundEmailData,
   type CancellationRejectionEmailData,
   type BookingConfirmationEmailData,
+  type BookingDeclinedEmailData,
   type PartnerOtpEmailData,
   type PartnerApprovalEmailData,
   type PartnerRejectionEmailData,
@@ -439,6 +444,98 @@ export async function sendPartnerRejectionEmail(data: PartnerRejectionEmailData)
     replyTo: getAdminEmail(),
   });
 }
+
+/**
+ * Sends both Customer Downpayment Secured (Under Review) & Admin New Booking Alert emails.
+ */
+export async function sendDownpaymentSecuredReviewEmails(
+  data: BookingConfirmationEmailData
+): Promise<{ customerSent: boolean; adminSent: boolean }> {
+  let customerSent = false;
+  let adminSent = false;
+  const adminEmail = getAdminEmail();
+
+  // 1. Customer "Downpayment Secured & Under Review" Email
+  try {
+    if (data.customerEmail && data.customerEmail.includes('@')) {
+      const html = getDownpaymentUnderReviewEmailHtml(data);
+      const safeRef = data.paymongoReference || data.bookingId;
+      const res = await sendEmail({
+        to: data.customerEmail.trim(),
+        subject: `Downpayment Secured & Reservation Under Technical Review: #${safeRef} (${data.eventDate}) - BINHI Concept`,
+        html,
+        replyTo: adminEmail,
+      });
+      customerSent = res.success;
+    }
+  } catch (err) {
+    console.error('[emailService] Error sending customer under review email:', err);
+  }
+
+  // 2. Admin Notification Alert: Pending Technical Review
+  try {
+    if (adminEmail) {
+      const adminHtml = getAdminNewBookingPendingReviewAlertHtml(data);
+      const safeRef = data.paymongoReference || data.bookingId;
+      const adminRes = await sendEmail({
+        to: adminEmail,
+        subject: `[Action Required: Review Booking] #${safeRef} - ${data.customerName} (${data.eventDate})`,
+        html: adminHtml,
+        replyTo: data.customerEmail,
+      });
+      adminSent = adminRes.success;
+    }
+  } catch (err) {
+    console.error('[emailService] Error sending admin booking alert email:', err);
+  }
+
+  return { customerSent, adminSent };
+}
+
+/**
+ * Sends official Booking Approved confirmation email to the customer.
+ */
+export async function sendCustomerBookingApprovedEmail(
+  data: BookingConfirmationEmailData
+): Promise<SendEmailResponse> {
+  if (!data.customerEmail || !data.customerEmail.includes('@')) {
+    return { success: false, error: 'Invalid or missing customer email address.' };
+  }
+
+  const html = getBookingApprovedEmailHtml(data);
+  const safeRef = data.paymongoReference || data.bookingId;
+  const subject = `Official Booking Approved & Confirmed: #${safeRef} (${data.eventDate}) - BINHI Concept`;
+
+  return await sendEmail({
+    to: data.customerEmail.trim(),
+    subject,
+    html,
+    replyTo: getAdminEmail(),
+  });
+}
+
+/**
+ * Sends Booking Declined & 100% Refund Issued notification email to the customer.
+ */
+export async function sendCustomerBookingDeclinedRefundedEmail(
+  data: BookingDeclinedEmailData
+): Promise<SendEmailResponse> {
+  if (!data.customerEmail || !data.customerEmail.includes('@')) {
+    return { success: false, error: 'Invalid or missing customer email address.' };
+  }
+
+  const html = getBookingDeclinedRefundedEmailHtml(data);
+  const safeRef = data.paymongoReference || data.bookingId;
+  const subject = `Booking Update: Reservation Declined & 100% Refund Issued (#${safeRef}) - BINHI Concept`;
+
+  return await sendEmail({
+    to: data.customerEmail.trim(),
+    subject,
+    html,
+    replyTo: getAdminEmail(),
+  });
+}
+
 
 
 

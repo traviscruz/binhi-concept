@@ -3,6 +3,20 @@
  * Styled to match the official BINHI Concept letterhead and design language.
  */
 
+
+export function getAppBaseUrl(): string {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_APP_URL) {
+    return import.meta.env.VITE_APP_URL.replace(/\/+$/, '');
+  }
+  if (typeof process !== 'undefined' && process.env?.VITE_APP_URL) {
+    return process.env.VITE_APP_URL.replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.includes('localhost')) {
+    return window.location.origin.replace(/\/+$/, '');
+  }
+  return 'https://binhiconcept.vercel.app';
+}
+
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -467,7 +481,7 @@ export function getAdminRescheduleRequestAlertHtml(data: RescheduleRequestEmailD
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin:20px 0 0 0;">
       <tr>
         <td align="center" bgcolor="#24252C" style="border-radius:24px;">
-          <a href="https://binhiconcept.ph" style="display:inline-block; padding:12px 28px; font-size:12px; font-weight:700; color:#FFFFFF; text-decoration:none; letter-spacing:0.5px; font-family:Arial,Helvetica,sans-serif;">
+          <a href="${getAppBaseUrl()}" style="display:inline-block; padding:12px 28px; font-size:12px; font-weight:700; color:#FFFFFF; text-decoration:none; letter-spacing:0.5px; font-family:Arial,Helvetica,sans-serif;">
             Open Bookings Management →
           </a>
         </td>
@@ -562,7 +576,7 @@ export function getCustomerRescheduleApprovedHtml(data: RescheduleApprovalEmailD
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 0 0;">
       <tr>
         <td align="center" bgcolor="#24252C" style="border-radius:24px;">
-          <a href="https://binhiconcept.ph" style="display:inline-block; padding:12px 28px; font-size:12px; font-weight:700; color:#FFFFFF; text-decoration:none; letter-spacing:0.5px; font-family:Arial,Helvetica,sans-serif;">
+          <a href="${getAppBaseUrl()}" style="display:inline-block; padding:12px 28px; font-size:12px; font-weight:700; color:#FFFFFF; text-decoration:none; letter-spacing:0.5px; font-family:Arial,Helvetica,sans-serif;">
             View Booking Tracker →
           </a>
         </td>
@@ -630,7 +644,7 @@ export function getCustomerRescheduleRejectedHtml(data: RescheduleRejectionEmail
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 0 0;">
       <tr>
         <td align="center" bgcolor="#24252C" style="border-radius:24px;">
-          <a href="https://binhiconcept.ph" style="display:inline-block; padding:12px 28px; font-size:12px; font-weight:700; color:#FFFFFF; text-decoration:none; letter-spacing:0.5px; font-family:Arial,Helvetica,sans-serif;">
+          <a href="${getAppBaseUrl()}" style="display:inline-block; padding:12px 28px; font-size:12px; font-weight:700; color:#FFFFFF; text-decoration:none; letter-spacing:0.5px; font-family:Arial,Helvetica,sans-serif;">
             View Calendar Availability →
           </a>
         </td>
@@ -778,7 +792,7 @@ export function getAdminCancellationRequestAlertHtml(data: CancellationRequestEm
     <table role="presentation" cellpadding="0" cellspacing="0">
       <tr>
         <td align="center" bgcolor="#E11D48" style="border-radius:24px;">
-          <a href="https://binhiconcept.ph" style="display:inline-block; padding:12px 28px; font-size:12px; font-weight:700; color:#FFFFFF; text-decoration:none; letter-spacing:0.5px; font-family:Arial,Helvetica,sans-serif;">
+          <a href="${getAppBaseUrl()}" style="display:inline-block; padding:12px 28px; font-size:12px; font-weight:700; color:#FFFFFF; text-decoration:none; letter-spacing:0.5px; font-family:Arial,Helvetica,sans-serif;">
             Review in Admin Dashboard →
           </a>
         </td>
@@ -1014,7 +1028,7 @@ export function getBookingConfirmationEmailHtml(data: BookingConfirmationEmailDa
   const isFull = Boolean(data.isFullyPaid || depositNum >= totalNum);
   const remainingNum = isFull ? 0 : Math.max(0, totalNum - depositNum);
 
-  const trackerLink = data.trackerUrl || `https://binhiconcept.ph/?page=booking-status&ref=${encodeURIComponent(safeRef)}`;
+  const trackerLink = data.trackerUrl || `${getAppBaseUrl()}/?page=booking-status&ref=${encodeURIComponent(safeRef)}`;
 
   const bodyContent = `
     <p class="text-muted" style="margin:0 0 16px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
@@ -1429,6 +1443,271 @@ export function getPartnerRejectionEmailHtml(data: PartnerRejectionEmailData): s
     bodyContent,
   });
 }
+
+/**
+ * Data interface for Booking Declined & Refunded Notifications
+ */
+export interface BookingDeclinedEmailData {
+  bookingId: string;
+  paymongoReference?: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone?: string;
+  packageName: string;
+  eventType?: string;
+  eventDate: string;
+  totalCost: number | string;
+  depositAmount: number | string;
+  refundAmount: number | string;
+  refundReference?: string;
+  declineReason?: string;
+  adminNotes?: string;
+}
+
+/**
+ * 12. Template: Customer Notification - Downpayment Secured & Reservation Under Technical Review
+ * Sent immediately after successful PayMongo checkout.
+ */
+export function getDownpaymentUnderReviewEmailHtml(data: BookingConfirmationEmailData): string {
+  const safeName = escapeHtml(data.customerName || 'Valued Client');
+  const safeRef = escapeHtml(data.paymongoReference || data.bookingId);
+  const safePkg = escapeHtml(data.packageName || 'Event Production Package');
+  const safeDate = escapeHtml(data.eventDate);
+  const safeStartTime = data.startTime ? escapeHtml(data.startTime) : '1:00 PM';
+  const safeEndTime = data.endTime ? escapeHtml(data.endTime) : '6:00 PM';
+  const safeVenue = escapeHtml(data.venueAddress || 'Selected Venue Location');
+  const safeChannel = escapeHtml(data.paymentChannel || 'PayMongo Online Payment');
+
+  const totalNum = typeof data.totalCost === 'number' ? data.totalCost : parseFloat(String(data.totalCost).replace(/[^0-9.]/g, '')) || 0;
+  const depositNum = typeof data.depositAmount === 'number' ? data.depositAmount : parseFloat(String(data.depositAmount).replace(/[^0-9.]/g, '')) || 0;
+  const trackerLink = data.trackerUrl || `${getAppBaseUrl()}/?page=booking-status&ref=${encodeURIComponent(safeRef)}`;
+
+  const bodyContent = `
+    <p class="text-muted" style="margin:0 0 16px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      Dear <strong class="text-ink" style="color:#24252C;">${safeName}</strong>,
+    </p>
+    <p class="text-muted" style="margin:0 0 20px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      Thank you for choosing <strong>BINHI Concept Lights &amp; Sounds</strong>. We have successfully received your initial downpayment of <strong class="text-ink" style="color:#059669;">₱${depositNum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong> via ${safeChannel}.
+    </p>
+
+    <!-- ── Under Technical Review Status Card ── -->
+    <div style="background-color:#FEF3C7; border:1.5px solid #FCD34D; border-radius:14px; padding:20px; margin-bottom:24px; text-align:center;">
+      <div style="display:inline-block; width:36px; height:36px; border-radius:50%; background-color:#D97706; color:#FFFFFF; font-size:18px; font-weight:bold; line-height:36px; margin-bottom:8px;">
+        ⏳
+      </div>
+      <div style="font-size:11px; font-weight:800; color:#92400E; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:4px;">
+        Reservation Held &amp; Under Technical Assessment
+      </div>
+      <div style="font-size:20px; font-weight:900; color:#78350F; margin-bottom:6px; font-family:Arial,Helvetica,sans-serif;">
+        DOWNPAYMENT SECURED · PENDING REVIEW
+      </div>
+      <div style="font-size:12px; color:#92400E; font-weight:600;">
+        Reference: <strong style="font-family:monospace; font-size:13px; color:#78350F;">#${safeRef}</strong>
+      </div>
+    </div>
+
+    <!-- ── Next Steps & Production Notice ── -->
+    <div style="background-color:#F8FAFC; border:1px solid #E2E8F0; border-radius:10px; padding:18px 20px; margin-bottom:20px;">
+      <div style="font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:10px;">
+        📋 What Happens Next?
+      </div>
+      <ol style="margin:0; padding-left:18px; font-size:12px; color:#4B5563; line-height:1.7;">
+        <li><strong>Venue &amp; Technical Assessment:</strong> Our production engineer is reviewing the venue power specifications, acoustic profile, and rigging safety for your date.</li>
+        <li><strong>Crew &amp; Equipment Allocation:</strong> We ensure 100% attendance availability of certified audio/lighting technicians.</li>
+        <li><strong>Official Confirmation:</strong> You will receive a final confirmation notification within <strong>24 hours</strong> once verified.</li>
+        <li><strong>100% Refund Guarantee:</strong> In the rare event of technical constraints or venue incompatibilities, your deposit is <strong>fully refunded immediately</strong>.</li>
+      </ol>
+    </div>
+
+    <!-- ── Summary Table ── -->
+    <div class="code-box" style="background-color:#ECEEF1; border:1px solid #E4E6EA; border-radius:10px; padding:18px 20px; margin-bottom:20px; font-size:12px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:4px 0; color:#6B7280; width:35%;">Package:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:700; color:#24252C;">${safePkg}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Event Date:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:700; color:#24252C;">${safeDate} (${safeStartTime} - ${safeEndTime})</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Venue:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:600; color:#24252C;">${safeVenue}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Total Package Amount:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:700; color:#24252C;">₱${totalNum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        </tr>
+        <tr style="border-top:1px solid #E4E6EA;">
+          <td style="padding:6px 0 2px 0; color:#059669; font-weight:700;">Secured Downpayment:</td>
+          <td style="padding:6px 0 2px 0; text-align:right; font-weight:800; font-size:13px; color:#059669;">₱${depositNum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ── Live Tracking CTA ── -->
+    <div style="text-align:center; margin:26px 0;">
+      <a
+        href="${trackerLink}"
+        target="_blank"
+        style="display:inline-block; background-color:#24252C; color:#FFFFFF; font-size:13px; font-weight:700; text-decoration:none; padding:13px 30px; border-radius:9999px; letter-spacing:0.3px;"
+      >
+        Track Reservation Status →
+      </a>
+    </div>
+
+    <p class="text-muted" style="margin:20px 0 0 0; font-size:12px; color:#6B7280; line-height:1.6; font-family:Arial,Helvetica,sans-serif;">
+      Have immediate questions regarding your event date? Reply directly to this email or reach us at <a href="mailto:admin@binhiconcept.ph" style="color:#2563EB; text-decoration:none;">admin@binhiconcept.ph</a>.
+    </p>
+  `;
+
+  return renderEmailShell({
+    title: `Downpayment Secured & Reservation Under Review: #${safeRef} - BINHI Concept`,
+    badgeText: 'RESERVATION UNDER REVIEW',
+    headline: 'Downpayment Secured · Under Technical Review',
+    bodyContent,
+  });
+}
+
+/**
+ * 13. Template: Admin Alert - New Booking Pending Approval
+ */
+export function getAdminNewBookingPendingReviewAlertHtml(data: BookingConfirmationEmailData): string {
+  const safeName = escapeHtml(data.customerName || 'Client');
+  const safeRef = escapeHtml(data.paymongoReference || data.bookingId);
+  const safePkg = escapeHtml(data.packageName || 'Production Package');
+  const safeDate = escapeHtml(data.eventDate);
+  const safeVenue = escapeHtml(data.venueAddress || 'Venue');
+  const safeEmail = escapeHtml(data.customerEmail);
+  const safePhone = data.customerPhone ? escapeHtml(data.customerPhone) : 'N/A';
+  const totalNum = typeof data.totalCost === 'number' ? data.totalCost : parseFloat(String(data.totalCost).replace(/[^0-9.]/g, '')) || 0;
+  const depositNum = typeof data.depositAmount === 'number' ? data.depositAmount : parseFloat(String(data.depositAmount).replace(/[^0-9.]/g, '')) || 0;
+
+  const bodyContent = `
+    <p class="text-muted" style="margin:0 0 16px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      A customer has completed downpayment for an event reservation and is awaiting <strong class="text-ink" style="color:#24252C;">Technical &amp; Crew Schedule Approval</strong>.
+    </p>
+
+    <div style="background-color:#FFFBEB; border:1px solid #FDE68A; border-radius:10px; padding:16px 18px; margin-bottom:20px;">
+      <div style="font-size:10px; font-weight:700; color:#B45309; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">
+        Action Required: Review &amp; Approve Booking
+      </div>
+      <div style="font-size:18px; font-weight:800; color:#92400E;">
+        ${safeName} · #${safeRef}
+      </div>
+      <div style="font-size:12px; color:#78350F; margin-top:2px;">
+        ${safePkg} — Target Date: <strong>${safeDate}</strong>
+      </div>
+    </div>
+
+    <div class="code-box" style="background-color:#ECEEF1; border:1px solid #E4E6EA; border-radius:8px; padding:16px 18px; margin-bottom:20px; font-size:12px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Customer:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:700; color:#24252C;">${safeName}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Email:</td>
+          <td style="padding:4px 0; text-align:right; font-family:monospace; color:#24252C;">${safeEmail}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Contact:</td>
+          <td style="padding:4px 0; text-align:right; color:#24252C;">${safePhone}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Venue:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:600; color:#24252C;">${safeVenue}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Total Package Cost:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:700; color:#24252C;">₱${totalNum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0; color:#6B7280;">Deposit Collected:</td>
+          <td style="padding:4px 0; text-align:right; font-weight:700; color:#15803D;">₱${depositNum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        </tr>
+      </table>
+    </div>
+
+    <p class="text-muted" style="margin:20px 0 0 0; font-size:12px; color:#6B7280; line-height:1.6; font-family:Arial,Helvetica,sans-serif;">
+      Please log in to the <strong>Admin Dashboard &rarr; Bookings Decision Center</strong> to approve or decline with full automatic refund.
+    </p>
+  `;
+
+  return renderEmailShell({
+    title: `[Action Required: Pending Review] #${safeRef} - ${safeName} (${safeDate})`,
+    badgeText: 'PENDING APPROVAL',
+    headline: 'New Booking Awaiting Technical Review',
+    bodyContent,
+  });
+}
+
+/**
+ * 14. Template: Customer Notification - Booking Approved & Officially Confirmed
+ */
+export function getBookingApprovedEmailHtml(data: BookingConfirmationEmailData): string {
+  return getBookingConfirmationEmailHtml(data);
+}
+
+/**
+ * 15. Template: Customer Notification - Booking Declined & 100% Refund Issued
+ */
+export function getBookingDeclinedRefundedEmailHtml(data: BookingDeclinedEmailData): string {
+  const safeName = escapeHtml(data.customerName || 'Valued Customer');
+  const safeRef = escapeHtml(data.paymongoReference || data.bookingId);
+  const safePkg = escapeHtml(data.packageName || 'Production Package');
+  const safeDate = escapeHtml(data.eventDate);
+  const safeReason = escapeHtml(data.declineReason || 'Venue technical constraints or certified technician scheduling limitations.');
+  const safeNotes = data.adminNotes ? escapeHtml(data.adminNotes).replace(/\n/g, '<br/>') : '';
+  const safeRefundRef = escapeHtml(data.refundReference || `REF-${Date.now().toString().slice(-6)}`);
+
+  const depositNum = typeof data.depositAmount === 'number' ? data.depositAmount : parseFloat(String(data.depositAmount).replace(/[^0-9.]/g, '')) || 0;
+  const refundNum = typeof data.refundAmount === 'number' ? data.refundAmount : parseFloat(String(data.refundAmount).replace(/[^0-9.]/g, '')) || depositNum;
+
+  const bodyContent = `
+    <p class="text-muted" style="margin:0 0 16px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      Dear <strong class="text-ink" style="color:#24252C;">${safeName}</strong>,
+    </p>
+    <p class="text-muted" style="margin:0 0 20px 0; font-size:14px; color:#6B7280; line-height:1.65; font-family:Arial,Helvetica,sans-serif;">
+      Thank you for your interest in partnering with <strong>BINHI Concept</strong> for your event on <strong>${safeDate}</strong>. Following our technical review and crew logistics assessment, we regret to inform you that we cannot accommodate your reservation for <strong>${safePkg}</strong>.
+    </p>
+
+    <!-- ── 100% Refund Processed Box ── -->
+    <div style="background-color:#F0FDF4; border:1.5px solid #86EFAC; border-radius:12px; padding:18px 22px; margin-bottom:22px;">
+      <div style="font-size:10px; font-weight:700; color:#15803D; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">
+        ✓ 100% Full Refund Issued
+      </div>
+      <div style="font-size:22px; font-weight:900; color:#166534; margin-bottom:4px;">
+        ₱${refundNum.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+      </div>
+      <div style="font-size:11px; color:#14532D;">
+        Refund Reference: <strong style="font-family:monospace; color:#166534;">#${safeRefundRef}</strong>
+      </div>
+      <div style="font-size:11px; color:#15803D; margin-top:6px; line-height:1.5;">
+        Your initial deposit has been fully reversed to your original payment channel via PayMongo. Crediting takes 1-3 business days depending on your bank or e-wallet provider.
+      </div>
+    </div>
+
+    <!-- Reason Box -->
+    <div style="background-color:#FEF2F2; border:1px solid #FECACA; border-radius:10px; padding:16px 18px; margin-bottom:20px; font-size:12px; color:#991B1B;">
+      <strong style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">Assessment Details:</strong>
+      ${safeReason}
+      ${safeNotes ? `<div style="margin-top:8px; padding-top:8px; border-top:1px dashed #FECACA; color:#7F1D1D;"><strong>Technician Remarks:</strong> ${safeNotes}</div>` : ''}
+    </div>
+
+    <p class="text-muted" style="margin:20px 0 0 0; font-size:12px; color:#6B7280; line-height:1.6; font-family:Arial,Helvetica,sans-serif;">
+      We sincerely apologize for any inconvenience caused and hope to support your upcoming productions on future available dates. If you have questions regarding this refund, reply directly to this email or reach us at <a href="mailto:admin@binhiconcept.ph" style="color:#2563EB; text-decoration:none;">admin@binhiconcept.ph</a>.
+    </p>
+  `;
+
+  return renderEmailShell({
+    title: `Booking Notice: Reservation Declined & Refund Issued: #${safeRef} - BINHI Concept`,
+    badgeText: 'REFUND PROCESSED',
+    headline: 'Booking Reservation Update & 100% Refund',
+    bodyContent,
+  });
+}
+
 
 
 

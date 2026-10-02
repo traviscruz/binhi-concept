@@ -58,6 +58,7 @@ import { CrewLayout } from './components/layout/CrewLayout';
 import CrewAssignedBookingsPage from './pages/crew/CrewAssignedBookingsPage';
 import CrewBookingDetailPage from './pages/crew/CrewBookingDetailPage';
 import CrewSetupTeardownPage from './pages/crew/CrewSetupTeardownPage';
+import CrewAvailabilityPage from './pages/crew/CrewAvailabilityPage';
 import CrewProfilePage from './pages/crew/CrewProfilePage';
 import AdminReviewsPage from './pages/admin/AdminReviewsPage';
 import AdminAffiliatesPage from './pages/admin/AdminAffiliatesPage';
@@ -397,6 +398,7 @@ export default function App() {
         {page === 'crew-assigned-bookings' && <CrewAssignedBookingsPage go={go} />}
         {page === 'crew-booking-detail' && <CrewBookingDetailPage go={go} />}
         {page === 'crew-setup-teardown' && <CrewSetupTeardownPage go={go} />}
+        {page === 'crew-availability' && <CrewAvailabilityPage go={go} />}
         {page === 'crew-profile' && <CrewProfilePage go={go} />}
       </CrewLayout>
     );

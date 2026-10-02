@@ -138,6 +138,7 @@ export function CrewLayout({
         {/* Navigation Items */}
         <div className="space-y-1.5">
           {navItem('Assigned Bookings', 'crew-assigned-bookings', <IconCalendar className="w-4 h-4" />, liveAssignedCount)}
+          {navItem('My Attendance & Duty', 'crew-availability', <IconCalendar className="w-4 h-4" />)}
           {navItem('Gear Packing & Specs', 'crew-booking-detail', <IconBox className="w-4 h-4" />)}
           {navItem('Setup / Teardown Status', 'crew-setup-teardown', <IconCheck className="w-4 h-4" />)}
         </div>

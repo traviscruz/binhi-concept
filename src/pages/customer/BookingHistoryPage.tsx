@@ -168,9 +168,27 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
               createdAt: b.created_at ? new Date(b.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '',
               rawCreatedAt: b.created_at || '',
               isCompleted: (b.status || b.payment_status || '').toLowerCase() === 'completed',
-              rawStatus: (b.status || b.payment_status || '').toLowerCase(),
-              status: (b.status || b.payment_status || '').toLowerCase() === 'completed' ? 'Completed' : (b.status || b.payment_status || '').toLowerCase() === 'cancelled' ? 'Cancelled' : b.payment_status === 'paid' ? 'Confirmed & Secured' : b.payment_status === 'pending' ? 'Pending Payment' : 'Confirmed',
-              statusColor: (b.status || b.payment_status || '').toLowerCase() === 'completed' ? 'bg-[#1090F8]/10 text-[#1090F8] border-[#1090F8]/20' : (b.status || b.payment_status || '').toLowerCase() === 'cancelled' ? 'bg-rose-500/10 text-rose-600 border-rose-500/20' : b.payment_status === 'paid' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' : b.payment_status === 'pending' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' : 'bg-rose-500/10 text-rose-600 border-rose-500/20',
+              rawStatus: (b.booking_status || b.status || b.payment_status || '').toLowerCase(),
+              status: ((b.booking_status || b.status || '').toLowerCase() === 'declined' || (b.payment_status || '').toLowerCase() === 'refunded')
+                ? 'Declined & Refunded'
+                : (b.status || b.payment_status || '').toLowerCase() === 'completed'
+                ? 'Completed'
+                : (b.status || b.payment_status || '').toLowerCase() === 'cancelled'
+                ? 'Cancelled'
+                : b.payment_status === 'paid'
+                ? 'Confirmed & Secured'
+                : b.payment_status === 'pending'
+                ? 'Pending Payment'
+                : 'Confirmed',
+              statusColor: ((b.booking_status || b.status || '').toLowerCase() === 'declined' || (b.payment_status || '').toLowerCase() === 'refunded' || (b.status || b.payment_status || '').toLowerCase() === 'cancelled')
+                ? 'bg-rose-500/10 text-rose-700 border-rose-500/30'
+                : (b.status || b.payment_status || '').toLowerCase() === 'completed'
+                ? 'bg-[#1090F8]/10 text-[#1090F8] border-[#1090F8]/20'
+                : b.payment_status === 'paid'
+                ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+                : b.payment_status === 'pending'
+                ? 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+                : 'bg-rose-500/10 text-rose-600 border-rose-500/20',
               paymentChannel: b.payment_channel || 'PayMongo',
               rescheduleStatus: b.reschedule_status || null,
               rescheduleRequestedDate: b.reschedule_requested_date || null,
@@ -663,8 +681,13 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
 
                   {/* Right: Streamlined Action Buttons */}
                   <div className="flex items-center gap-2 flex-wrap lg:justify-end shrink-0 pt-2 lg:pt-0">
-                    {/* If cancellation is requested, hide interfering buttons and show clear review status */}
-                    {item.cancellationStatus === 'requested' ? (
+                    {/* If cancelled or declined, hide operational buttons */}
+                    {item.rawStatus === 'cancelled' || item.rawStatus === 'declined' || item.rawStatus === 'refunded' || item.status === 'Cancelled' || item.status === 'Declined & Refunded' ? (
+                      <div className="text-[11px] font-bold text-rose-800 bg-rose-50 border border-rose-200 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5 shadow-2xs">
+                        <IconX className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                        <span>{item.status === 'Declined & Refunded' ? 'Declined & 100% Refunded' : 'Booking Cancelled'}</span>
+                      </div>
+                    ) : item.cancellationStatus === 'requested' ? (
                       <div className="text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5 shadow-2xs">
                         <IconAlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
                         <span>Cancellation Under Review</span>
@@ -672,7 +695,7 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                     ) : (
                       <>
                         {/* Pay Remaining Balance (High-priority action) */}
-                        {!item.isCompleted && item.rawStatus !== 'cancelled' && !item.isFullyPaid && item.rawRemaining > 0 && (
+                        {!item.isCompleted && !item.isFullyPaid && item.rawRemaining > 0 && (
                           <button
                             type="button"
                             onClick={() => handlePayRemainingBalance(item)}
@@ -685,7 +708,7 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                         )}
 
                         {/* Track Live Setup */}
-                        {!item.isCompleted && item.rawStatus !== 'cancelled' && (
+                        {!item.isCompleted && (
                           <button
                             onClick={() => {
                               localStorage.setItem('binhi_selected_active_booking_id', item.dbId);
@@ -699,7 +722,7 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                         )}
 
                         {/* Reschedule Button */}
-                        {!item.isCompleted && item.rawStatus !== 'cancelled' && (
+                        {!item.isCompleted && (
                           <button
                             type="button"
                             onClick={() => handleOpenRescheduleModal(item)}
@@ -712,7 +735,7 @@ export default function BookingHistoryPage({ go }: { go: (p: Page) => void }) {
                         )}
 
                         {/* Cancel & Refund Button */}
-                        {!item.isCompleted && item.rawStatus !== 'cancelled' && (
+                        {!item.isCompleted && (
                           <button
                             type="button"
                             onClick={() => handleOpenCancellationModal(item)}

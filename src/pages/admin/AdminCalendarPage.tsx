@@ -16,6 +16,7 @@ import {
   type ScheduleOverride,
   DEFAULT_BOOKING_SETTINGS,
 } from '../../utils/bookingEngine';
+import { getDailyCrewCapacity, type DailyCrewCapacity } from '../../utils/crewAvailabilityService';
 
 export default function AdminCalendarPage({ go }: { go: (p: Page) => void }) {
   const today = new Date();
@@ -24,6 +25,7 @@ export default function AdminCalendarPage({ go }: { go: (p: Page) => void }) {
   const [dbBookings, setDbBookings] = useState<DBBooking[]>([]);
   const [bookingSettings, setBookingSettings] = useState<BookingSettings>(DEFAULT_BOOKING_SETTINGS);
   const [scheduleOverrides, setScheduleOverrides] = useState<ScheduleOverride[]>([]);
+  const [dayCrewCapacity, setDayCrewCapacity] = useState<DailyCrewCapacity | null>(null);
 
   // Modals state
   const [selectedBookingModal, setSelectedBookingModal] = useState<DBBooking | null>(null);
@@ -34,6 +36,15 @@ export default function AdminCalendarPage({ go }: { go: (p: Page) => void }) {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsSuccessNotice, setSettingsSuccessNotice] = useState(false);
   const [settingsErrorNotice, setSettingsErrorNotice] = useState('');
+
+  useEffect(() => {
+    const targetDate = selectedDaySchedule?.date || selectedBookingModal?.event_date;
+    if (targetDate) {
+      getDailyCrewCapacity(targetDate).then(setDayCrewCapacity);
+    } else {
+      setDayCrewCapacity(null);
+    }
+  }, [selectedDaySchedule, selectedBookingModal]);
 
   useEffect(() => {
     async function loadData() {
@@ -344,6 +355,39 @@ export default function AdminCalendarPage({ go }: { go: (p: Page) => void }) {
                 {selectedDaySchedule.bookings.length} production setups scheduled on this date with turnaround analysis.
               </p>
             </div>
+
+            {dayCrewCapacity && dayCrewCapacity.totalActiveCrew > 0 ? (
+              <div className="p-3.5 rounded-2xl bg-sky-50/70 border border-sky-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div>
+                  <span className="font-bold text-sky-950 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-sky-500" />
+                    Crew Roster &amp; Capacity: {dayCrewCapacity.availableCrewCount} of {dayCrewCapacity.totalActiveCrew} Available
+                  </span>
+                  <p className="text-[11px] text-sky-800 mt-0.5">
+                    {dayCrewCapacity.onLeaveCrewCount > 0
+                      ? `${dayCrewCapacity.onLeaveCrewCount} crew technician(s) on leave today.`
+                      : 'All registered crew technicians available for deployment.'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {dayCrewCapacity.crewRoster.map((c) => (
+                    <span
+                      key={c.crewId}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                        c.status === 'on_leave'
+                          ? 'bg-rose-50 text-rose-700 border-rose-200'
+                          : c.status === 'assigned'
+                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                          : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      }`}
+                      title={c.reason || c.status}
+                    >
+                      {c.crewName.split(' ')[0]} ({c.status === 'on_leave' ? 'Leave' : c.status === 'assigned' ? 'Assigned' : 'Active'})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
               {selectedDaySchedule.bookings.map((b, idx) => {
@@ -716,6 +760,88 @@ export default function AdminCalendarPage({ go }: { go: (p: Page) => void }) {
                   </>
                 );
               })()}
+            </div>
+
+            {/* 3. Technical Crew Staffing Requirement */}
+            <div className="p-4 rounded-2xl bg-[var(--mist)] border border-[#24252c]/[0.06] space-y-3">
+              <div>
+                <h4 className="font-extrabold text-sm text-[var(--ink)]">3. Technical Crew Staffing Requirement</h4>
+                <p className="text-[11px] text-[#24252c]/55">
+                  Configure when customer booking dates should be automatically blocked due to missing/absent crew.
+                </p>
+              </div>
+
+              <div className="space-y-2.5">
+                {/* Option A: Strict Full Roster Present */}
+                <label
+                  className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
+                    settingsForm.require_full_crew_roster !== false
+                      ? 'bg-white border-[#1090F8] shadow-xs'
+                      : 'bg-white/60 border-[#24252c]/10 hover:bg-white'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="crew_rule"
+                    checked={settingsForm.require_full_crew_roster !== false}
+                    onChange={() => setSettingsForm((prev) => ({ ...prev, require_full_crew_roster: true }))}
+                    className="mt-0.5 accent-[#1090F8]"
+                  />
+                  <div>
+                    <span className="font-extrabold text-xs text-[var(--ink)] block">
+                      Require Full Crew Presence (Block date if 1 crew is missing)
+                    </span>
+                    <span className="text-[11px] text-[#24252c]/65 block mt-0.5">
+                      Blocks customer bookings on any date where <strong>even 1 crew technician is absent / on-leave</strong>. All registered crew must be on-duty.
+                    </span>
+                  </div>
+                </label>
+
+                {/* Option B: Flexible Minimum Threshold */}
+                <label
+                  className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
+                    settingsForm.require_full_crew_roster === false
+                      ? 'bg-white border-[#1090F8] shadow-xs'
+                      : 'bg-white/60 border-[#24252c]/10 hover:bg-white'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="crew_rule"
+                    checked={settingsForm.require_full_crew_roster === false}
+                    onChange={() => setSettingsForm((prev) => ({ ...prev, require_full_crew_roster: false }))}
+                    className="mt-0.5 accent-[#1090F8]"
+                  />
+                  <div className="flex-1">
+                    <span className="font-extrabold text-xs text-[var(--ink)] block">
+                      Minimum Available Crew Threshold
+                    </span>
+                    <span className="text-[11px] text-[#24252c]/65 block mt-0.5">
+                      Allow bookings as long as a minimum number of technicians are on-duty.
+                    </span>
+
+                    {settingsForm.require_full_crew_roster === false && (
+                      <div className="mt-2.5 pt-2.5 border-t border-[#24252c]/[0.08] flex items-center gap-2 animate-fade-in">
+                        <span className="text-[11px] font-bold text-[var(--ink)]">Minimum Crew Needed Per Event:</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="20"
+                          value={settingsForm.min_crew_required !== undefined ? settingsForm.min_crew_required : 1}
+                          onChange={(e) =>
+                            setSettingsForm((prev) => ({
+                              ...prev,
+                              min_crew_required: Math.max(1, parseInt(e.target.value, 10) || 1),
+                            }))
+                          }
+                          className="w-16 px-2.5 py-1 bg-white rounded-lg border border-[#1090F8] text-xs font-black text-center text-[var(--ink)] focus:outline-none"
+                        />
+                        <span className="text-[11px] text-[#24252c]/60">technicians</span>
+                      </div>
+                    )}
+                  </div>
+                </label>
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">

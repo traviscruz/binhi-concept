@@ -53,6 +53,7 @@ export type Page =
   | 'crew-assigned-bookings'
   | 'crew-booking-detail'
   | 'crew-setup-teardown'
+  | 'crew-availability'
   | 'crew-profile'
 
 export type UserRole = 'customer' | 'inventory_manager' | 'admin' | 'crew' | 'partner'
@@ -75,5 +76,16 @@ export interface Booking {
   userId: string
   serviceId: string
   eventDate: string
-  status: 'pending' | 'confirmed' | 'completed' | 'cancelled'
+  status: 'pending_approval' | 'pending' | 'confirmed' | 'completed' | 'declined' | 'refunded' | 'cancelled'
+}
+
+export interface CrewAvailabilityRecord {
+  id: string
+  crewId: string
+  crewName: string
+  date: string // YYYY-MM-DD
+  status: 'available' | 'on_leave' | 'unavailable'
+  reason?: string
+  createdAt: string
+  updatedAt?: string
 }

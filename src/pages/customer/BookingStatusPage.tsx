@@ -126,6 +126,9 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
           (b: any) =>
             (b.payment_status || '').toLowerCase() !== 'cancelled' &&
             (b.payment_status || '').toLowerCase() !== 'completed' &&
+            (b.payment_status || '').toLowerCase() !== 'refunded' &&
+            (b.booking_status || '').toLowerCase() !== 'declined' &&
+            (b.status || '').toLowerCase() !== 'declined' &&
             (b.status || '').toLowerCase() !== 'cancelled' &&
             (b.status || '').toLowerCase() !== 'completed'
         );
@@ -429,41 +432,57 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
   }
 
   const isPending = (activeBooking.payment_status || '').toLowerCase() === 'pending';
+  const isPendingApproval = activeBooking.status === 'pending_approval' || ((activeBooking.payment_status || '').toLowerCase() === 'paid' && !activeBooking.status && !activeBooking.is_completed);
+  const isDeclined = activeBooking.status === 'declined' || activeBooking.status === 'refunded';
+  const isConfirmed = !isPending && !isPendingApproval && !isDeclined;
+
   const assignedCrewList = Array.isArray(activeBooking.assigned_crew) ? activeBooking.assigned_crew : [];
   const isReschedulePending = activeBooking.reschedule_status === 'pending';
   const isRescheduleApproved = activeBooking.reschedule_status === 'approved';
 
   const steps = [
     {
-      title: isPending ? 'Reservation Pending Verification' : 'Reservation Secured',
-      status: isPending ? 'Pending Approval' : 'Completed',
-      date: isPending ? 'Verification in Progress' : 'Reservation Secured',
+      title: 'Downpayment Secured (PayMongo)',
+      status: isPending ? 'Pending Deposit Payment' : 'Payment Received & Secured',
+      date: isPending ? 'Awaiting Payment' : 'Payment Verified',
       done: !isPending,
       current: isPending,
     },
     {
+      title: 'Technical & Crew Schedule Review',
+      status: isDeclined
+        ? 'Declined & Refunded'
+        : isPendingApproval
+        ? 'Under Review by Production Lead'
+        : isConfirmed
+        ? 'Approved & Verified'
+        : 'Pending',
+      date: isPendingApproval ? 'Review within 24 Hours' : isConfirmed ? 'Approved' : 'Pending',
+      done: isConfirmed,
+      current: isPendingApproval,
+    },
+    {
       title: 'Date Locked & Production Schedule',
-      status: isPending ? 'Pending Deposit' : 'Confirmed',
+      status: isDeclined
+        ? 'Reservation Cancelled'
+        : isConfirmed
+        ? 'Locked on Production Calendar'
+        : 'Awaiting Technical Approval',
       date: formatDisplayDate(activeBooking.event_date),
-      done: !isPending,
+      done: isConfirmed && !isDeclined,
+      current: false,
     },
     {
-      title: 'Warehouse Equipment Pre-Check & Staging',
-      status: 'In Progress',
+      title: 'Warehouse Gear Pre-Check & Staging',
+      status: isConfirmed ? 'In Progress / Gear Allocated' : 'Scheduled upon Approval',
       date: 'Pre-Event Staging',
-      current: !isPending,
       done: false,
+      current: isConfirmed,
     },
     {
-      title: 'Logistics Transport & Venue Rigging',
+      title: 'Logistics Rigging, Soundcheck & Execution',
       status: 'Scheduled',
-      date: 'Event Day Setup',
-      done: false,
-    },
-    {
-      title: 'Soundcheck, Lighting Cue & Execution',
-      status: 'Scheduled',
-      date: 'Event Execution',
+      date: `${formatDisplayDate(activeBooking.event_date)} (${(activeBooking.start_time || '13:00').slice(0, 5)} - ${(activeBooking.end_time || '18:00').slice(0, 5)})`,
       done: false,
     },
   ];
@@ -656,10 +675,20 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
             {/* Right: Top-Right Aligned Status & Request Reschedule Action */}
             <div className="flex flex-col sm:items-end gap-2.5 shrink-0">
               <div className="flex items-center gap-2 flex-wrap sm:justify-end">
-                {isPending ? (
+                {isDeclined ? (
+                  <span className="inline-flex items-center gap-1.5 bg-rose-500/10 text-rose-700 font-extrabold text-xs px-3.5 py-1.5 rounded-full border border-rose-500/20 whitespace-nowrap shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                    Declined &amp; Refunded
+                  </span>
+                ) : isPending ? (
                   <span className="inline-flex items-center gap-1.5 bg-amber-500/10 text-amber-700 font-extrabold text-xs px-3.5 py-1.5 rounded-full border border-amber-500/20 whitespace-nowrap shadow-2xs">
                     <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
                     Deposit Pending Approval
+                  </span>
+                ) : isPendingApproval ? (
+                  <span className="inline-flex items-center gap-1.5 bg-amber-500/15 text-amber-800 font-extrabold text-xs px-3.5 py-1.5 rounded-full border border-amber-500/30 whitespace-nowrap shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping shrink-0" />
+                    Under Technical Review
                   </span>
                 ) : isFullyPaid ? (
                   <span className="inline-flex items-center gap-1.5 bg-emerald-500/15 text-emerald-700 font-extrabold text-xs px-3.5 py-1.5 rounded-full border border-emerald-500/30 whitespace-nowrap shadow-2xs">
@@ -669,7 +698,7 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
                 ) : (
                   <span className="inline-flex items-center gap-1.5 bg-emerald-500/10 text-emerald-700 font-extrabold text-xs px-3.5 py-1.5 rounded-full border border-emerald-500/20 whitespace-nowrap shadow-2xs">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                    50% Deposit Secured
+                    Confirmed &amp; Secured
                   </span>
                 )}
 
@@ -692,6 +721,28 @@ export default function BookingStatusPage({ go }: { go: (p: Page) => void }) {
               </div>
             </div>
           </div>
+
+          {/* ── Under Technical Review Notice Banner ── */}
+          {isPendingApproval && (
+            <div className="my-6 p-4.5 rounded-2xl bg-gradient-to-r from-amber-50 via-amber-50/70 to-white border border-amber-300 text-amber-950 text-xs shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-500 text-white font-bold flex items-center justify-center shrink-0 text-sm shadow-xs mt-0.5">
+                  ⏳
+                </div>
+                <div>
+                  <div className="font-extrabold text-sm text-amber-950 flex items-center gap-2">
+                    <span>Reservation Held · Technical Review in Progress</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 border border-amber-300 uppercase tracking-wider">
+                      Pending Admin Review
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-900/90 mt-1 leading-relaxed">
+                    Your downpayment of <strong className="font-bold">₱{depositAmount.toLocaleString()}</strong> is securely held. Our production lead is verifying venue electrical specifications and certified technician availability. Official confirmation will be issued within <strong>24 hours</strong>.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ── Reschedule Request Status Banner ── */}
           {isReschedulePending && (
