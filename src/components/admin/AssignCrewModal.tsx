@@ -56,6 +56,8 @@ export function AssignCrewModal({ isOpen, onClose, booking, onAssigned }: Assign
   const [loading, setLoading] = useState(true);
   const [selectedCrew, setSelectedCrew] = useState<AssignedCrewMember[]>([]);
   const [saving, setSaving] = useState(false);
+  const [cancellingAndRefunding, setCancellingAndRefunding] = useState(false);
+  const [showEmergencyRefundConfirm, setShowEmergencyRefundConfirm] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   // Determine clean event date string (YYYY-MM-DD)
@@ -311,6 +313,51 @@ export function AssignCrewModal({ isOpen, onClose, booking, onAssigned }: Assign
     }
   };
 
+  const handleEmergencyFullRefund = async () => {
+    if (!booking) return;
+    setCancellingAndRefunding(true);
+    setErrorMsg('');
+    try {
+      // 1. Update public.bookings in Supabase
+      const { error: dbErr } = await supabase
+        .from('bookings')
+        .update({
+          payment_status: 'refunded',
+          status: 'Cancelled',
+          booking_status: 'cancelled',
+          is_completed: false,
+          decline_reason: `Cancelled & 100% Refunded due to Total Crew Absence / Medical Emergency on ${booking.date}`,
+          refund_id: `ref_emergency_crew_${Date.now()}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', booking.dbId);
+
+      if (dbErr) {
+        console.warn('Supabase booking emergency refund update error:', dbErr);
+      }
+
+      // 2. Log immutable audit log
+      await logAuditEvent({
+        action: 'CANCEL_BOOKING',
+        module: 'bookings',
+        targetId: booking.id,
+        targetName: `${booking.customer} - ${booking.package}`,
+        details: `Booking ${booking.id} (${booking.customer}) cancelled with 100% emergency refund: All ${availableStaff.length} crew technicians are on medical/emergency leave on ${booking.date}.`,
+        previousData: { status: 'Confirmed', date: booking.date, package: booking.package },
+        currentData: { status: 'Cancelled', payment_status: 'refunded' },
+      });
+
+      onAssigned([]);
+      onClose();
+    } catch (err: any) {
+      console.error('Error issuing emergency refund:', err);
+      setErrorMsg(err.message || 'Failed to process emergency refund.');
+    } finally {
+      setCancellingAndRefunding(false);
+      setShowEmergencyRefundConfirm(false);
+    }
+  };
+
   const totalCrew = availableStaff.length;
   const onLeaveCount = availableStaff.filter((s) => s.isOnLeave || s.isUnavailable).length;
   const availableCount = totalCrew - onLeaveCount;
@@ -364,6 +411,126 @@ export function AssignCrewModal({ isOpen, onClose, booking, onAssigned }: Assign
             )}
           </div>
         </div>
+
+        {/* Zero Crew Coverage & Emergency Full Refund Action (When ALL Crew are Absent) */}
+        {!loading && availableCount === 0 && (
+          <div className="mt-3 p-4 rounded-2xl bg-rose-50 border border-rose-300 text-rose-950 text-xs space-y-3 animate-fade-in">
+            <div className="flex items-center gap-2 font-bold text-rose-900">
+              <IconAlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+              <span className="text-sm font-extrabold">All Technicians Absent — Operating Rules Breached</span>
+            </div>
+            <p className="text-[11px] text-rose-900/85 leading-relaxed">
+              All <strong>{totalCrew}</strong> crew technicians are on medical/emergency leave on <strong>{booking.date}</strong>.
+              Under the system's <em>Operating Hours &amp; Pre-Event Setup / Buffer Rules</em>, production equipment cannot be operated without certified technician presence.
+            </p>
+            
+            {!showEmergencyRefundConfirm ? (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowEmergencyRefundConfirm(true)}
+                  className="w-full py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <IconBan className="w-4 h-4" />
+                  <span>Issue 100% Emergency Refund &amp; Cancel Booking</span>
+                </button>
+              </div>
+            ) : (
+              <div className="p-3 bg-white/90 rounded-xl border border-rose-200 space-y-2.5 animate-fade-in">
+                <div className="font-bold text-rose-900 text-xs">
+                  Confirm 100% Emergency Refund for {booking.customer}?
+                </div>
+                <p className="text-[10.5px] text-rose-800 leading-relaxed">
+                  This will immediately cancel booking <strong>{booking.id}</strong>, issue a 100% full refund via PayMongo, and log the incident in the system audit trail.
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowEmergencyRefundConfirm(false)}
+                    className="flex-1 py-2 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-800 font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    Keep Booking
+                  </button>
+                  <button
+                    type="button"
+                    disabled={cancellingAndRefunding}
+                    onClick={handleEmergencyFullRefund}
+                    className="flex-1 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow-sm transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    {cancellingAndRefunding ? (
+                      <span>Processing Refund...</span>
+                    ) : (
+                      <span>Yes, Cancel &amp; Refund 100%</span>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Emergency Absence Reassignment Alert */}
+        {(() => {
+          const absentAssigned = availableStaff.filter(
+            (s) =>
+              (s.isOnLeave || s.isUnavailable) &&
+              (selectedCrew.some((c) => c.id === s.id || c.name.toLowerCase() === s.name.toLowerCase()) ||
+                (booking.assignedCrew || []).some((c) => c.id === s.id || c.name.toLowerCase() === s.name.toLowerCase()))
+          );
+
+          if (absentAssigned.length === 0) return null;
+
+          const firstFree = availableStaff.find((s) => !s.isOnLeave && !s.isUnavailable && !s.isAssignedOtherBooking && !isMemberSelected(s.id));
+
+          return (
+            <div className="mt-3 p-3.5 rounded-2xl bg-rose-50 border border-rose-300 text-rose-950 text-xs space-y-2 animate-fade-in">
+              <div className="flex items-center gap-2 font-bold text-rose-900">
+                <IconAlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>Emergency Crew Reassignment Needed</span>
+              </div>
+              {absentAssigned.map((abs) => (
+                <div key={abs.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 rounded-xl bg-white/80 border border-rose-200 text-[11px]">
+                  <div>
+                    <span className="font-black text-rose-900">{abs.name}</span> is on leave / absent:
+                    <div className="text-rose-700 italic font-medium mt-0.5">{abs.leaveReason || 'Emergency Leave Filed'}</div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCrew((prev) => prev.filter((c) => c.id !== abs.id && c.name.toLowerCase() !== abs.name.toLowerCase()));
+                      }}
+                      className="px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 hover:bg-rose-200 font-bold cursor-pointer transition-colors"
+                    >
+                      Remove
+                    </button>
+                    {firstFree && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedCrew((prev) => [
+                            ...prev.filter((c) => c.id !== abs.id && c.name.toLowerCase() !== abs.name.toLowerCase()),
+                            {
+                              id: firstFree.id,
+                              name: firstFree.name,
+                              email: firstFree.email,
+                              roleTitle: firstFree.role ? (firstFree.role.charAt(0).toUpperCase() + firstFree.role.slice(1).toLowerCase()) : 'Crew',
+                              phone: firstFree.phone,
+                            },
+                          ]);
+                        }}
+                        className="px-3 py-1 rounded-full bg-[#1090F8] text-white hover:bg-[#1090F8]/90 font-extrabold cursor-pointer shadow-2xs transition-all flex items-center gap-1"
+                      >
+                        <span>Swap with {firstFree.name.split(' ')[0]}</span>
+                        <span>→</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
 
         {/* Body Content */}
         <div className="flex-1 overflow-y-auto py-3.5 space-y-3 modal-scroll">

@@ -8,6 +8,7 @@ import {
   IconClock,
   IconShield,
   IconPin,
+  IconAlertTriangle,
 } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { supabase } from '../../utils/supabase';
@@ -46,8 +47,11 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
 
   const [savingStatus, setSavingStatus] = useState(false);
   const [editStatus, setEditStatus] = useState<'available' | 'on_leave'>('available');
+  const [leaveType, setLeaveType] = useState<'standard' | 'emergency'>('standard');
   const [editReason, setEditReason] = useState('Rest Day / Off-Duty');
   const [customReason, setCustomReason] = useState('');
+  const [emergencyCategory, setEmergencyCategory] = useState<'sickness' | 'family' | 'accident' | 'other'>('sickness');
+  const [emergencyNotes, setEmergencyNotes] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const year = currentDate.getFullYear();
@@ -195,10 +199,10 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
       });
 
       let status: 'available' | 'on_leave' | 'assigned' = 'available';
-      if (assigned) {
-        status = 'assigned';
-      } else if (myRec && (myRec.status === 'on_leave' || myRec.status === 'unavailable')) {
+      if (myRec && (myRec.status === 'on_leave' || myRec.status === 'unavailable')) {
         status = 'on_leave';
+      } else if (assigned) {
+        status = 'assigned';
       }
 
       days.push({
@@ -225,10 +229,10 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
 
     calendarDays.forEach((day) => {
       if (!day.isCurrentMonth) return;
-      if (day.myStatus === 'assigned') {
-        assigned++;
-      } else if (day.myStatus === 'on_leave') {
+      if (day.myStatus === 'on_leave') {
         onLeave++;
+      } else if (day.myStatus === 'assigned') {
+        assigned++;
       } else {
         onDuty++;
       }
@@ -239,9 +243,21 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
 
   const handleOpenDayModal = async (day: any) => {
     if (!day.isCurrentMonth) return;
+
+    const eventDateObj = new Date(day.dateStr);
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const diffDays = Math.ceil((eventDateObj.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    const hasBooking = (day.dayBookings && day.dayBookings.length > 0) || Boolean(day.assignedBooking);
+
+    const isExistingEmergency = Boolean(day.myReason && day.myReason.toLowerCase().includes('emergency'));
+    
     setEditStatus(day.myStatus === 'on_leave' ? 'on_leave' : 'available');
+    setLeaveType(isExistingEmergency || (diffDays < 7 && hasBooking) ? 'emergency' : 'standard');
     setEditReason(day.myReason || 'Rest Day / Off-Duty');
     setCustomReason('');
+    setEmergencyCategory('sickness');
+    setEmergencyNotes('');
 
     // Fetch live daily capacity across all crew
     const cap = await getDailyCrewCapacity(day.dateStr, activeBookings);
@@ -272,12 +288,12 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
 
     const hasBooking = (selectedDay.dayBookings && selectedDay.dayBookings.length > 0) || Boolean(selectedDay.assignedBooking);
 
-    // Only lock within 7 days if there is an actual booking scheduled on this date
-    if (diffDays < 7 && hasBooking) {
+    // Standard Leave Validation: Requires 7+ days notice if an event is booked
+    if (editStatus === 'on_leave' && leaveType === 'standard' && diffDays < 7 && hasBooking) {
       alert(
-        `Cannot alter attendance: An event production is scheduled on this date in ${
-          diffDays === 0 ? 'today' : diffDays === 1 ? '1 day' : `${diffDays} days`
-        }. Schedule is locked within 7 days of a booked event.`
+        `Standard scheduled rest days require 7 days advance notice for booked events (${
+          diffDays === 0 ? 'today' : diffDays === 1 ? '1 day away' : `${diffDays} days away`
+        }).\n\nFor sudden illness, fever, or emergency, please switch to the "Emergency / Medical Absence" tab.`
       );
       return;
     }
@@ -285,9 +301,23 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
     setSavingStatus(true);
 
     try {
-      const finalReason = editStatus === 'on_leave'
-        ? (editReason === 'Others' ? customReason || 'Personal Leave' : editReason)
-        : undefined;
+      let finalReason: string | undefined = undefined;
+
+      if (editStatus === 'on_leave') {
+        if (leaveType === 'emergency') {
+          const catLabel =
+            emergencyCategory === 'sickness'
+              ? 'Medical Illness / Sickness'
+              : emergencyCategory === 'family'
+              ? 'Family Emergency'
+              : emergencyCategory === 'accident'
+              ? 'Transit Accident / Breakdown'
+              : 'Urgent Emergency';
+          finalReason = `[Emergency Leave - ${catLabel}]${emergencyNotes ? `: ${emergencyNotes}` : ''}`;
+        } else {
+          finalReason = editReason === 'Others' ? customReason || 'Personal Leave' : editReason;
+        }
+      }
 
       const res = await setCrewDateAvailability({
         crewId: currentUser.id,
@@ -321,12 +351,15 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
           }
         });
 
+        const isEmergency = editStatus === 'on_leave' && leaveType === 'emergency';
         setToastMessage(
-          `Attendance for ${formatDisplayDate(selectedDay.dateStr)} updated to ${
-            editStatus === 'on_leave' ? 'On-Leave (Off-Duty)' : 'Available (On-Duty)'
-          }.`
+          isEmergency
+            ? `Emergency leave filed for ${formatDisplayDate(selectedDay.dateStr)}. Management has been alerted for crew reassignment.`
+            : `Attendance for ${formatDisplayDate(selectedDay.dateStr)} updated to ${
+                editStatus === 'on_leave' ? 'On-Leave (Off-Duty)' : 'Available (On-Duty)'
+              }.`
         );
-        setTimeout(() => setToastMessage(null), 5000);
+        setTimeout(() => setToastMessage(null), 6000);
         setSelectedDay(null);
       }
     } catch (err) {
@@ -484,8 +517,8 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
                   );
                 }
 
-                const isAssigned = day.myStatus === 'assigned';
                 const isOnLeave = day.myStatus === 'on_leave';
+                const isAssigned = day.myStatus === 'assigned';
                 const hasBookings = (day.dayBookings && day.dayBookings.length > 0) || false;
 
                 let cellBorder = 'border-[#24252c]/[0.08]';
@@ -496,15 +529,15 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
                   cellBg = 'bg-[#1090F8]/5';
                 }
 
-                if (isAssigned) {
+                if (isOnLeave) {
+                  cellBg = 'bg-amber-50/90';
+                  cellBorder = 'border-amber-300 shadow-xs';
+                } else if (isAssigned) {
                   cellBg = 'bg-blue-50/60';
                   cellBorder = 'border-[#1090F8]/40 shadow-xs';
                 } else if (hasBookings) {
                   cellBg = day.isPast ? 'bg-zinc-100' : 'bg-white';
                   cellBorder = day.isPast ? 'border-zinc-300' : 'border-[#1090F8]/30 shadow-xs';
-                } else if (isOnLeave) {
-                  cellBg = 'bg-amber-50/60';
-                  cellBorder = 'border-amber-200';
                 }
 
                 return (
@@ -524,17 +557,17 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
                         {day.dayNumber}
                       </span>
 
-                      {isAssigned ? (
+                      {isOnLeave ? (
+                        <span className="text-[7.5px] font-extrabold uppercase text-amber-900 bg-amber-200 border border-amber-300 px-1.5 py-0.5 rounded-full shadow-2xs">
+                          {day.assignedBooking ? 'Absent (Gig)' : 'Off-Duty'}
+                        </span>
+                      ) : isAssigned ? (
                         <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-full bg-blue-600 text-white shadow-2xs">
                           Assigned
                         </span>
                       ) : hasBookings ? (
                         <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-full bg-[#1090F8] text-white">
                           {day.dayBookings?.length} {day.dayBookings?.length === 1 ? 'Event' : 'Events'}
-                        </span>
-                      ) : isOnLeave ? (
-                        <span className="text-[7.5px] font-bold uppercase text-amber-800 bg-amber-100 px-1 py-0.5 rounded">
-                          Off-Duty
                         </span>
                       ) : (
                         <span className="text-[7.5px] font-bold uppercase text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded">
@@ -543,14 +576,21 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
                       )}
                     </div>
 
-                    {/* Events list in the day box (Exact Admin Calendar Style) */}
+                    {/* Events list in the day box */}
                     <div className="space-y-1 mt-1 flex-1 overflow-hidden w-full">
+                      {isOnLeave && (
+                        <div className="text-[8px] font-bold text-amber-900 bg-amber-200/90 border border-amber-300 rounded px-1.5 py-0.5 truncate mb-1">
+                          {day.myReason || 'Off-Duty / Leave'}
+                        </div>
+                      )}
                       {hasBookings ? (
                         <>
                           {day.dayBookings?.slice(0, 2).map((b, bIdx) => (
                             <div
                               key={bIdx}
-                              className="bg-[var(--ink)] text-white text-[9px] rounded-md px-1.5 py-1 leading-tight truncate shadow-2xs"
+                              className={`${
+                                isOnLeave ? 'opacity-70 bg-[var(--ink)]' : 'bg-[var(--ink)]'
+                              } text-white text-[9px] rounded-md px-1.5 py-1 leading-tight truncate shadow-2xs`}
                             >
                               <div className="font-bold flex items-center justify-between gap-1">
                                 <span className="text-sky-300 font-mono text-[8px]">
@@ -570,11 +610,7 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
                             </div>
                           )}
                         </>
-                      ) : isOnLeave ? (
-                        <div className="text-[8.5px] text-amber-800 font-medium truncate italic mt-auto">
-                          {day.myReason || 'Rest Day'}
-                        </div>
-                      ) : (
+                      ) : !isOnLeave && (
                         <div className="text-[8.5px] text-zinc-400 font-medium truncate mt-auto">
                           Available
                         </div>
@@ -700,7 +736,7 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
               </div>
             )}
 
-            {/* 7-Day Pre-Event Freeze Policy Notice */}
+            {/* Past Date Notice */}
             {(() => {
               let daysUntilDate = 999;
               if (selectedDay.dateStr) {
@@ -710,30 +746,12 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
                 daysUntilDate = Math.ceil((eventDateObj.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
               }
               const isPast = daysUntilDate < 0;
-              const hasBooking = (selectedDay.dayBookings && selectedDay.dayBookings.length > 0) || Boolean(selectedDay.assignedBooking);
-              const isLockedByEventFreeze = daysUntilDate >= 0 && daysUntilDate < 7 && hasBooking;
 
               if (isPast) {
                 return (
                   <div className="p-3.5 rounded-2xl bg-zinc-100 border border-zinc-200 text-zinc-600 text-xs flex items-center gap-2">
                     <IconClock className="w-4 h-4 text-zinc-400 shrink-0" />
                     <span>Past Date: Historical attendance records cannot be modified.</span>
-                  </div>
-                );
-              }
-
-              if (isLockedByEventFreeze) {
-                return (
-                  <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs space-y-1">
-                    <div className="flex items-center gap-1.5 font-bold text-amber-900">
-                      <IconShield className="w-4 h-4 text-amber-700 shrink-0" />
-                      <span>Attendance Locked (7-Day Pre-Event Freeze)</span>
-                    </div>
-                    <p className="text-[11px] text-amber-900/80 leading-relaxed">
-                      A client production event is scheduled on this date in{' '}
-                      <strong>{daysUntilDate === 0 ? 'today' : daysUntilDate === 1 ? '1 day' : `${daysUntilDate} days`}</strong>.
-                      Crew attendance cannot be altered or set to absent within 7 days of a confirmed event.
-                    </p>
                   </div>
                 );
               }
@@ -766,7 +784,7 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
               </div>
             )}
 
-            {/* Status Selector */}
+            {/* Attendance & Leave Management Section */}
             {(() => {
               let daysUntilDate = 999;
               if (selectedDay.dateStr) {
@@ -777,98 +795,178 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
               }
               const isPast = daysUntilDate < 0;
               const hasBooking = (selectedDay.dayBookings && selectedDay.dayBookings.length > 0) || Boolean(selectedDay.assignedBooking);
-              const isLocked = isPast || (daysUntilDate < 7 && hasBooking);
+              const isNearEvent = daysUntilDate >= 0 && daysUntilDate < 7 && hasBooking;
+
+              if (isPast) return null;
 
               return (
-                <div className="space-y-3 pt-2 border-t border-[#24252c]/[0.06]">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 block">
-                      Set Your Attendance Status:
+                <div className="space-y-4 pt-2 border-t border-[#24252c]/[0.06]">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 block mb-2">
+                      Set Attendance / Duty Status:
                     </label>
-                    {isLocked && !isPast && (
-                      <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
-                        Locked (Event within 7d)
-                      </span>
-                    )}
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      disabled={isLocked}
-                      onClick={() => {
-                        if (!isLocked) setEditStatus('available');
-                      }}
-                      className={`p-3 rounded-2xl border text-left transition-all flex items-center gap-2 ${
-                        isLocked
-                          ? 'bg-zinc-100 border-zinc-200 text-zinc-400 cursor-not-allowed opacity-60'
-                          : editStatus === 'available'
-                          ? 'bg-emerald-50 border-emerald-400 text-emerald-950 font-bold shadow-2xs cursor-pointer'
-                          : 'bg-white border-[#24252c]/15 text-[#24252c]/60 hover:bg-[var(--mist)] cursor-pointer'
-                      }`}
-                    >
-                      <span
-                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] ${
-                          editStatus === 'available' ? 'bg-emerald-600 text-white' : 'border border-black/30'
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditStatus('available')}
+                        className={`p-3 rounded-2xl border text-left transition-all flex items-center gap-2 cursor-pointer ${
+                          editStatus === 'available'
+                            ? 'bg-emerald-50 border-emerald-400 text-emerald-950 font-bold shadow-2xs ring-1 ring-emerald-400/50'
+                            : 'bg-white border-[#24252c]/15 text-[#24252c]/60 hover:bg-[var(--mist)]'
                         }`}
                       >
-                        {editStatus === 'available' ? <IconCheck className="w-2.5 h-2.5" /> : null}
-                      </span>
-                      <span>On-Duty (Available)</span>
-                    </button>
+                        <span
+                          className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] ${
+                            editStatus === 'available' ? 'bg-emerald-600 text-white' : 'border border-black/30'
+                          }`}
+                        >
+                          {editStatus === 'available' ? <IconCheck className="w-2.5 h-2.5" /> : null}
+                        </span>
+                        <span className="text-xs">On-Duty (Available)</span>
+                      </button>
 
-                    <button
-                      type="button"
-                      disabled={isLocked}
-                      onClick={() => {
-                        if (!isLocked) setEditStatus('on_leave');
-                      }}
-                      className={`p-3 rounded-2xl border text-left transition-all flex items-center gap-2 ${
-                        isLocked
-                          ? 'bg-zinc-100 border-zinc-200 text-zinc-400 cursor-not-allowed opacity-60'
-                          : editStatus === 'on_leave'
-                          ? 'bg-amber-50 border-amber-400 text-amber-950 font-bold shadow-2xs cursor-pointer'
-                          : 'bg-white border-[#24252c]/15 text-[#24252c]/60 hover:bg-[var(--mist)] cursor-pointer'
-                      }`}
-                      title={isLocked ? 'Cannot record attendance or leave within 7 days of a booked event' : ''}
-                    >
-                      <span
-                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] ${
-                          editStatus === 'on_leave' ? 'bg-amber-600 text-white' : 'border border-black/30'
+                      <button
+                        type="button"
+                        onClick={() => setEditStatus('on_leave')}
+                        className={`p-3 rounded-2xl border text-left transition-all flex items-center gap-2 cursor-pointer ${
+                          editStatus === 'on_leave'
+                            ? 'bg-amber-50 border-amber-400 text-amber-950 font-bold shadow-2xs ring-1 ring-amber-400/50'
+                            : 'bg-white border-[#24252c]/15 text-[#24252c]/60 hover:bg-[var(--mist)]'
                         }`}
                       >
-                        {editStatus === 'on_leave' ? <IconCheck className="w-2.5 h-2.5" /> : null}
-                      </span>
-                      <span>Off-Duty (On-Leave)</span>
-                    </button>
+                        <span
+                          className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] ${
+                            editStatus === 'on_leave' ? 'bg-amber-600 text-white' : 'border border-black/30'
+                          }`}
+                        >
+                          {editStatus === 'on_leave' ? <IconCheck className="w-2.5 h-2.5" /> : null}
+                        </span>
+                        <span className="text-xs">Off-Duty / Leave</span>
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Leave Reason Options (only shown if on_leave and editable) */}
-                  {editStatus === 'on_leave' && !isLocked && (
-                    <div className="space-y-2 pt-2 border-t border-[#24252c]/[0.06] animate-fade-in">
-                      <label className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 block">
-                        Reason for Off-Duty / Leave:
-                      </label>
-                      <select
-                        value={editReason}
-                        onChange={(e) => setEditReason(e.target.value)}
-                        className="w-full rounded-full border border-black/15 px-4 py-2.5 bg-[#F8F9FA] text-xs font-semibold text-[var(--ink)] focus:outline-none focus:border-amber-500 cursor-pointer"
-                      >
-                        <option value="Rest Day / Off-Duty">Rest Day / Off-Duty</option>
-                        <option value="Personal Leave / Emergency">Personal Leave / Family Emergency</option>
-                        <option value="Medical / Health Rest">Medical / Health Recovery</option>
-                        <option value="External Production Assignment">External Production Assignment</option>
-                        <option value="Others">Others (Custom reason)</option>
-                      </select>
+                  {/* Leave Options Container */}
+                  {editStatus === 'on_leave' && (
+                    <div className="space-y-3.5 p-3.5 rounded-2xl bg-[#F8F9FA] border border-[#24252c]/[0.08] animate-fade-in">
+                      {/* Leave Type Selector (Standard vs Emergency) */}
+                      <div>
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/60 block mb-1.5">
+                          Leave Classification:
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setLeaveType('standard')}
+                            className={`px-3 py-2.5 rounded-xl border text-xs font-bold transition-all text-center cursor-pointer ${
+                              leaveType === 'standard'
+                                ? 'bg-white border-[var(--ink)] text-[var(--ink)] shadow-xs'
+                                : 'bg-transparent border-[#24252c]/15 text-[#24252c]/60 hover:bg-white'
+                            }`}
+                          >
+                            Standard Rest Day
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setLeaveType('emergency')}
+                            className={`px-3 py-2.5 rounded-xl border text-xs font-bold transition-all text-center cursor-pointer ${
+                              leaveType === 'emergency'
+                                ? 'bg-rose-600 border-rose-600 text-white shadow-xs'
+                                : 'bg-transparent border-rose-300 text-rose-700 hover:bg-rose-50'
+                            }`}
+                          >
+                            Emergency / Medical
+                          </button>
+                        </div>
+                      </div>
 
-                      {editReason === 'Others' && (
-                        <input
-                          type="text"
-                          value={customReason}
-                          onChange={(e) => setCustomReason(e.target.value)}
-                          placeholder="Specify reason for day-off..."
-                          className="w-full rounded-full border border-black/15 px-4 py-2 bg-[#F8F9FA] text-xs font-medium text-[var(--ink)] focus:outline-none focus:border-amber-500"
-                        />
+                      {/* Standard Scheduled Leave Form */}
+                      {leaveType === 'standard' && (
+                        <div className="space-y-2.5">
+                          {isNearEvent ? (
+                            <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs space-y-1">
+                              <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                                <IconShield className="w-4 h-4 text-amber-700 shrink-0" />
+                                <span>Advance Notice Policy Required</span>
+                              </div>
+                              <p className="text-[11px] text-amber-900/80 leading-relaxed">
+                                Standard rest days require at least 7 days notice when an event is scheduled ({daysUntilDate} days away).
+                                If you are sick, injured, or have an emergency, please switch to <strong>Emergency / Medical</strong> above so Operations can assign a substitute technician.
+                              </p>
+                            </div>
+                          ) : (
+                            <div>
+                              <label className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 block mb-1">
+                                Rest Day Reason:
+                              </label>
+                              <select
+                                value={editReason}
+                                onChange={(e) => setEditReason(e.target.value)}
+                                className="w-full rounded-full border border-black/15 px-4 py-2.5 bg-white text-xs font-semibold text-[var(--ink)] focus:outline-none focus:border-amber-500 cursor-pointer"
+                              >
+                                <option value="Rest Day / Off-Duty">Rest Day / Scheduled Off-Duty</option>
+                                <option value="Personal Leave / Planned Leave">Personal / Planned Day-Off</option>
+                                <option value="External Production Assignment">External Production Gig</option>
+                                <option value="Others">Others (Custom reason)</option>
+                              </select>
+
+                              {editReason === 'Others' && (
+                                <input
+                                  type="text"
+                                  value={customReason}
+                                  onChange={(e) => setCustomReason(e.target.value)}
+                                  placeholder="Specify reason..."
+                                  className="mt-2 w-full rounded-full border border-black/15 px-4 py-2 bg-white text-xs font-medium text-[var(--ink)] focus:outline-none focus:border-amber-500"
+                                />
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Emergency / Sickness Form */}
+                      {leaveType === 'emergency' && (
+                        <div className="space-y-3">
+                          <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-950 text-xs space-y-1">
+                            <div className="flex items-center gap-1.5 font-bold text-rose-800">
+                              <IconAlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                              <span>Immediate Emergency Notice</span>
+                            </div>
+                            <p className="text-[11px] text-rose-900/80 leading-relaxed">
+                              Submitting this emergency absence will mark you Off-Duty immediately and alert Admin to assign an on-duty substitute technician to any assigned events.
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 block mb-1">
+                              Emergency Category:
+                            </label>
+                            <select
+                              value={emergencyCategory}
+                              onChange={(e) => setEmergencyCategory(e.target.value as any)}
+                              className="w-full rounded-full border border-rose-300 px-4 py-2.5 bg-white text-xs font-bold text-rose-950 focus:outline-none focus:border-rose-600 cursor-pointer"
+                            >
+                              <option value="sickness">Medical Sickness / Acute Illness / Injury</option>
+                              <option value="family">Urgent Family Emergency / Bereavement</option>
+                              <option value="accident">Transit Breakdown / Accident / Calamity</option>
+                              <option value="other">Other Urgent Unforeseen Emergency</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 block mb-1">
+                              Handover / Operational Notes (Optional):
+                            </label>
+                            <textarea
+                              rows={2}
+                              value={emergencyNotes}
+                              onChange={(e) => setEmergencyNotes(e.target.value)}
+                              placeholder="e.g., Doctor advised 2 days rest for acute fever. Audio channel list is stored in group drive."
+                              className="w-full rounded-2xl border border-black/15 p-3 bg-white text-xs text-[var(--ink)] focus:outline-none focus:border-rose-500"
+                            />
+                          </div>
+                        </div>
                       )}
                     </div>
                   )}
@@ -886,8 +984,6 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
                 daysUntilDate = Math.ceil((eventDateObj.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
               }
               const isPast = daysUntilDate < 0;
-              const hasBooking = (selectedDay.dayBookings && selectedDay.dayBookings.length > 0) || Boolean(selectedDay.assignedBooking);
-              const isLocked = isPast || (daysUntilDate < 7 && hasBooking);
 
               return (
                 <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#24252c]/[0.06]">
@@ -896,20 +992,26 @@ export default function CrewAvailabilityPage({ go }: { go: (p: Page) => void }) 
                     onClick={() => setSelectedDay(null)}
                     className="px-5 py-2.5 rounded-full border border-black/10 text-xs font-semibold text-[var(--ink)] hover:bg-[#F0F0F0] transition-colors cursor-pointer"
                   >
-                    {isLocked ? 'Close' : 'Cancel'}
+                    {isPast ? 'Close' : 'Cancel'}
                   </button>
-                  {!isLocked && (
+                  {!isPast && (
                     <button
                       type="button"
                       onClick={handleSaveAvailability}
                       disabled={savingStatus}
-                      className="bg-[var(--ink)] hover:bg-[var(--ink-soft)] text-white font-semibold px-6 py-2.5 rounded-full transition-colors cursor-pointer text-xs shadow-md flex items-center gap-1.5 disabled:opacity-50"
+                      className={`${
+                        editStatus === 'on_leave' && leaveType === 'emergency'
+                          ? 'bg-rose-600 hover:bg-rose-700'
+                          : 'bg-[var(--ink)] hover:bg-[var(--ink-soft)]'
+                      } text-white font-semibold px-6 py-2.5 rounded-full transition-colors cursor-pointer text-xs shadow-md flex items-center gap-1.5 disabled:opacity-50`}
                     >
                       {savingStatus ? (
                         <>
                           <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                           <span>Saving...</span>
                         </>
+                      ) : editStatus === 'on_leave' && leaveType === 'emergency' ? (
+                        'Submit Emergency Leave'
                       ) : (
                         'Save Attendance'
                       )}

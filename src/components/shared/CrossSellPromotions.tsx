@@ -200,18 +200,14 @@ export function CrossSellPromotions({
 
   return (
     <div
-      className={`rounded-2xl bg-gradient-to-br from-[var(--mist)] to-blue-50/50 border border-[#1090F8]/20 space-y-3 ${
-        compact ? 'p-3.5 mb-4' : 'p-5 mb-5'
+      className={`rounded-2xl bg-gradient-to-br from-[var(--mist)] to-blue-50/60 border border-[#1090F8]/20 space-y-3.5 ${
+        compact ? 'p-3.5 mb-4' : 'p-4 sm:p-5 mb-5'
       }`}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-[#1090F8] animate-pulse" />
-          <h4
-            className={`font-black text-[var(--ink)] uppercase tracking-wider ${
-              compact ? 'text-[11px]' : 'text-xs sm:text-sm'
-            }`}
-          >
+          <span className="w-2 h-2 rounded-full bg-[#1090F8] animate-pulse shrink-0" />
+          <h4 className="font-extrabold text-[var(--ink)] uppercase tracking-wider text-xs sm:text-sm">
             Frequently Paired Upgrades (Bundle &amp; Save)
           </h4>
         </div>
@@ -220,57 +216,59 @@ export function CrossSellPromotions({
         </span>
       </div>
 
-      <div className={`grid gap-3 ${compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2'}`}>
+      <div className="space-y-3">
         {bundles.map((b) => {
           const isSelected = selectedBundleIds.includes(b.id);
           return (
             <div
               key={b.id}
               onClick={() => onToggleBundle(b)}
-              className={`p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between space-y-2.5 ${
+              className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-3 ${
                 isSelected
-                  ? 'bg-blue-50/90 border-[#1090F8] shadow-xs'
-                  : 'bg-white border-[#24252c]/[0.08] hover:border-[#1090F8]/40 shadow-2xs'
+                  ? 'bg-blue-50/90 border-[#1090F8] shadow-sm ring-1 ring-[#1090F8]/30'
+                  : 'bg-white border-[#24252c]/[0.08] hover:border-[#1090F8]/40 hover:shadow-sm'
               }`}
             >
               <div>
-                <div className="flex items-center justify-between gap-1.5 flex-nowrap">
-                  <span className="text-[9px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 whitespace-nowrap shrink-0">
+                {/* Header: Tag + Price */}
+                <div className="flex items-center justify-between gap-2 flex-wrap pb-1">
+                  <span className="text-[9px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 whitespace-nowrap shrink-0">
                     {b.tag}
                   </span>
-                  <div className="text-right whitespace-nowrap shrink-0">
-                    <span className="text-[10px] text-[#24252c]/40 line-through mr-1">
+                  <div className="flex items-baseline gap-1.5 whitespace-nowrap shrink-0">
+                    <span className="text-[11px] text-[#24252c]/40 line-through">
                       ₱{b.originalPrice.toLocaleString()}
                     </span>
-                    <span className="text-xs font-black text-[#1090F8]">
+                    <span className="text-sm font-black text-[#1090F8]">
                       ₱{b.bundlePrice.toLocaleString()}
                     </span>
                   </div>
                 </div>
 
-                <h5 className="font-extrabold text-xs text-[var(--ink)] mt-1.5 leading-tight">{b.title}</h5>
-                <p className="text-[11px] text-[#24252c]/60 mt-0.5 leading-snug">{b.subtitle}</p>
+                <h5 className="font-extrabold text-sm text-[var(--ink)] mt-1.5 leading-snug">{b.title}</h5>
+                <p className="text-xs text-[#24252c]/60 mt-0.5 leading-snug">{b.subtitle}</p>
 
-                <ul className="mt-2 space-y-1 text-[10px] text-[#24252c]/70">
+                <ul className="mt-2.5 space-y-1.5 text-[11px] text-[#24252c]/75 bg-[var(--mist)]/60 p-2.5 rounded-xl border border-[#24252c]/[0.04]">
                   {b.inclusions.map((inc, i) => (
                     <li key={i} className="flex items-start gap-1.5">
-                      <IconCheck className="w-3 h-3 text-emerald-600 shrink-0 mt-0.5" />
-                      <span>{inc}</span>
+                      <IconCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                      <span className="leading-tight">{inc}</span>
                     </li>
                   ))}
                 </ul>
               </div>
 
-              <div className="pt-2 border-t border-[#24252c]/[0.06] flex items-center justify-between gap-2 flex-nowrap">
-                <span className="text-[10px] font-bold text-emerald-600 whitespace-nowrap shrink-0">
-                  Save ₱{b.savings.toLocaleString()}
+              {/* Bottom Action Bar: Savings + Button */}
+              <div className="pt-2.5 border-t border-[#24252c]/[0.06] flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-xs font-bold text-emerald-600 whitespace-nowrap">
+                  Save ₱{b.savings.toLocaleString()} (20% Off)
                 </span>
                 <button
                   type="button"
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0 ${
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shadow-2xs ${
                     isSelected
-                      ? 'bg-[#1090F8] text-white'
-                      : 'bg-[var(--mist)] text-[var(--ink)] hover:bg-[#1090F8]/10 hover:text-[#1090F8]'
+                      ? 'bg-[#1090F8] text-white shadow-sm'
+                      : 'bg-[var(--mist)] text-[var(--ink)] hover:bg-[#1090F8] hover:text-white'
                   }`}
                 >
                   {isSelected ? '✓ Added to Rig' : '+ Add Bundle Deal'}
