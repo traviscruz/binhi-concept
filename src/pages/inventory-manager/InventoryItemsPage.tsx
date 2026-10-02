@@ -182,6 +182,20 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
   const [showQuarantineModal, setShowQuarantineModal] = useState(false);
   const [isSubmittingQuarantine, setIsSubmittingQuarantine] = useState(false);
 
+  // Quarantine Form States
+  const [quarantineCategory, setQuarantineCategory] = useState<string>('Hardware Damage (Dropped / Broken)');
+  const [quarantineLiability, setQuarantineLiability] = useState<'Company Absorbed' | 'Client Liable' | 'Under Investigation'>('Company Absorbed');
+  const [quarantineEstimatedCost, setQuarantineEstimatedCost] = useState<string>('0');
+  const [quarantineNotes, setQuarantineNotes] = useState<string>('');
+  const [quarantineUnassignBookings, setQuarantineUnassignBookings] = useState<boolean>(true);
+
+  // Success Notification State
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const showSuccess = (msg: string) => {
+    setSuccessMessage(msg);
+    setTimeout(() => setSuccessMessage(null), 4500);
+  };
+
   // Print Labels State
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [printScope, setPrintScope] = useState<'all' | 'category' | 'model' | 'unit'>('all');
@@ -615,9 +629,7 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
       setAddModelUnitQty('4');
       setAddFile(null);
       setAddFilePreview('');
-      window.dispatchEvent(new Event('inventory-updated'));
-      setAddFile(null);
-      setAddFilePreview('');
+      showSuccess(`Equipment model "${newModel.name}" with ${qty} physical units created successfully.`);
       window.dispatchEvent(new Event('inventory-updated'));
     } catch (err: any) {
       setAddFormError(err.message || 'An error occurred while creating equipment model.');
@@ -704,6 +716,7 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
       );
 
       setEditingModel(null);
+      showSuccess(`Equipment model "${updatedModel.name}" updated successfully.`);
       window.dispatchEvent(new Event('inventory-updated'));
     } catch (err: any) {
       setEditFormError(err.message || 'Failed to update equipment model.');
@@ -744,6 +757,7 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
 
     setModels((prev) => prev.filter((m) => m.modelId !== modelId));
     setDeleteModelId(null);
+    showSuccess(`Equipment model "${target?.name || modelId}" and associated physical units deleted.`);
     window.dispatchEvent(new Event('inventory-updated'));
   };
 
@@ -790,6 +804,7 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
       setModels((prev) =>
         prev.map((m) => (m.modelId === modelId ? { ...m, units: [...m.units, newUnit] } : m))
       );
+      showSuccess(`Physical unit ${newUnitId} added to "${targetModel.name}".`);
       window.dispatchEvent(new Event('inventory-updated'));
     } catch (err: any) {
       console.error('Add unit error:', err);
@@ -887,6 +902,7 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
       );
 
       setSelectedUnitForEdit(null);
+      showSuccess(`Physical unit ${cleanSerialId} specifications updated successfully.`);
       window.dispatchEvent(new Event('inventory-updated'));
     } catch (err: any) {
       setUnitEditError(err.message || 'Failed to update physical unit.');
@@ -934,6 +950,7 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
       );
 
       setUnitToDelete(null);
+      showSuccess(`Physical unit ${serialId} deleted from inventory.`);
       window.dispatchEvent(new Event('inventory-updated'));
     } catch (err: any) {
       alert(`Could not remove physical unit: ${err.message}`);
@@ -947,27 +964,29 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
   // =========================================================================
   const handleInitiateQuarantine = (modelId: string, modelName: string, unit: PhysicalUnit) => {
     const conflicts = unitAssignmentsMap[unit.serialId] || [];
-    if (conflicts.length > 0) {
-      setQuarantineTarget({ modelId, modelName, unit, conflictingBookings: conflicts });
-      setShowQuarantineModal(true);
-    } else {
-      executeQuarantine(modelId, modelName, unit, false);
-    }
+    setQuarantineTarget({ modelId, modelName, unit, conflictingBookings: conflicts });
+    setQuarantineCategory('Hardware Damage (Dropped / Broken)');
+    setQuarantineLiability('Company Absorbed');
+    setQuarantineEstimatedCost('0');
+    setQuarantineNotes('');
+    setQuarantineUnassignBookings(true);
+    setShowQuarantineModal(true);
   };
 
-  const executeQuarantine = async (
-    modelId: string,
-    modelName: string,
-    unit: PhysicalUnit,
-    unassignFromBookings: boolean
-  ) => {
+  const handleConfirmQuarantine = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quarantineTarget) return;
+
     setIsSubmittingQuarantine(true);
+    const { modelId, modelName, unit, conflictingBookings } = quarantineTarget;
+
     try {
       const todayIso = new Date().toISOString().split('T')[0];
+      const costValue = Math.max(0, parseFloat(quarantineEstimatedCost) || 0);
 
       // 1. If unassign requested, update bookings table to remove unit from assigned_units
-      if (unassignFromBookings && quarantineTarget) {
-        for (const conflict of quarantineTarget.conflictingBookings) {
+      if (quarantineUnassignBookings && conflictingBookings.length > 0) {
+        for (const conflict of conflictingBookings) {
           const { data: bData } = await supabase
             .from('bookings')
             .select('assigned_units')
@@ -1001,24 +1020,45 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
           status: 'Maintenance / Repair',
           condition: 'In Repair',
           last_maintenance: todayIso,
-          notes: `[QUARANTINE] Tagged under repair on ${todayIso}`,
+          notes: `[QUARANTINE - ${quarantineLiability}] ${quarantineNotes.trim() || quarantineCategory}`,
         })
         .eq('serial_id', unit.serialId);
 
-      // 3. Create Maintenance Alert in inventory_alerts table
-      await supabase.from('inventory_alerts').insert({
-        alert_type: 'Hardware Damage Log',
+      // 3. Create Maintenance / Incident Alert in inventory_alerts table
+      const metadataBundle = JSON.stringify({
+        estimatedCost: costValue,
+        clientLiability: quarantineLiability,
+        notes: quarantineNotes.trim() || `Unit placed in Quarantine (${quarantineCategory}).`,
+      });
+      const fullDetailsPayload = `__INCIDENT_PAYLOAD__:${metadataBundle}`;
+
+      const primaryPayload: any = {
+        alert_type: quarantineCategory,
         severity: 'High',
         gear_name: `${modelName} (${unit.serialId})`,
-        details: `Unit placed in Quarantine / Under Repair mode. Automatically deducted from available booking stock.`,
+        details: fullDetailsPayload,
         status: 'active',
-      });
+        estimated_cost: costValue,
+        client_liability: quarantineLiability,
+      };
+
+      const { error: insertErr } = await supabase.from('inventory_alerts').insert(primaryPayload);
+      if (insertErr) {
+        // Fallback for default schema
+        await supabase.from('inventory_alerts').insert({
+          alert_type: quarantineCategory,
+          severity: 'High',
+          gear_name: `${modelName} (${unit.serialId})`,
+          details: fullDetailsPayload,
+          status: 'active',
+        });
+      }
 
       // 4. Log Audit Trail
       await logAuditToSupabase(
         'QUARANTINE_UNIT',
         unit.serialId,
-        `Placed unit ${unit.serialId} (${modelName}) in Quarantine / Under Repair mode.`
+        `Placed unit ${unit.serialId} (${modelName}) in Quarantine / Under Repair mode. Liability: ${quarantineLiability}. Reason: ${quarantineCategory}`
       );
 
       // 5. Update local state
@@ -1034,7 +1074,7 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
                       status: 'Maintenance / Repair' as PhysicalUnitStatus,
                       condition: 'In Repair' as PhysicalUnitCondition,
                       lastMaintenance: todayIso,
-                      notes: `[QUARANTINE] Tagged under repair on ${todayIso}`,
+                      notes: `[QUARANTINE - ${quarantineLiability}] ${quarantineNotes.trim() || quarantineCategory}`,
                     }
                   : u
               ),
@@ -1046,6 +1086,7 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
 
       setShowQuarantineModal(false);
       setQuarantineTarget(null);
+      showSuccess(`Unit ${unit.serialId} (${modelName}) placed in quarantine (${quarantineLiability}).`);
       window.dispatchEvent(new Event('inventory-updated'));
     } catch (err) {
       console.error('Failed to quarantine unit:', err);
@@ -1100,6 +1141,7 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
         })
       );
 
+      showSuccess(`Unit ${unit.serialId} (${modelName}) restored to Available in Warehouse.`);
       window.dispatchEvent(new Event('inventory-updated'));
     } catch (err) {
       console.error('Failed to restore unit:', err);
@@ -1174,6 +1216,26 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
           </button>
         </div>
       </div>
+
+      {/* Operation Success Banner */}
+      {successMessage && (
+        <div className="flex items-center justify-between gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold shadow-xs animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-2.5">
+            <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-700 flex items-center justify-center shrink-0">
+              <IconCheck className="w-3.5 h-3.5 text-emerald-700" />
+            </span>
+            <span>{successMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSuccessMessage(null)}
+            className="text-emerald-700 hover:text-emerald-900 p-1 rounded-full hover:bg-emerald-100/50 cursor-pointer transition-colors"
+            title="Dismiss notification"
+          >
+            <IconX className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Category Filter & Search Bar */}
       <div className="bg-white p-4 rounded-2xl border border-[#24252c]/[0.08] shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -1495,93 +1557,7 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* QUARANTINE BOOKING CONFLICT MODAL                                         */}
-      {/* ========================================================================= */}
-      <ModalOverlay isOpen={showQuarantineModal} onClose={() => setShowQuarantineModal(false)}>
-        <div className="bg-white rounded-[2rem] p-6 max-w-lg w-full shadow-2xl border border-[#24252c]/10 relative">
-          <button
-            onClick={() => setShowQuarantineModal(false)}
-            className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
-          >
-            <IconX className="w-5 h-5" />
-          </button>
 
-          <div className="flex items-center gap-2 mb-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
-            <span className="text-xs font-bold uppercase tracking-wider text-rose-600">Booking Assignment Conflict</span>
-          </div>
-
-          <h3 className="text-xl font-extrabold text-[var(--ink)]">
-            Quarantine Scheduled Unit
-          </h3>
-          <p className="text-xs text-[#24252c]/60 mt-1 mb-4 leading-relaxed">
-            Unit <strong className="font-mono font-extrabold text-[#1090F8]">{quarantineTarget?.unit.serialId}</strong> ({quarantineTarget?.modelName}) is currently assigned to upcoming event(s).
-          </p>
-
-          {quarantineTarget && quarantineTarget.conflictingBookings.length > 0 && (
-            <div className="space-y-2 mb-5">
-              <span className="text-[11px] font-bold text-[#24252c]/70 uppercase tracking-wider block">
-                Affected Event Deployments:
-              </span>
-              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                {quarantineTarget.conflictingBookings.map((b) => (
-                  <div
-                    key={b.bookingId}
-                    className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl text-xs space-y-0.5 text-amber-950"
-                  >
-                    <div className="font-extrabold text-sm text-[var(--ink)]">{b.eventName}</div>
-                    <div className="text-[11px] text-[#24252c]/70 flex items-center gap-1.5 flex-wrap">
-                      <IconCalendar className="w-3.5 h-3.5 text-amber-800 shrink-0" />
-                      <span><strong>Event Date:</strong> {b.eventDate} • <strong>Client:</strong> {b.customerName}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-2.5 pt-2 border-t border-[#24252c]/[0.06]">
-            <button
-              type="button"
-              disabled={isSubmittingQuarantine}
-              onClick={() => {
-                if (quarantineTarget) {
-                  executeQuarantine(
-                    quarantineTarget.modelId,
-                    quarantineTarget.modelName,
-                    quarantineTarget.unit,
-                    true
-                  );
-                }
-              }}
-              className="w-full bg-rose-600 text-white font-semibold py-3 rounded-full hover:bg-rose-700 transition-colors cursor-pointer text-xs shadow-md disabled:opacity-50"
-            >
-              {isSubmittingQuarantine
-                ? 'Processing...'
-                : 'Quarantine & Unassign from Booking (Prompt for Replacement)'}
-            </button>
-
-            <button
-              type="button"
-              disabled={isSubmittingQuarantine}
-              onClick={() => {
-                if (quarantineTarget) {
-                  executeQuarantine(
-                    quarantineTarget.modelId,
-                    quarantineTarget.modelName,
-                    quarantineTarget.unit,
-                    false
-                  );
-                }
-              }}
-              className="w-full bg-[var(--mist)] text-[var(--ink)] font-semibold py-3 rounded-full hover:bg-[#EBEBEB] transition-colors cursor-pointer text-xs border border-[#24252c]/10"
-            >
-              Quarantine &amp; Keep Flagged in Booking Table
-            </button>
-          </div>
-        </div>
-      </ModalOverlay>
 
       {/* ========================================================================= */}
       {/* UNIFORM ADD MASTER MODEL MODAL (FULL CONTAINER PREVIEW IN MODAL) */}
@@ -2186,6 +2162,145 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
               {isSubmittingUnitDelete ? 'Removing...' : 'Remove Unit'}
             </button>
           </div>
+        </div>
+      </ModalOverlay>
+
+      {/* ========================================================================= */}
+      {/* QUARANTINE / PLACE UNDER REPAIR MODAL */}
+      {/* ========================================================================= */}
+      <ModalOverlay isOpen={showQuarantineModal} onClose={() => setShowQuarantineModal(false)}>
+        <div className="bg-white rounded-[2.5rem] p-6 md:p-8 max-w-lg w-full shadow-2xl border border-[#24252c]/10 relative text-left">
+          <button
+            onClick={() => setShowQuarantineModal(false)}
+            className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
+          >
+            <IconX className="w-5 h-5" />
+          </button>
+
+          <div className="flex items-center gap-2 mb-1">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+            <span className="text-xs font-bold uppercase tracking-wider text-amber-600">Quarantine & Repair Mode</span>
+          </div>
+
+          <h3 className="text-xl font-extrabold text-[var(--ink)] mb-1">
+            Quarantine Physical Serial Unit
+          </h3>
+          <p className="text-xs text-[#24252c]/60 mb-4">
+            Tag unit <strong className="font-mono text-[#1090F8]">{quarantineTarget?.unit.serialId}</strong> ({quarantineTarget?.modelName}) as under repair and deduct from available warehouse stock.
+          </p>
+
+          <form onSubmit={handleConfirmQuarantine} className="space-y-4 text-xs">
+            {/* Reason Category */}
+            <div>
+              <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
+                Reason / Incident Classification *
+              </label>
+              <select
+                value={quarantineCategory}
+                onChange={(e) => setQuarantineCategory(e.target.value)}
+                className={inputClass + ' font-semibold py-2.5'}
+              >
+                <option value="Hardware Damage (Dropped / Broken)">Hardware Damage (Dropped / Cracked / Broken)</option>
+                <option value="Routine Inspection / Bench Testing">Routine Inspection / Workshop Bench Testing</option>
+                <option value="Torn / Damaged Cable">Torn / Damaged Cable or Connector</option>
+                <option value="Liquid Spill / Electrical Fault">Liquid Spill / Blown Component / Electrical Fault</option>
+                <option value="Lost / Missing Gear">Lost / Missing Equipment</option>
+              </select>
+            </div>
+
+            {/* Liability & Cost Grid */}
+            <div className="grid grid-cols-2 gap-3 p-3.5 bg-amber-50/60 rounded-2xl border border-amber-200/50">
+              <div>
+                <label className="font-bold text-amber-900 uppercase block mb-1 text-[11px]">
+                  Liability Determination *
+                </label>
+                <select
+                  value={quarantineLiability}
+                  onChange={(e) => setQuarantineLiability(e.target.value as any)}
+                  className={inputClass + ' bg-white font-semibold py-2.5 text-xs'}
+                >
+                  <option value="Company Absorbed">Company Absorbed (Wear & Tear)</option>
+                  <option value="Client Liable">Client Liable (Charge to Host)</option>
+                  <option value="Under Investigation">Under Investigation / Discussion</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-amber-900 uppercase block mb-1 text-[11px]">
+                  Est. Repair / Replacement (₱)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-gray-500">₱</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="50"
+                    value={quarantineEstimatedCost}
+                    onChange={(e) => setQuarantineEstimatedCost(e.target.value)}
+                    placeholder="0"
+                    className={inputClass + ' pl-8 bg-white font-bold text-rose-600'}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Diagnostic / Quarantine Notes */}
+            <div>
+              <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
+                Diagnostic & Workshop Inspection Notes
+              </label>
+              <textarea
+                rows={3}
+                value={quarantineNotes}
+                onChange={(e) => setQuarantineNotes(e.target.value)}
+                placeholder="Describe reason for quarantine (e.g. Blown bulb during rehearsal, bent casing, crackling audio output...)"
+                className="w-full rounded-2xl border px-4 py-2.5 bg-[#EEEEEE] focus:outline-none focus:border-[#1090F8] border-transparent transition-colors text-xs"
+              />
+            </div>
+
+            {/* Conflicting Bookings Warning */}
+            {quarantineTarget && quarantineTarget.conflictingBookings.length > 0 && (
+              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl space-y-2">
+                <div className="flex items-center gap-1.5 font-bold text-rose-800 text-[11px]">
+                  <span>⚠️ Assigned to {quarantineTarget.conflictingBookings.length} Upcoming Event(s):</span>
+                </div>
+                <div className="max-h-24 overflow-y-auto space-y-1">
+                  {quarantineTarget.conflictingBookings.map((c) => (
+                    <div key={c.bookingId} className="text-[11px] text-rose-700 bg-white/80 p-2 rounded-xl border border-rose-200/60 flex justify-between items-center">
+                      <span className="font-semibold truncate">{c.eventName} ({c.customerName})</span>
+                      <span className="font-mono text-[10px] text-rose-600 shrink-0 ml-2">{c.eventDate}</span>
+                    </div>
+                  ))}
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer pt-1 font-semibold text-rose-900 text-[11px]">
+                  <input
+                    type="checkbox"
+                    checked={quarantineUnassignBookings}
+                    onChange={(e) => setQuarantineUnassignBookings(e.target.checked)}
+                    className="rounded text-rose-600"
+                  />
+                  <span>Automatically unassign this unit from upcoming events</span>
+                </label>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowQuarantineModal(false)}
+                className="flex-1 bg-[var(--mist)] text-[var(--ink)] font-semibold py-3.5 rounded-full border border-[#24252c]/10 hover:bg-[var(--ink)] hover:text-white transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmittingQuarantine}
+                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-extrabold py-3.5 rounded-full transition-colors shadow-md cursor-pointer disabled:opacity-50"
+              >
+                {isSubmittingQuarantine ? 'Quarantining...' : 'Confirm Quarantine'}
+              </button>
+            </div>
+          </form>
         </div>
       </ModalOverlay>
 

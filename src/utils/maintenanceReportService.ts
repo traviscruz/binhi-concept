@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import * as XLSX from 'xlsx';
 
 export interface MaintenanceLogEntry {
   id: string;
@@ -231,48 +232,85 @@ export function computeMaintenanceSummary(uniqueLogs: MaintenanceLogEntry[]): Ma
 }
 
 export function exportMaintenanceToCSV(logs: MaintenanceLogEntry[]) {
-  const headers = [
-    'Serial ID',
-    'Equipment Model',
-    'Category',
-    'Brand',
-    'Defect Type',
-    'Issue Description',
-    'Quarantine Date',
-    'Restored Date',
-    'Downtime (Days)',
-    'Status',
-    'Severity',
-    'Estimated Cost (PHP)',
-    'Liability Attribution',
-    'Event Name',
-    'Technician Notes',
-  ];
+  const timestamp = new Date().toISOString().split('T')[0];
+  const rows = logs.map((l) => ({
+    'Serial ID': l.serialId,
+    'Equipment Model': l.modelName,
+    'Category': l.category,
+    'Brand': l.brand,
+    'Defect Type': l.type,
+    'Issue Description': l.issueDescription,
+    'Quarantine Date': l.quarantineDate,
+    'Restored Date': l.restoredDate || 'Under Repair / Active',
+    'Downtime Duration': `${l.downtimeDays} Days`,
+    'Status': l.status,
+    'Severity': l.severity,
+    'Estimated Repair Cost (PHP)': `₱${(l.estimatedCost || 0).toLocaleString()}`,
+    'Liability Attribution': l.clientLiability,
+    'Associated Event': l.eventName || 'Warehouse Direct',
+    'Technician Notes': l.technicianNotes || 'None',
+  }));
 
-  const rows = logs.map((l) => [
-    `"${l.serialId}"`,
-    `"${l.modelName}"`,
-    `"${l.category}"`,
-    `"${l.brand}"`,
-    `"${l.type}"`,
-    `"${l.issueDescription.replace(/"/g, '""')}"`,
-    `"${l.quarantineDate}"`,
-    `"${l.restoredDate || 'N/A'}"`,
-    l.downtimeDays,
-    `"${l.status}"`,
-    `"${l.severity}"`,
-    l.estimatedCost,
-    `"${l.clientLiability}"`,
-    `"${l.eventName || 'N/A'}"`,
-    `"${(l.technicianNotes || '').replace(/"/g, '""')}"`,
-  ]);
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const csv = XLSX.utils.sheet_to_csv(ws);
 
-  const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-  const encodedUri = encodeURI(csvContent);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  link.setAttribute('href', encodedUri);
-  link.setAttribute('download', `BINHI_Equipment_Maintenance_Report_${new Date().toISOString().split('T')[0]}.csv`);
+  link.setAttribute('href', url);
+  link.setAttribute('download', `BINHI_Equipment_Maintenance_Report_${timestamp}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+export function exportMaintenanceToExcel(
+  logs: MaintenanceLogEntry[],
+  summary: MaintenanceStatsSummary,
+  dateRangeLabel: string = 'All Time'
+) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+  // 1. Summary Sheet
+  const summaryRows = [
+    { 'Metric': 'Date Scope', 'Value': dateRangeLabel },
+    { 'Metric': 'Total Incident Count', 'Value': `${summary.totalIncidentsCount} Incidents` },
+    { 'Metric': 'Units In Active Repair', 'Value': `${summary.totalUnderRepair} Units` },
+    { 'Metric': 'Restored to Fleet', 'Value': `${summary.totalRestored} Units` },
+    { 'Metric': 'Decommissioned / Retired', 'Value': `${summary.totalDecommissioned} Units` },
+    { 'Metric': 'Average Downtime (MTTR)', 'Value': `${summary.avgDowntimeDays} Days` },
+    { 'Metric': 'Total Repair Cost Valuation', 'Value': `₱${summary.totalEstimatedCost.toLocaleString()}` },
+    { 'Metric': 'Client Liable Valuation', 'Value': `₱${summary.totalClientLiableAmount.toLocaleString()}` },
+    { 'Metric': 'Company Absorbed Valuation', 'Value': `₱${summary.totalCompanyAbsorbedAmount.toLocaleString()}` },
+    { 'Metric': 'Report Generated At', 'Value': new Date().toLocaleString() },
+  ];
+
+  // 2. Detailed Logs Sheet
+  const detailRows = logs.map((l) => ({
+    'Serial ID': l.serialId,
+    'Equipment Model': l.modelName,
+    'Category': l.category,
+    'Brand': l.brand,
+    'Defect Type': l.type,
+    'Issue Description': l.issueDescription,
+    'Quarantine Date': l.quarantineDate,
+    'Restored Date': l.restoredDate || 'Under Repair / Active',
+    'Downtime Duration': `${l.downtimeDays} Days`,
+    'Status': l.status,
+    'Severity': l.severity,
+    'Estimated Repair Cost': `₱${(l.estimatedCost || 0).toLocaleString()}`,
+    'Liability Attribution': l.clientLiability,
+    'Associated Event': l.eventName || 'Warehouse Direct',
+    'Technician Notes': l.technicianNotes || 'None',
+  }));
+
+  const wb = XLSX.utils.book_new();
+
+  const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Maintenance Summary');
+
+  const wsDetails = XLSX.utils.json_to_sheet(detailRows);
+  XLSX.utils.book_append_sheet(wb, wsDetails, 'Incidents & Quarantine Logs');
+
+  XLSX.writeFile(wb, `BINHI_Equipment_Maintenance_Report_${timestamp}.xlsx`);
 }

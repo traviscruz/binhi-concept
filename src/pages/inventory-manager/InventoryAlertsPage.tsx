@@ -1,13 +1,278 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconX, IconShield, IconSearch, IconPlus, IconCheck } from '../../components/shared/icons';
+import { IconX, IconShield, IconSearch, IconPlus, IconCheck, IconChevronDown } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { supabase } from '../../lib/supabase';
 
 const inputClass =
   'w-full rounded-full border px-4 py-2.5 text-xs bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
+
+function SearchableEquipmentSelect({
+  equipmentModels,
+  value,
+  onChange,
+  placeholder = 'Select equipment or serial unit...',
+  className = '',
+}: {
+  equipmentModels: any[];
+  value: string;
+  onChange: (val: string) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Close when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
+  // Focus search input on open
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
+    } else {
+      setSearch('');
+    }
+  }, [isOpen]);
+
+  // Filter models and physical units
+  const query = search.trim().toLowerCase();
+
+  const filteredGroups = equipmentModels
+    .map((m) => {
+      const modelMatch =
+        (m.name || '').toLowerCase().includes(query) ||
+        (m.brand || '').toLowerCase().includes(query) ||
+        (m.category || '').toLowerCase().includes(query) ||
+        (m.model_id || '').toLowerCase().includes(query);
+
+      const matchingUnits = (m.units || []).filter((u: any) => {
+        if (!query) return true;
+        if (modelMatch) return true;
+        return (
+          (u.serial_id || '').toLowerCase().includes(query) ||
+          (u.condition || '').toLowerCase().includes(query) ||
+          (u.status || '').toLowerCase().includes(query)
+        );
+      });
+
+      const includeModel = modelMatch || matchingUnits.length > 0;
+      return includeModel
+        ? {
+            model: m,
+            modelMatch,
+            units: matchingUnits,
+          }
+        : null;
+    })
+    .filter(Boolean) as Array<{
+    model: any;
+    modelMatch: boolean;
+    units: any[];
+  }>;
+
+  const handleSelect = (val: string) => {
+    onChange(val);
+    setIsOpen(false);
+  };
+
+  const handleClear = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onChange('');
+  };
+
+  return (
+    <div className={`relative ${className}`} ref={containerRef}>
+      {/* Trigger Button */}
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="w-full rounded-2xl border px-4 py-2.5 text-xs bg-[#EEEEEE] hover:bg-[#E5E5E5] text-left flex items-center justify-between transition-all border-transparent focus:outline-none focus:border-[#1090F8] cursor-pointer group"
+      >
+        <div className="flex items-center gap-2 truncate pr-2">
+          <IconSearch className="w-3.5 h-3.5 text-gray-400 shrink-0 group-hover:text-gray-600 transition-colors" />
+          {value ? (
+            <div className="flex items-center gap-1.5 truncate">
+              <span className="font-bold text-[var(--ink)] truncate">{value}</span>
+            </div>
+          ) : (
+            <span className="text-[#24252c]/50 font-normal truncate">{placeholder}</span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          {value && (
+            <span
+              onClick={handleClear}
+              className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors cursor-pointer"
+              title="Clear selection"
+            >
+              <IconX className="w-3.5 h-3.5" />
+            </span>
+          )}
+          <IconChevronDown
+            className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+          />
+        </div>
+      </button>
+
+      {/* Dropdown Popover */}
+      {isOpen && (
+        <div className="absolute z-50 left-0 right-0 top-full mt-1.5 bg-white rounded-2xl shadow-2xl border border-[#24252c]/10 overflow-hidden">
+          {/* Search Header */}
+          <div className="p-2.5 bg-gray-50/90 border-b border-gray-100 flex items-center gap-2">
+            <IconSearch className="w-3.5 h-3.5 text-gray-400 shrink-0 ml-1" />
+            <input
+              ref={inputRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search model, brand, serial ID (e.g. MIC-001)..."
+              className="w-full text-xs bg-transparent border-none outline-none text-[var(--ink)] placeholder:text-gray-400 font-medium"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setIsOpen(false);
+              }}
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="p-1 text-gray-400 hover:text-gray-600 rounded-full cursor-pointer"
+              >
+                <IconX className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          {/* Quick status banner */}
+          <div className="px-3 py-1.5 bg-gray-50/40 text-[10px] font-semibold uppercase tracking-wider text-[#24252c]/40 flex items-center justify-between border-b border-gray-100">
+            <span>
+              {filteredGroups.length} {filteredGroups.length === 1 ? 'Model' : 'Models'} Available
+            </span>
+            <span>Select master model or unit</span>
+          </div>
+
+          {/* Results List */}
+          <div className="max-h-60 overflow-y-auto divide-y divide-gray-100/70 p-1.5">
+            {filteredGroups.length === 0 ? (
+              <div className="py-6 px-4 text-center">
+                <p className="text-xs font-semibold text-gray-700">No equipment matching "{search}"</p>
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Try searching with a serial ID (e.g. SPK-001) or model name.
+                </p>
+              </div>
+            ) : (
+              filteredGroups.map(({ model: m, units }) => {
+                const masterModelVal = `${m.name} (${m.model_id})`;
+                const isMasterSelected = value === masterModelVal;
+
+                return (
+                  <div key={m.model_id} className="py-2 first:pt-1 last:pb-1">
+                    {/* Model Header */}
+                    <div className="px-2.5 py-1 flex items-center justify-between text-[11px] font-bold text-gray-700">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="truncate">
+                          {m.brand} {m.name}
+                        </span>
+                        <span className="text-[10px] font-mono font-normal text-gray-400">({m.model_id})</span>
+                      </div>
+                      {m.category && (
+                        <span className="text-[9px] font-bold uppercase tracking-wider bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full shrink-0">
+                          {m.category}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Master Model Option */}
+                    <button
+                      type="button"
+                      onClick={() => handleSelect(masterModelVal)}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer group mt-0.5 ${
+                        isMasterSelected ? 'bg-sky-50 text-sky-700 font-bold' : 'hover:bg-gray-50 text-gray-600'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-sky-600 bg-sky-100/70 px-1.5 py-0.5 rounded">
+                          Master Model
+                        </span>
+                        <span className="truncate">{m.name} (General / Fleet)</span>
+                      </div>
+                      {isMasterSelected && <IconCheck className="w-3.5 h-3.5 text-sky-600 shrink-0" />}
+                    </button>
+
+                    {/* Physical Units Sub-List */}
+                    {units && units.length > 0 && (
+                      <div className="mt-1 pl-2 space-y-0.5 border-l-2 border-gray-100 ml-3">
+                        {units.map((u: any) => {
+                          const unitVal = `${m.name} (${u.serial_id})`;
+                          const isUnitSelected = value === unitVal;
+                          const isDamaged =
+                            u.condition === 'In Repair' ||
+                            u.condition === 'Needs Inspection' ||
+                            u.status === 'Maintenance / Repair';
+
+                          return (
+                            <button
+                              key={u.serial_id}
+                              type="button"
+                              onClick={() => handleSelect(unitVal)}
+                              className={`w-full text-left px-2 py-1.5 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer ${
+                                isUnitSelected
+                                  ? 'bg-sky-50 text-sky-700 font-bold'
+                                  : 'hover:bg-gray-50 text-gray-700'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 truncate">
+                                <span className="font-mono text-[10px] font-bold bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded border border-gray-200/60">
+                                  {u.serial_id}
+                                </span>
+                                <span
+                                  className={`text-[10px] font-semibold truncate ${
+                                    isDamaged ? 'text-amber-700' : 'text-gray-500'
+                                  }`}
+                                >
+                                  {u.condition || 'Good'}
+                                </span>
+                                {u.status && (
+                                  <span className="text-[9px] text-gray-400 hidden sm:inline truncate">
+                                    • {u.status}
+                                  </span>
+                                )}
+                              </div>
+                              {isUnitSelected && <IconCheck className="w-3.5 h-3.5 text-sky-600 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function IconAlertTriangle({ className = 'w-4 h-4' }: { className?: string }) {
   return (
@@ -107,6 +372,13 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Success Notification State
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const showSuccess = (msg: string) => {
+    setSuccessMessage(msg);
+    setTimeout(() => setSuccessMessage(null), 4500);
+  };
+
   // =========================================================================
   // SUPABASE READ (FETCH MODELS, PHYSICAL UNITS, BOOKINGS & ALERTS)
   // =========================================================================
@@ -141,41 +413,17 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
         console.warn('Custom alerts table fetch note:', alertsError);
       }
 
+      // Helper to extract serial ID from gear string
+      const extractSerialId = (str?: string) => {
+        if (!str) return null;
+        const match = str.match(/\(([^)]+)\)/);
+        return match ? match[1].trim() : null;
+      };
+
       const derivedAlerts: InventoryAlertItem[] = [];
+      const activeCustomAlertSerials = new Set<string>();
 
-      // Physical units flagged as requiring repair or decommissioned
-      if (modelsData && modelsData.length > 0) {
-        modelsData.forEach((m: any) => {
-          const units = m.units || [];
-
-          units.forEach((u: any) => {
-            if (
-              u.condition === 'In Repair' ||
-              u.condition === 'Needs Inspection' ||
-              u.condition === 'Minor Wear' ||
-              u.status === 'Maintenance / Repair' ||
-              u.status === 'Decommissioned / Inactive'
-            ) {
-              const isHigh = u.condition === 'In Repair' || u.status === 'Decommissioned / Inactive';
-              const isLost = (u.notes || '').toLowerCase().includes('lost') || (u.status || '').toLowerCase().includes('inactive');
-
-              derivedAlerts.push({
-                id: `unit-${u.serial_id}`,
-                type: isLost ? 'Lost / Missing Gear' : u.condition === 'In Repair' ? 'Hardware Damage' : 'Maintenance Required',
-                category: isLost || u.condition === 'In Repair' ? 'Incident' : 'Maintenance',
-                gear: `${m.name} (${u.serial_id})`,
-                details: u.notes || `Unit condition is currently flagged as ${u.condition} (${u.status}).`,
-                severity: isHigh ? 'High' : 'Medium',
-                date: u.last_maintenance || new Date().toISOString().split('T')[0],
-                modelId: m.model_id,
-                serialId: u.serial_id,
-              });
-            }
-          });
-        });
-      }
-
-      // Add custom logged alerts from database with parsed incident attributes
+      // 1. Process custom logged alerts from database with parsed incident attributes
       if (customAlertsData && customAlertsData.length > 0) {
         customAlertsData.forEach((ca: any) => {
           if (ca.alert_type !== 'Low Stock Warning') {
@@ -184,7 +432,7 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
             let extEventName = ca.event_name;
             let extClientName = ca.client_name;
             let extCost = Number(ca.estimated_cost) || 0;
-            let extLiability = ca.client_liability || 'Client Liable';
+            let extLiability = ca.client_liability || undefined;
 
             // Check if details contains JSON metadata bundle
             if (parsedDetails.startsWith('__INCIDENT_PAYLOAD__:')) {
@@ -202,11 +450,17 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
             const isIncident =
               ca.alert_type === 'Lost / Missing Gear' ||
               ca.alert_type === 'Hardware Damage' ||
+              ca.alert_type === 'Hardware Damage Log' ||
               ca.alert_type === 'Torn / Broken Cable' ||
               ca.alert_type === 'Damage Incident' ||
               ca.alert_type === 'Liquid Spill' ||
               ca.alert_type === 'Electrical Fault' ||
               Boolean(extEventName || extCost > 0);
+
+            const itemSerialId = ca.serial_id || extractSerialId(ca.gear_name) || undefined;
+            if (itemSerialId) {
+              activeCustomAlertSerials.add(itemSerialId.toLowerCase());
+            }
 
             derivedAlerts.push({
               id: ca.id,
@@ -217,7 +471,7 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
               severity: (ca.severity as any) || 'High',
               date: ca.created_at ? ca.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
               modelId: ca.model_id,
-              serialId: ca.serial_id,
+              serialId: itemSerialId,
               isCustomAlert: true,
               bookingId: extBookingId,
               eventName: extEventName,
@@ -227,6 +481,43 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
               resolutionNotes: ca.resolution_notes,
             });
           }
+        });
+      }
+
+      // 2. Physical units flagged as requiring repair or decommissioned (deduplicating if custom alert already exists)
+      if (modelsData && modelsData.length > 0) {
+        modelsData.forEach((m: any) => {
+          const units = m.units || [];
+
+          units.forEach((u: any) => {
+            if (
+              u.condition === 'In Repair' ||
+              u.condition === 'Needs Inspection' ||
+              u.condition === 'Minor Wear' ||
+              u.status === 'Maintenance / Repair' ||
+              u.status === 'Decommissioned / Inactive'
+            ) {
+              // Skip if an explicit custom alert record already exists for this physical unit
+              if (u.serial_id && activeCustomAlertSerials.has(u.serial_id.toLowerCase())) {
+                return;
+              }
+
+              const isHigh = u.condition === 'In Repair' || u.status === 'Decommissioned / Inactive';
+              const isLost = (u.notes || '').toLowerCase().includes('lost') || (u.status || '').toLowerCase().includes('inactive');
+
+              derivedAlerts.push({
+                id: `unit-${u.serial_id}`,
+                type: isLost ? 'Lost / Missing Gear' : u.condition === 'In Repair' ? 'Hardware Damage' : 'Maintenance Required',
+                category: isLost || u.condition === 'In Repair' ? 'Incident' : 'Maintenance',
+                gear: `${m.name} (${u.serial_id})`,
+                details: u.notes || `Unit condition is currently flagged as ${u.condition} (${u.status}).`,
+                severity: isHigh ? 'High' : 'Medium',
+                date: u.last_maintenance || new Date().toISOString().split('T')[0],
+                modelId: m.model_id,
+                serialId: u.serial_id,
+              });
+            }
+          });
         });
       }
 
@@ -360,6 +651,7 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
       setShowAddIncidentModal(false);
       setIncidentDetails('');
       setCustomAccessoryName('');
+      showSuccess(`Damage / incident logged for "${gearDisplayName}" (${incidentCategory}).`);
       window.dispatchEvent(new Event('inventory-updated'));
     } catch (err) {
       console.warn('Create incident error:', err);
@@ -413,6 +705,7 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
       await fetchAlertsAndInventory();
       setShowAddMaintenanceModal(false);
       setMaintDetails('');
+      showSuccess(`Bench maintenance alert logged for "${gearDisplayName}".`);
       window.dispatchEvent(new Event('inventory-updated'));
     } catch (err) {
       console.warn('Create maintenance alert error:', err);
@@ -430,8 +723,10 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
 
     const item = selectedItemForResolve;
     try {
+      const targetSerialId = item.serialId || (item.gear?.match(/\(([^)]+)\)/)?.[1]?.trim());
+
       // 1. If physical serial unit, restore condition if requested
-      if (item.serialId && restoreUnitOperational) {
+      if (targetSerialId && restoreUnitOperational) {
         await supabase
           .from('physical_units')
           .update({
@@ -440,7 +735,7 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
             last_maintenance: new Date().toISOString().split('T')[0],
             notes: resolveOutcome ? `Resolved: ${resolveOutcome}` : null,
           })
-          .eq('serial_id', item.serialId);
+          .eq('serial_id', targetSerialId);
       }
 
       // 2. Update custom alert in inventory_alerts table
@@ -463,6 +758,18 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
             })
             .eq('id', item.id);
         }
+      } else if (targetSerialId) {
+        try {
+          await supabase
+            .from('inventory_alerts')
+            .update({
+              status: 'resolved',
+              resolved_at: new Date().toISOString(),
+              resolution_notes: resolveOutcome || 'Resolved by inventory manager',
+            })
+            .eq('status', 'active')
+            .ilike('gear_name', `%${targetSerialId}%`);
+        } catch (e) {}
       }
 
       await logAuditToSupabase(
@@ -475,6 +782,7 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
       setShowResolveModal(false);
       setSelectedItemForResolve(null);
       setResolveOutcome('');
+      showSuccess(`Incident / maintenance alert for "${item.gear}" marked as resolved.`);
       window.dispatchEvent(new Event('inventory-updated'));
     } catch (err) {
       console.warn('Resolve error:', err);
@@ -542,6 +850,26 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
           </button>
         </div>
       </div>
+
+      {/* Operation Success Notification Banner */}
+      {successMessage && (
+        <div className="flex items-center justify-between gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold shadow-xs animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-2.5">
+            <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-700 flex items-center justify-center shrink-0">
+              <IconCheck className="w-3.5 h-3.5 text-emerald-700" />
+            </span>
+            <span>{successMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSuccessMessage(null)}
+            className="text-emerald-700 hover:text-emerald-900 p-1 rounded-full hover:bg-emerald-100/50 cursor-pointer transition-colors"
+            title="Dismiss notification"
+          >
+            <IconX className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* KPI Metrics Dashboard Bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -896,25 +1224,12 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
               </div>
 
               {targetType === 'model_unit' ? (
-                <select
+                <SearchableEquipmentSelect
+                  equipmentModels={equipmentModels}
                   value={selectedTarget}
-                  onChange={(e) => setSelectedTarget(e.target.value)}
-                  className={inputClass + ' font-semibold py-2.5'}
-                >
-                  <option value="">Select Equipment Unit...</option>
-                  {equipmentModels.map((m) => (
-                    <optgroup key={m.model_id} label={`${m.brand} ${m.name} (${m.model_id})`}>
-                      <option value={`${m.name} (${m.model_id})`}>
-                        Master Model: {m.brand} {m.name}
-                      </option>
-                      {(m.units || []).map((u: any) => (
-                        <option key={u.serial_id} value={`${m.name} (${u.serial_id})`}>
-                          Serial Unit: {u.serial_id} — {u.condition} ({u.status})
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
+                  onChange={setSelectedTarget}
+                  placeholder="Search model, brand, or serial ID (e.g. MIC-001)..."
+                />
               ) : (
                 <input
                   value={customAccessoryName}
@@ -1013,25 +1328,12 @@ export default function InventoryAlertsPage({ go: _go }: { go: (p: Page) => void
               <label className="font-semibold uppercase text-[#24252c]/50 block mb-1">
                 Target Equipment Model / Serial Unit
               </label>
-              <select
+              <SearchableEquipmentSelect
+                equipmentModels={equipmentModels}
                 value={maintTarget}
-                onChange={(e) => setMaintTarget(e.target.value)}
-                className={inputClass + ' font-semibold py-3'}
-              >
-                <option value="">Select Equipment Target...</option>
-                {equipmentModels.map((m) => (
-                  <optgroup key={m.model_id} label={`${m.brand} ${m.name} (${m.model_id})`}>
-                    <option value={`${m.name} (${m.model_id})`}>
-                      Master Model: {m.brand} {m.name}
-                    </option>
-                    {(m.units || []).map((u: any) => (
-                      <option key={u.serial_id} value={`${m.name} (${u.serial_id})`}>
-                        Serial Unit: {u.serial_id} — {u.condition}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+                onChange={setMaintTarget}
+                placeholder="Search model, brand, or serial ID (e.g. SPK-001)..."
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">

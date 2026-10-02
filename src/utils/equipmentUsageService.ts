@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import * as XLSX from 'xlsx';
+import { FEATURED_PACKAGES } from '../data/packages';
 
 export interface BookingUsageEvent {
   bookingId: string;
@@ -98,34 +99,165 @@ export function calculateEventDurationHours(startTime?: string, endTime?: string
 }
 
 // Parse quantity prefix from string (e.g. "2x Active Subwoofer" -> { qty: 2, label: "Active Subwoofer" })
-export function parseItemQty(raw: string): { qty: number; label: string } {
+export function parseItemQty(raw: any): { qty: number; label: string } {
   if (!raw) return { qty: 1, label: '' };
-  const m = raw.match(/^(\d+)\s*[xX]\s+(.+)$/);
+  
+  let str = '';
+  let explicitQty: number | null = null;
+
+  if (typeof raw === 'object') {
+    str = raw.name || raw.label || raw.model_id || raw.modelId || '';
+    if (raw.qty) explicitQty = Number(raw.qty);
+    else if (raw.quantity) explicitQty = Number(raw.quantity);
+  } else {
+    str = String(raw).trim();
+  }
+
+  // Strip price tags e.g. "Wireless Mic (₱1,500)" or "(+₱2,000)" or "- ₱1,500"
+  str = str.replace(/(\s*[\(\[-]\s*(\+?\s*₱|\+?\s*PHP)\s*[\d,]+(\.\d{2})?(\s*each|\s*\/unit)?\s*[\)\]]?)/gi, '').trim();
+
+  const m = str.match(/^(\d+)\s*(?:[xX]|\s*units?\s+of)\s+(.+)$/i);
   if (m) {
     return { qty: Math.max(1, parseInt(m[1], 10)), label: m[2].trim() };
   }
-  return { qty: 1, label: raw.trim() };
+
+  return { qty: explicitQty && explicitQty > 0 ? explicitQty : 1, label: str };
 }
 
-// Fuzzy match for gear name against model name
-export function matchGearToModel(itemLabel: string, modelName: string, category: string): boolean {
+// Filter out non-hardware labor and service items
+export function isServiceItem(rawLabel: string): boolean {
+  const lower = rawLabel.toLowerCase();
+  const serviceKeywords = [
+    'technician',
+    'soundcheck',
+    'sound check',
+    'operator',
+    'director',
+    'engineer',
+    'crew',
+    'load-in',
+    'load in',
+    'on-site',
+    'onsite',
+    'setup & teardown',
+    'delivery',
+    'transport',
+    'labor',
+    'vj',
+    'stage director',
+    'sound engineer',
+    'lighting operator',
+  ];
+  return serviceKeywords.some((k) => lower.includes(k));
+}
+
+// Calculate match score between a package inclusion label and a specific equipment model
+export function calculateMatchScore(
+  itemLabel: string,
+  modelName: string,
+  modelId: string,
+  modelDesc: string
+): number {
   const norm = (s: string) =>
     s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-  
-  const normLabel = norm(itemLabel);
-  const normModel = norm(modelName);
-  const normCat = norm(category);
 
-  if (normModel.includes(normLabel) || normLabel.includes(normModel)) return true;
+  const l = norm(itemLabel);
+  const name = norm(modelName);
+  const id = norm(modelId);
+  const desc = norm(modelDesc);
 
-  const labelWords = normLabel.split(' ').filter((w) => w.length > 2);
-  if (labelWords.length === 0) return false;
+  if (!l) return 0;
 
-  const matchCount = labelWords.filter((w) => normModel.includes(w) || normCat.includes(w)).length;
-  return matchCount >= Math.max(1, Math.floor(labelWords.length * 0.4));
+  // Direct match on ID or full Name
+  if (id && (l.includes(id) || id.includes(l))) return 10;
+  if (name && (l.includes(name) || name.includes(l))) return 8;
+
+  let score = 0;
+
+  // Target specific equipment patterns
+  const patterns: { keywords: string[]; modelKeywords: string[]; weight: number }[] = [
+    {
+      keywords: ['led wall', 'p3', 'led panel', 'video wall', 'video screen', 'display screen', 'led screen', 'indoor led'],
+      modelKeywords: ['led wall', 'p3', 'led panel', 'video wall', 'led screen', 'display screen', 'led-p3'],
+      weight: 6,
+    },
+    {
+      keywords: ['line array', 'array module', 'concert line array', 'line array speaker'],
+      modelKeywords: ['line array', 'array rig', 'spk-line', 'array module'],
+      weight: 6,
+    },
+    {
+      keywords: ['subwoofer', 'subs', 'dual 15', 'dual 18', '18 inch sub', '15 inch sub', 'powered subwoofer'],
+      modelKeywords: ['subwoofer', 'subs', 'sub', 'bass bin'],
+      weight: 5,
+    },
+    {
+      keywords: ['active pa', 'pa speaker', 'top speaker', '12 inch speaker', 'pa 12', 'concert speaker'],
+      modelKeywords: ['speaker', 'pa', 'top speaker', 'audio speaker', 'active pa'],
+      weight: 5,
+    },
+    {
+      keywords: ['moving head', 'beam', 'spot light', '7r', '230w', 'moving head beam', 'dmx light'],
+      modelKeywords: ['moving head', 'beam', 'spot', 'lgt-mhead', '7r'],
+      weight: 6,
+    },
+    {
+      keywords: ['uplight', 'color uplight', 'par uplight', 'led par', 'rgbw', 'par light'],
+      modelKeywords: ['uplight', 'par', 'color light', 'ambient light', 'par light'],
+      weight: 5,
+    },
+    {
+      keywords: ['fog machine', 'smoke machine', 'haze', 'low lying fog', 'smoke effect', 'haze machine', 'low fog'],
+      modelKeywords: ['fog', 'smoke', 'haze', 'low lying', 'efx-smk'],
+      weight: 6,
+    },
+    {
+      keywords: ['wireless mic', 'handheld mic', 'microphone', 'uhf', 'vocal mic', 'host microphone', 'dual wireless'],
+      modelKeywords: ['microphone', 'mic', 'uhf', 'wireless', 'mic-uhf', 'sennheiser', 'shure'],
+      weight: 6,
+    },
+    {
+      keywords: ['truss', 'trussing', 'aluminum truss', 'box truss', 'overhead truss', 'global truss'],
+      modelKeywords: ['truss', 'box truss', 'rigging', 'trs-alum', 'aluminum box'],
+      weight: 6,
+    },
+    {
+      keywords: ['mixer', 'mixing console', 'digital mixer', 'compact mixer', '8 channel mixer', '16 channel mixer'],
+      modelKeywords: ['mixer', 'mixing console', 'console', 'digital 8', 'digital 16'],
+      weight: 6,
+    },
+    {
+      keywords: ['laptop', 'macbook', 'songs', 'playback laptop', 'dj laptop'],
+      modelKeywords: ['laptop', 'macbook', 'songs', 'laptop w/ songs'],
+      weight: 7,
+    },
+    {
+      keywords: ['drum kit', 'bass amp', 'guitar amp', 'backline', 'band backline'],
+      modelKeywords: ['backline', 'drum', 'amp', 'guitar amp', 'live band'],
+      weight: 6,
+    },
+  ];
+
+  for (const p of patterns) {
+    const hasItemKey = p.keywords.some((k) => l.includes(k));
+    const hasModelKey = p.modelKeywords.some((k) => name.includes(k) || id.includes(k) || desc.includes(k));
+    if (hasItemKey && hasModelKey) {
+      score += p.weight;
+    }
+  }
+
+  // Exact word tokens overlap
+  const stopWords = new Set(['and', 'with', 'full', 'set', 'unit', 'units', 'each', 'the', 'for', 'inch', 'high', 'output', 'heavy', 'duty', 'sound', 'system', 'audio', 'lighting']);
+  const itemWords = l.split(' ').filter((w) => w.length > 2 && !stopWords.has(w));
+  const modelWords = name.split(' ').filter((w) => w.length > 2 && !stopWords.has(w));
+
+  const overlap = itemWords.filter((w) => modelWords.includes(w)).length;
+  score += overlap * 2;
+
+  return score;
 }
 
-export type TimeRangeFilter = 'all' | '30days' | 'quarter' | 'year' | 'this_month' | 'custom';
+export type TimeRangeFilter = 'all' | '7days' | '30days' | 'quarter' | 'year' | 'this_month' | 'custom';
 export type EventScopeFilter = 'completed_only' | 'all_active';
 
 /**
@@ -148,6 +280,8 @@ export async function fetchEquipmentUsageStats(options?: {
   const startDate = options?.startDate || '';
   const endDate = options?.endDate || '';
   const todayStr = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 
   try {
     // 1. Fetch bookings, models, physical units, and packages concurrently
@@ -155,7 +289,6 @@ export async function fetchEquipmentUsageStats(options?: {
       supabase
         .from('bookings')
         .select('*')
-        .neq('payment_status', 'cancelled')
         .order('event_date', { ascending: false }),
       supabase
         .from('equipment_models')
@@ -187,30 +320,58 @@ export async function fetchEquipmentUsageStats(options?: {
       ];
     }
 
-    // Build package lookup map
+    // Build package lookup map with standard packages + database packages
     const pkgMap: Record<string, { tag: string; inclusions: string[] }> = {};
+    
+    // 1a. Load default FEATURED_PACKAGES
+    FEATURED_PACKAGES.forEach((p) => {
+      const data = { tag: p.tag, inclusions: p.inclusions };
+      pkgMap[p.id] = data;
+      pkgMap[p.id.toLowerCase()] = data;
+      pkgMap[p.name] = data;
+      pkgMap[p.name.toLowerCase()] = data;
+      const shortName = p.name.split('—')[0].trim();
+      pkgMap[shortName] = data;
+      pkgMap[shortName.toLowerCase()] = data;
+    });
+
+    // 1b. Overlay DB packages
     rawPackages.forEach((p: any) => {
       const inclusions: string[] =
         Array.isArray(p.inclusions) && p.inclusions.length > 0
           ? p.inclusions
           : Array.isArray(p.items)
-          ? p.items.map((it: any) => (typeof it === 'string' ? it : `${it.qty || 1}x ${it.name}`))
+          ? p.items.map((it: any) => (typeof it === 'string' ? it : `${it.qty || 1}x ${it.name || it.label || ''}`))
           : [];
-      const tag = p.tag || 'Production Setup';
-      if (p.package_id) pkgMap[p.package_id] = { tag, inclusions };
-      if (p.name) pkgMap[p.name] = { tag, inclusions };
-      if (p.id) pkgMap[p.id] = { tag, inclusions };
+      const tag = p.tag || p.name || 'Production Setup';
+      const entry = { tag, inclusions };
+      const pid = p.package_id || p.id;
+      if (pid) {
+        pkgMap[pid] = entry;
+        pkgMap[String(pid).toLowerCase()] = entry;
+      }
+      if (p.name) {
+        pkgMap[p.name] = entry;
+        pkgMap[String(p.name).toLowerCase()] = entry;
+        const shortName = String(p.name).split('—')[0].trim();
+        pkgMap[shortName] = entry;
+        pkgMap[shortName.toLowerCase()] = entry;
+      }
     });
 
     // Build model to serials mapping
     const modelToSerials: Record<string, { serialId: string; condition: string; status: string }[]> = {};
     modelsList.forEach((m: any) => {
-      modelToSerials[m.model_id] = [];
+      const mid = m.model_id || m.modelId || m.id;
+      modelToSerials[mid] = [];
     });
     rawUnits.forEach((u: any) => {
-      if (modelToSerials[u.model_id]) {
-        modelToSerials[u.model_id].push({
-          serialId: u.serial_id,
+      const mid = u.model_id || u.modelId;
+      const sid = u.serial_id || u.serialId || u.id;
+      if (mid && sid) {
+        if (!modelToSerials[mid]) modelToSerials[mid] = [];
+        modelToSerials[mid].push({
+          serialId: sid,
           condition: u.condition || 'Operational (Good)',
           status: u.status || 'Available in Warehouse',
         });
@@ -218,34 +379,76 @@ export async function fetchEquipmentUsageStats(options?: {
     });
 
     // Map and filter bookings according to scope & date range
-    const parsedEvents: BookingUsageEvent[] = rawBookings.map((b: any) => {
+    const parsedEvents: BookingUsageEvent[] = [];
+
+    rawBookings.forEach((b: any) => {
+      const rawStatus = String(b.status || b.booking_status || '').toLowerCase().trim();
+      const payStatus = String(b.payment_status || '').toLowerCase().trim();
+      const setupStatus = String(b.setup_status || '').toLowerCase().trim();
+
+      // Exclude explicitly cancelled, declined, or voided bookings
+      const isCancelled =
+        rawStatus === 'cancelled' ||
+        rawStatus === 'declined' ||
+        rawStatus === 'refunded' ||
+        payStatus === 'cancelled' ||
+        payStatus === 'declined' ||
+        payStatus === 'refunded';
+
+      if (isCancelled) return;
+
       const bDate = b.event_date ? (b.event_date.includes('T') ? b.event_date.split('T')[0] : b.event_date) : todayStr;
       const sTime = b.start_time ? String(b.start_time).slice(0, 5) : '13:00';
       const eTime = b.end_time ? String(b.end_time).slice(0, 5) : '18:00';
       const duration = calculateEventDurationHours(sTime, eTime);
-      // Strict check for Completed status of bookings
-      const isComp =
+
+      // Event date timestamp check
+      const eventDateObj = new Date(bDate + 'T00:00:00');
+      const isPastOrToday = !isNaN(eventDateObj.getTime()) && eventDateObj.getTime() <= (todayMidnight + 24 * 60 * 60 * 1000);
+
+      // Completion Criteria:
+      // 1. Explicitly marked complete in is_completed
+      // 2. status or booking_status === 'completed'
+      // 3. setup_status === 'teardown complete' or 'completed'
+      // 4. payment_status === 'completed'
+      // 5. Past / concluded event date and confirmed/paid
+      const isCompleted =
         b.is_completed === true ||
-        (b.status && b.status.toLowerCase() === 'completed') ||
-        (b.booking_status && b.booking_status.toLowerCase() === 'completed') ||
-        b.setup_status === 'Teardown Complete' ||
-        b.payment_status === 'completed';
+        rawStatus === 'completed' ||
+        setupStatus === 'teardown complete' ||
+        setupStatus === 'completed' ||
+        payStatus === 'completed' ||
+        (isPastOrToday && (payStatus === 'paid' || payStatus === 'deposit_paid' || rawStatus === 'confirmed' || rawStatus === 'upcoming' || rawStatus === 'pending_approval' || !rawStatus));
 
-      const assignedUnits = Array.isArray(b.assigned_units)
-        ? b.assigned_units
-        : typeof b.assigned_units === 'string'
-        ? JSON.parse(b.assigned_units || '[]')
-        : [];
+      let assignedUnits: string[] = [];
+      if (Array.isArray(b.assigned_units)) {
+        assignedUnits = b.assigned_units.map((u: any) => typeof u === 'string' ? u : u.serial_id || u.serialId || u.serial || String(u));
+      } else if (typeof b.assigned_units === 'string') {
+        try {
+          const parsed = JSON.parse(b.assigned_units);
+          if (Array.isArray(parsed)) {
+            assignedUnits = parsed.map((u: any) => typeof u === 'string' ? u : u.serial_id || u.serialId || u.serial || String(u));
+          }
+        } catch {}
+      }
 
-      const selectedAddons = Array.isArray(b.selected_addons)
-        ? b.selected_addons
-        : typeof b.selected_addons === 'string'
-        ? JSON.parse(b.selected_addons || '[]')
-        : [];
+      let selectedAddons: string[] = [];
+      if (Array.isArray(b.selected_addons)) {
+        selectedAddons = b.selected_addons.map((a: any) => typeof a === 'string' ? a : (a.name || a.label || ''));
+      } else if (typeof b.selected_addons === 'string') {
+        try {
+          const parsed = JSON.parse(b.selected_addons);
+          if (Array.isArray(parsed)) {
+            selectedAddons = parsed.map((a: any) => typeof a === 'string' ? a : (a.name || a.label || ''));
+          }
+        } catch {}
+      }
 
-      return {
+      const pkgName = b.package_name || (b.package_id && pkgMap[b.package_id]?.tag) || 'Event Production Setup';
+
+      parsedEvents.push({
         bookingId: b.id,
-        bookingRef: b.paymongo_reference_number || `BNH-${b.id.slice(0, 8)}`,
+        bookingRef: b.paymongo_reference_number || `BNH-${b.id?.slice(0, 8) || 'BOOKING'}`,
         customerName: b.customer_name || 'Event Host',
         eventType: b.event_type || 'Event Production',
         eventDate: bDate,
@@ -254,20 +457,19 @@ export async function fetchEquipmentUsageStats(options?: {
         endTime: eTime,
         durationHours: duration,
         venueAddress: b.venue_address || 'Luzon Venue',
-        paymentStatus: (b.payment_status || 'paid').toLowerCase(),
-        status: isComp ? 'Completed' : (b.status || 'Upcoming'),
-        isCompleted: isComp,
+        paymentStatus: payStatus || 'paid',
+        status: isCompleted ? 'Completed' : (b.status || 'Upcoming'),
+        isCompleted,
         assignedUnits,
-        packageName: b.package_name || (b.package_id && pkgMap[b.package_id]?.tag) || 'Custom Staging Package',
+        packageName: pkgName,
         selectedAddons,
-      };
+      });
     });
 
-    // Date range filter logic - strictly only completed events
-    const now = new Date();
+    // Date range filter logic
     const filteredEvents = parsedEvents.filter((ev) => {
-      // Strictly enforce completed bookings only
-      if (!ev.isCompleted) {
+      // If scope is completed_only, strictly enforce completed bookings
+      if (scope === 'completed_only' && !ev.isCompleted) {
         return false;
       }
 
@@ -301,9 +503,85 @@ export async function fetchEquipmentUsageStats(options?: {
       return true;
     });
 
-    // 2. Compute accumulated operational hours per equipment model
+    // 2. Pre-process equipment assignments per event to guarantee accurate 1-to-1 matching
+    const eventModelAllocations = new Map<string, Map<string, { qty: number; serialsUsed: string[] }>>();
+
+    filteredEvents.forEach((ev) => {
+      const modelAlloc = new Map<string, { qty: number; serialsUsed: string[] }>();
+
+      // 1. Explicit assigned serial units
+      if (ev.assignedUnits && ev.assignedUnits.length > 0) {
+        ev.assignedUnits.forEach((assignedSerial: string) => {
+          const cleanSerial = String(assignedSerial).toUpperCase().trim();
+          const foundModel = modelsList.find((m: any) => {
+            const mid = m.model_id || m.modelId || m.id || '';
+            const uList = modelToSerials[mid] || [];
+            return (
+              uList.some((u) => u.serialId.toUpperCase() === cleanSerial) ||
+              (mid && cleanSerial.startsWith(mid.toUpperCase()))
+            );
+          });
+          if (foundModel) {
+            const mid = foundModel.model_id || foundModel.modelId || foundModel.id;
+            const curr = modelAlloc.get(mid) || { qty: 0, serialsUsed: [] };
+            curr.qty += 1;
+            curr.serialsUsed.push(assignedSerial);
+            modelAlloc.set(mid, curr);
+          }
+        });
+      }
+
+      // 2. If no explicit assigned serials, match package inclusions & add-ons to single best model
+      if (modelAlloc.size === 0) {
+        const pkgLookup =
+          pkgMap[ev.packageName] ||
+          pkgMap[ev.packageName?.toLowerCase()] ||
+          pkgMap[ev.packageName?.split('—')[0]?.trim()] ||
+          pkgMap[ev.bookingRef] ||
+          { tag: '', inclusions: [] };
+
+        const allItemsToCheck = [...pkgLookup.inclusions, ...ev.selectedAddons];
+
+        allItemsToCheck.forEach((itemRaw) => {
+          const { qty, label } = parseItemQty(itemRaw);
+          if (!label || isServiceItem(label)) return;
+
+          // Find the single best matching model for this item
+          let bestModel: any = null;
+          let highestScore = 0;
+
+          modelsList.forEach((model: any) => {
+            const mid = model.model_id || model.modelId || model.id || '';
+            const score = calculateMatchScore(label, model.name, mid, model.description || '');
+            if (score > highestScore && score >= 3) {
+              highestScore = score;
+              bestModel = model;
+            }
+          });
+
+          if (bestModel) {
+            const mid = bestModel.model_id || bestModel.modelId || bestModel.id;
+            const curr = modelAlloc.get(mid) || { qty: 0, serialsUsed: [] };
+            curr.qty += qty;
+            const uList = modelToSerials[mid] || [];
+            for (let k = 0; k < qty; k++) {
+              const simSerial = uList[k]?.serialId || `${mid}-00${k + 1}`;
+              if (!curr.serialsUsed.includes(simSerial)) {
+                curr.serialsUsed.push(simSerial);
+              }
+            }
+            modelAlloc.set(mid, curr);
+          }
+        });
+      }
+
+      eventModelAllocations.set(ev.bookingId, modelAlloc);
+    });
+
+    // 3. Compute accumulated operational hours per equipment model
     const modelsUsage: EquipmentModelUsage[] = modelsList.map((model: any) => {
-      const units = modelToSerials[model.model_id] || [];
+      const mid = model.model_id || model.modelId || model.id || 'MODEL';
+      const units = modelToSerials[mid] || [];
       const totalUnits = Math.max(1, units.length);
       const operationalCount = units.filter((u) => !u.status?.includes('Maintenance') && !u.condition?.includes('Repair')).length;
       const maintenanceCount = units.length - operationalCount;
@@ -313,44 +591,13 @@ export async function fetchEquipmentUsageStats(options?: {
       const deployments: ModelDeploymentRecord[] = [];
 
       filteredEvents.forEach((ev) => {
-        let modelQuantityForEvent = 0;
-        const serialsUsed: string[] = [];
+        const allocMap = eventModelAllocations.get(ev.bookingId);
+        const alloc = allocMap?.get(mid);
 
-        // Check assigned serial units
-        if (ev.assignedUnits && ev.assignedUnits.length > 0) {
-          ev.assignedUnits.forEach((assignedSerial: string) => {
-            const foundUnit = units.find((u) => u.serialId.toUpperCase() === String(assignedSerial).toUpperCase());
-            if (foundUnit || assignedSerial.toUpperCase().startsWith(model.model_id.toUpperCase())) {
-              modelQuantityForEvent += 1;
-              serialsUsed.push(assignedSerial);
-            }
-          });
-        }
-
-        // If no explicit serial match in assignedUnits, match package inclusions & selected add-ons
-        if (modelQuantityForEvent === 0) {
-          const pkg = pkgMap[ev.packageName] || pkgMap[ev.bookingRef] || { tag: '', inclusions: [] };
-          const allItemsToCheck = [...pkg.inclusions, ...ev.selectedAddons];
-
-          allItemsToCheck.forEach((itemStr) => {
-            const { qty, label } = parseItemQty(itemStr);
-            if (matchGearToModel(label, model.name, model.category || '')) {
-              modelQuantityForEvent += qty;
-              for (let k = 0; k < qty; k++) {
-                const simSerial = units[k]?.serialId || `${model.model_id}-00${k + 1}`;
-                if (!serialsUsed.includes(simSerial)) {
-                  serialsUsed.push(simSerial);
-                }
-              }
-            }
-          });
-        }
-
-        // If this model was deployed in this event, accumulate actual operational duration
-        if (modelQuantityForEvent > 0) {
-          const eventHours = Number((ev.durationHours * modelQuantityForEvent).toFixed(1));
+        if (alloc && alloc.qty > 0) {
+          const eventHours = Number((ev.durationHours * alloc.qty).toFixed(1));
           accumulatedHours += eventHours;
-          unitsDeployedCount += modelQuantityForEvent;
+          unitsDeployedCount += alloc.qty;
 
           deployments.push({
             bookingRef: ev.bookingRef,
@@ -359,8 +606,8 @@ export async function fetchEquipmentUsageStats(options?: {
             eventType: ev.eventType,
             venue: ev.venueAddress,
             durationHours: ev.durationHours,
-            quantity: modelQuantityForEvent,
-            serialsUsed,
+            quantity: alloc.qty,
+            serialsUsed: alloc.serialsUsed,
             totalModelHours: eventHours,
           });
         }
@@ -404,8 +651,8 @@ export async function fetchEquipmentUsageStats(options?: {
       const avgHoursPerEvent = eventsCount > 0 ? Number((accumulatedHours / eventsCount).toFixed(1)) : 0;
 
       return {
-        modelId: model.model_id,
-        name: model.name,
+        modelId: mid,
+        name: model.name || mid,
         brand: model.brand || 'BINHI Standard',
         category: model.category || 'Production Gear',
         description: model.description || '',
@@ -492,27 +739,29 @@ export function exportEquipmentUsageToExcel(
     'Equipment Name': m.name,
     'Category': m.category,
     'Brand': m.brand,
-    'Fleet Units': m.totalUnits,
-    'Accumulated Operating Hours': `${m.accumulatedHours} hrs`,
-    'Events Deployed': m.eventsCount,
-    'Total Units Deployed': m.unitsDeployedCount,
-    'Avg Hours per Event': `${m.avgHoursPerEvent} hrs`,
-    'Utilization Rate (%)': `${m.utilizationRate}%`,
+    'Total Fleet Units': `${m.totalUnits} Units`,
+    'Operational Units': `${m.operationalUnitsCount} Units`,
+    'In Maintenance Units': `${m.unitsInMaintenanceCount} Units`,
+    'Accumulated Operating Runtime': `${m.accumulatedHours} Hours`,
+    'Completed Events Deployed': `${m.eventsCount} Events`,
+    'Total Units Dispatched': `${m.unitsDeployedCount} Deployments`,
+    'Avg Operating Runtime per Event': `${m.avgHoursPerEvent} Hours / Event`,
+    'Fleet Utilization Rate': `${m.utilizationRate}%`,
     'Demand Status': m.status,
-    'Wear Health': m.wearStatus,
-    'Next Maintenance In': `${m.nextServiceHoursRemaining} hrs`,
+    'Wear & Maintenance Health': `${m.wearStatus} (${m.wearPercentage}% Worn)`,
+    'Next Scheduled Maintenance Due In': `${m.nextServiceHoursRemaining} Operating Hours (Interval: Every ${m.serviceIntervalHours} hrs)`,
   }));
 
   // 2. Summary Sheet Data
   const summaryRows = [
     { 'Report Metric': 'Report Filter Range', 'Value': timeRangeLabel },
-    { 'Report Metric': 'Total Fleet Operational Hours', 'Value': `${summary.totalFleetOperatingHours} Hours` },
-    { 'Report Metric': 'Completed Events Tracked', 'Value': `${summary.totalCompletedEvents} Events` },
-    { 'Report Metric': 'Total Unit Deployments', 'Value': `${summary.totalEquipmentDeployments} Deployments` },
+    { 'Report Metric': 'Total Fleet Operational Runtime', 'Value': `${summary.totalFleetOperatingHours} Operating Hours` },
+    { 'Report Metric': 'Completed Events Tracked', 'Value': `${summary.totalCompletedEvents} Completed Events` },
+    { 'Report Metric': 'Total Equipment Unit Deployments', 'Value': `${summary.totalEquipmentDeployments} Unit Deployments` },
     { 'Report Metric': 'Average Fleet Utilization', 'Value': `${summary.avgFleetUtilization}%` },
-    { 'Report Metric': 'Top Utilized Equipment', 'Value': summary.topUtilizedModel },
+    { 'Report Metric': 'Top Utilized Equipment Model', 'Value': summary.topUtilizedModel },
     { 'Report Metric': 'Highest Demand Category', 'Value': summary.topCategory },
-    { 'Report Metric': 'Active Tracked Models', 'Value': `${summary.activeTrackedModelsCount} Models` },
+    { 'Report Metric': 'Active Tracked Models', 'Value': `${summary.activeTrackedModelsCount} Equipment Models` },
     { 'Report Metric': 'Total Physical Serial Fleet', 'Value': `${summary.totalPhysicalUnitsCount} Physical Units` },
     { 'Report Metric': 'Generated At', 'Value': new Date().toLocaleString() },
   ];
@@ -529,9 +778,9 @@ export function exportEquipmentUsageToExcel(
         'Event Date': dep.eventDate,
         'Event Type': dep.eventType,
         'Venue': dep.venue,
-        'Event Duration (Hours)': dep.durationHours,
-        'Quantity Deployed': dep.quantity,
-        'Accumulated Model Hours': dep.totalModelHours,
+        'Event Duration': `${dep.durationHours} Hours`,
+        'Quantity Deployed': `${dep.quantity} Units`,
+        'Accumulated Model Operating Time': `${dep.totalModelHours} Operating Hours`,
         'Serials Assigned': dep.serialsUsed.join(', '),
       });
     });
@@ -554,21 +803,28 @@ export function exportEquipmentUsageToExcel(
 }
 
 /**
- * Export Equipment Usage Report to CSV
+ * Export Equipment Usage Report to CSV with explicit units
  */
 export function exportEquipmentUsageToCSV(models: EquipmentModelUsage[]) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const rows = models.map((m) => ({
-    model_id: m.modelId,
-    equipment_name: m.name,
-    category: m.category,
-    total_fleet_units: m.totalUnits,
-    accumulated_operational_hours: m.accumulatedHours,
-    events_count: m.eventsCount,
-    utilization_rate_pct: m.utilizationRate,
-    demand_status: m.status,
-    wear_status: m.wearStatus,
-    next_maintenance_hours_remaining: m.nextServiceHoursRemaining,
+    'Model ID': m.modelId,
+    'Equipment Name': m.name,
+    'Category': m.category,
+    'Brand': m.brand,
+    'Total Fleet Units': `${m.totalUnits} Units`,
+    'Operational Units': `${m.operationalUnitsCount} Units`,
+    'In Maintenance Units': `${m.unitsInMaintenanceCount} Units`,
+    'Accumulated Operating Runtime': `${m.accumulatedHours} Hours`,
+    'Completed Events Count': `${m.eventsCount} Events`,
+    'Total Unit Deployments': `${m.unitsDeployedCount} Deployments`,
+    'Avg Runtime per Event': `${m.avgHoursPerEvent} Hours/Event`,
+    'Utilization Rate (%)': `${m.utilizationRate}%`,
+    'Demand Status': m.status,
+    'Wear Health Status': m.wearStatus,
+    'Wear Cycle (% Worn)': `${m.wearPercentage}%`,
+    'Next Maintenance Due In': `${m.nextServiceHoursRemaining} Operating Hours`,
+    'Recommended Maintenance Interval': `Every ${m.serviceIntervalHours} Operating Hours`,
   }));
 
   const ws = XLSX.utils.json_to_sheet(rows);

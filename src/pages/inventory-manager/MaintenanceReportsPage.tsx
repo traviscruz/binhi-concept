@@ -9,16 +9,20 @@ import {
   IconCheck,
   IconPrinter,
   IconDownload,
+  IconFileSpreadsheet,
+  IconChevronDown,
   IconX,
 } from '../../components/shared/icons';
 import {
   fetchMaintenanceReportData,
   exportMaintenanceToCSV,
+  exportMaintenanceToExcel,
   computeMaintenanceSummary,
   type MaintenanceLogEntry,
   type MaintenanceStatsSummary,
 } from '../../utils/maintenanceReportService';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
+import { DualCalendarDateRangePicker, formatDateWords, formatRangeWords } from '../../components/shared/DualCalendarDateRangePicker';
 import binhiLogo from '../../assets/branding/BINHI Concept Logo.webp';
 
 export default function MaintenanceReportsPage({ go }: { go: (p: Page) => void }) {
@@ -37,11 +41,23 @@ export default function MaintenanceReportsPage({ go }: { go: (p: Page) => void }
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
 
-  // Print Preview Modal
+  // Print Preview Modal & Export Menu
   const [showPrintModal, setShowPrintModal] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const [selectedEntryDetail, setSelectedEntryDetail] = useState<MaintenanceLogEntry | null>(null);
 
   const printAreaRef = useRef<HTMLDivElement>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const loadData = async () => {
     setLoading(true);
@@ -125,50 +141,125 @@ export default function MaintenanceReportsPage({ go }: { go: (p: Page) => void }
   return (
     <div className="space-y-6">
       {/* ── Screen Header & Top Navigation Bar ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.08]">
-        <div>
+      <div className="space-y-4 pb-4 border-b border-[#24252c]/[0.08]">
+        {/* Top Report Type Switcher */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="inline-flex p-1 bg-[var(--mist)] rounded-2xl border border-[#24252c]/[0.08] w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={() => go('inventory-reports')}
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-[#24252c]/60 hover:text-[var(--ink)] hover:bg-white/60 transition-all cursor-pointer"
+            >
+              <IconTicket className="w-3.5 h-3.5 text-[#1090F8]" />
+              <span>Equipment Usage & Wear</span>
+            </button>
+            <button
+              type="button"
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-white text-[var(--ink)] shadow-xs transition-all cursor-default"
+            >
+              <IconShield className="w-3.5 h-3.5 text-amber-600" />
+              <span>Maintenance & Quarantine</span>
+            </button>
+          </div>
+
           <div className="flex items-center gap-2">
             <MonoBadge icon={IconShield}>Inventory Intelligence</MonoBadge>
             <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
               Audit & Compliance
             </span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-[var(--ink)] tracking-tight mt-2">
-            Equipment Maintenance & Quarantine Reports
-          </h1>
-          <p className="text-xs text-[#24252c]/60 mt-1">
-            Official audit tracking for equipment downtime, repair costs, failure frequency, and liability attribution.
-          </p>
         </div>
 
-        {/* Action Controls */}
-        <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Switch to Fleet Usage Report */}
-          <button
-            type="button"
-            onClick={() => go('inventory-reports')}
-            className="text-xs font-semibold px-3.5 py-2 rounded-xl bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/10 hover:bg-[#1090F8]/10 hover:text-[#1090F8] transition-colors cursor-pointer flex items-center gap-1.5"
-          >
-            <IconTicket className="w-3.5 h-3.5" /> Fleet Usage
-          </button>
+        {/* Title & Actions Bar */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-[var(--ink)] tracking-tight">
+              Equipment Maintenance & Quarantine Reports
+            </h1>
+            <p className="text-xs text-[#24252c]/60 mt-1">
+              Official audit tracking for equipment downtime, repair costs, failure frequency, and liability attribution.
+            </p>
+          </div>
 
-          {/* Export to CSV */}
-          <button
-            type="button"
-            onClick={() => exportMaintenanceToCSV(filteredLogs)}
-            className="text-xs font-semibold px-3.5 py-2 rounded-xl bg-white text-[var(--ink)] border border-[#24252c]/15 hover:bg-[var(--mist)] transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
-          >
-            <IconDownload className="w-3.5 h-3.5 text-emerald-600" /> Export CSV
-          </button>
+          {/* Action Controls */}
+          <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap sm:flex-nowrap">
+            {/* Refresh */}
+            <button
+              type="button"
+              onClick={loadData}
+              disabled={loading}
+              className="flex items-center justify-center gap-1.5 bg-white border border-[#24252c]/15 text-[var(--ink)] text-xs font-semibold px-3.5 py-2 rounded-xl hover:bg-[var(--mist)] transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
+              title="Refresh maintenance data"
+            >
+              <span className={`inline-block ${loading ? 'animate-spin text-[#1090F8]' : ''}`}>↻</span>
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
 
-          {/* Formal Print Preview */}
-          <button
-            type="button"
-            onClick={() => setShowPrintModal(true)}
-            className="text-xs font-bold px-4 py-2 rounded-xl bg-[var(--ink)] text-white hover:bg-[var(--ink-soft)] transition-colors cursor-pointer flex items-center gap-1.5 shadow-md"
-          >
-            <IconPrinter className="w-3.5 h-3.5" /> Formal Print Sheet
-          </button>
+            {/* Consolidated Export Dropdown */}
+            <div className="relative" ref={exportMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                className="flex items-center gap-1.5 bg-white border border-[#24252c]/15 text-[var(--ink)] text-xs font-semibold px-3.5 py-2 rounded-xl hover:bg-[var(--mist)] transition-colors shadow-2xs cursor-pointer"
+                title="Export maintenance report"
+              >
+                <IconDownload className="w-3.5 h-3.5 text-[#1090F8]" />
+                <span>Export</span>
+                <IconChevronDown className={`w-3.5 h-3.5 text-[#24252c]/50 transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showExportMenu && (
+                <div className="absolute right-0 mt-1.5 w-56 rounded-2xl bg-white border border-[#24252c]/10 shadow-xl p-1.5 z-30 space-y-1 animate-fade-in">
+                  <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#24252c]/40 border-b border-[#24252c]/[0.06]">
+                    Export Maintenance Data
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      exportMaintenanceToExcel(filteredLogs, summary, `${datePreset} Range`);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-[var(--ink)] hover:bg-[var(--mist)] transition-colors text-left cursor-pointer"
+                  >
+                    <div className="w-6 h-6 rounded-lg bg-blue-50 text-[#1090F8] flex items-center justify-center shrink-0">
+                      <IconDownload className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <div className="font-bold">Export Excel (.xlsx)</div>
+                      <div className="text-[10px] text-[#24252c]/50">Summary & incident logs workbook</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      exportMaintenanceToCSV(filteredLogs);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-[var(--ink)] hover:bg-[var(--mist)] transition-colors text-left cursor-pointer"
+                  >
+                    <div className="w-6 h-6 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                      <IconFileSpreadsheet className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <div className="font-bold">Export CSV (.csv)</div>
+                      <div className="text-[10px] text-[#24252c]/50">Downtime & repairs matrix</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Formal Print Preview */}
+            <button
+              type="button"
+              onClick={() => setShowPrintModal(true)}
+              className="flex items-center gap-1.5 bg-[var(--ink)] text-white text-xs font-semibold px-4 py-2 rounded-xl hover:bg-[var(--ink-soft)] transition-colors shadow-sm cursor-pointer whitespace-nowrap"
+            >
+              <IconPrinter className="w-3.5 h-3.5" />
+              <span>Formal Print Sheet</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -332,16 +423,15 @@ export default function MaintenanceReportsPage({ go }: { go: (p: Page) => void }
           </div>
         </div>
 
-        {/* Dropdown Filters & Date Controls */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-2 border-t border-[#24252c]/[0.06] text-xs">
-          <div>
-            <label className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 block mb-1">
-              Category
-            </label>
+        {/* Dropdown Filters & Dual Calendar Date Range Picker */}
+        <div className="flex flex-wrap items-center gap-2.5 pt-2 border-t border-[#24252c]/[0.06] text-xs">
+          {/* Category */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[#24252c]/50 font-medium whitespace-nowrap">Category:</span>
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="w-full bg-[var(--mist)] border border-[#24252c]/10 rounded-lg px-2.5 py-1.5 text-xs text-[var(--ink)] focus:outline-none"
+              className="rounded-xl border border-[#24252c]/15 bg-white px-3 py-2 text-xs text-[var(--ink)] font-semibold focus:outline-none focus:border-[#1090F8] shadow-2xs"
             >
               {categories.map((c) => (
                 <option key={c} value={c}>
@@ -351,14 +441,13 @@ export default function MaintenanceReportsPage({ go }: { go: (p: Page) => void }
             </select>
           </div>
 
-          <div>
-            <label className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 block mb-1">
-              Severity
-            </label>
+          {/* Severity */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[#24252c]/50 font-medium whitespace-nowrap">Severity:</span>
             <select
               value={severityFilter}
               onChange={(e) => setSeverityFilter(e.target.value)}
-              className="w-full bg-[var(--mist)] border border-[#24252c]/10 rounded-lg px-2.5 py-1.5 text-xs text-[var(--ink)] focus:outline-none"
+              className="rounded-xl border border-[#24252c]/15 bg-white px-3 py-2 text-xs text-[var(--ink)] font-semibold focus:outline-none focus:border-[#1090F8] shadow-2xs"
             >
               <option value="All">All Severities</option>
               <option value="High">High Severity</option>
@@ -367,14 +456,13 @@ export default function MaintenanceReportsPage({ go }: { go: (p: Page) => void }
             </select>
           </div>
 
-          <div>
-            <label className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 block mb-1">
-              Liability Attribution
-            </label>
+          {/* Liability Attribution */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[#24252c]/50 font-medium whitespace-nowrap">Liability:</span>
             <select
               value={liabilityFilter}
               onChange={(e) => setLiabilityFilter(e.target.value)}
-              className="w-full bg-[var(--mist)] border border-[#24252c]/10 rounded-lg px-2.5 py-1.5 text-xs text-[var(--ink)] focus:outline-none"
+              className="rounded-xl border border-[#24252c]/15 bg-white px-3 py-2 text-xs text-[var(--ink)] font-semibold focus:outline-none focus:border-[#1090F8] shadow-2xs"
             >
               <option value="All">All Liabilities</option>
               <option value="Client Liable">Client Liable</option>
@@ -383,65 +471,37 @@ export default function MaintenanceReportsPage({ go }: { go: (p: Page) => void }
             </select>
           </div>
 
-          <div>
-            <label className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 block mb-1">
-              Date Period Preset
-            </label>
-            <select
-              value={datePreset}
-              onChange={(e) => handlePresetChange(e.target.value as any)}
-              className="w-full bg-[var(--mist)] border border-[#24252c]/10 rounded-lg px-2.5 py-1.5 text-xs text-[var(--ink)] font-semibold focus:outline-none"
-            >
-              <option value="all">All Recorded Dates</option>
-              <option value="this_month">This Current Month</option>
-              <option value="30days">Last 30 Days</option>
-              <option value="year">This Calendar Year</option>
-              <option value="custom">Custom Date Range</option>
-            </select>
-          </div>
-        </div>
+          {/* Custom Dual-Calendar Date Range Picker with Presets & Strict Range Validation */}
+          <DualCalendarDateRangePicker
+            startDate={startDate}
+            endDate={endDate}
+            onChange={(start, end) => {
+              setStartDate(start);
+              setEndDate(end);
+            }}
+            preset={datePreset}
+            onPresetChange={(p) => setDatePreset(p as any)}
+          />
 
-        {/* Custom Date Range Inputs */}
-        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#24252c]/[0.06] text-xs">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-[#24252c]/50 shrink-0">
-            Date Filter:
-          </span>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <div className="flex items-center gap-1 bg-[var(--mist)] px-2.5 py-1 rounded-lg border border-[#24252c]/10">
-              <span className="text-[10px] font-medium text-[#24252c]/50">Start:</span>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => {
-                  setStartDate(e.target.value);
-                  setDatePreset('custom');
-                }}
-                className="bg-transparent text-xs text-[var(--ink)] font-semibold focus:outline-none"
-              />
-            </div>
-            <span className="text-[#24252c]/40 font-medium">–</span>
-            <div className="flex items-center gap-1 bg-[var(--mist)] px-2.5 py-1 rounded-lg border border-[#24252c]/10">
-              <span className="text-[10px] font-medium text-[#24252c]/50">End:</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => {
-                  setEndDate(e.target.value);
-                  setDatePreset('custom');
-                }}
-                className="bg-transparent text-xs text-[var(--ink)] font-semibold focus:outline-none"
-              />
-            </div>
-            {(startDate || endDate || datePreset !== 'all') && (
-              <button
-                type="button"
-                onClick={() => handlePresetChange('all')}
-                className="text-[11px] font-semibold text-rose-600 hover:text-rose-800 px-2 py-1 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer flex items-center gap-1"
-              >
-                <IconX className="w-3 h-3" /> Reset Dates
-              </button>
-            )}
-          </div>
+          {/* Reset Filters (if active) */}
+          {(startDate || endDate || statusFilter !== 'All' || categoryFilter !== 'All' || severityFilter !== 'All' || liabilityFilter !== 'All' || search || datePreset !== 'all') && (
+            <button
+              type="button"
+              onClick={() => {
+                setStartDate('');
+                setEndDate('');
+                setStatusFilter('All');
+                setCategoryFilter('All');
+                setSeverityFilter('All');
+                setLiabilityFilter('All');
+                setSearch('');
+                setDatePreset('all');
+              }}
+              className="text-[11px] font-semibold text-rose-600 hover:text-rose-800 px-2.5 py-1.5 rounded-xl hover:bg-rose-50 transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
+            >
+              <IconX className="w-3.5 h-3.5" /> Reset Filters
+            </button>
+          )}
         </div>
       </div>
 
@@ -466,57 +526,154 @@ export default function MaintenanceReportsPage({ go }: { go: (p: Page) => void }
             No maintenance records match your filter criteria.
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-[var(--mist)] text-[#24252c]/60 font-semibold border-b border-[#24252c]/[0.06]">
-                <tr>
-                  <th className="py-3 px-4">Serial Tag & Model</th>
-                  <th className="py-3 px-3">Defect / Reason</th>
-                  <th className="py-3 px-3">Quarantine Date</th>
-                  <th className="py-3 px-3">Downtime</th>
-                  <th className="py-3 px-3">Est. Cost & Liability</th>
-                  <th className="py-3 px-3">Status</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#24252c]/[0.04]">
-                {filteredLogs.map((l) => (
-                  <tr key={l.id} className="hover:bg-black/[0.015] transition-colors">
-                    <td className="py-3 px-4">
-                      <div className="font-mono font-bold text-[11px] text-[var(--ink)] flex items-center gap-1.5">
-                        <span className="px-2 py-0.5 rounded bg-zinc-100 text-zinc-800 border border-zinc-200">
-                          {l.serialId}
-                        </span>
-                      </div>
-                      <div className="font-semibold text-[var(--ink)] mt-1">{l.modelName}</div>
-                      <div className="text-[10px] text-[#24252c]/50">{l.category} · {l.brand}</div>
-                    </td>
-
-                    <td className="py-3 px-3 max-w-xs">
-                      <div className="font-medium text-[var(--ink)] leading-snug line-clamp-2">
-                        {l.issueDescription}
-                      </div>
-                      {l.eventName && (
-                        <div className="text-[10px] text-[#1090F8] font-semibold mt-0.5 truncate">
-                          Event: {l.eventName}
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden lg:block overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-[var(--mist)] text-[#24252c]/60 font-semibold border-b border-[#24252c]/[0.06]">
+                  <tr>
+                    <th className="py-3 px-4 whitespace-nowrap">Serial Tag & Model</th>
+                    <th className="py-3 px-3 whitespace-nowrap">Defect / Reason</th>
+                    <th className="py-3 px-3 whitespace-nowrap">Quarantine Date</th>
+                    <th className="py-3 px-3 whitespace-nowrap">Downtime</th>
+                    <th className="py-3 px-3 whitespace-nowrap">Est. Cost & Liability</th>
+                    <th className="py-3 px-3 whitespace-nowrap">Status</th>
+                    <th className="py-3 px-4 text-right whitespace-nowrap">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#24252c]/[0.04]">
+                  {filteredLogs.map((l) => (
+                    <tr key={l.id} className="hover:bg-black/[0.015] transition-colors">
+                      <td className="py-3 px-4">
+                        <div className="font-mono font-bold text-[11px] text-[var(--ink)] flex items-center gap-1.5">
+                          <span className="px-2 py-0.5 rounded bg-zinc-100 text-zinc-800 border border-zinc-200">
+                            {l.serialId}
+                          </span>
                         </div>
-                      )}
-                    </td>
+                        <div className="font-semibold text-[var(--ink)] mt-1">{l.modelName}</div>
+                        <div className="text-[10px] text-[#24252c]/50">{l.category} · {l.brand}</div>
+                      </td>
 
-                    <td className="py-3 px-3 whitespace-nowrap">
-                      <div className="font-semibold text-[var(--ink)]">{l.quarantineDate}</div>
-                      <div className="text-[10px] text-[#24252c]/50">
-                        {l.restoredDate ? `Restored: ${l.restoredDate}` : 'Currently Active'}
-                      </div>
-                    </td>
+                      <td className="py-3 px-3 max-w-xs">
+                        <div className="font-medium text-[var(--ink)] leading-snug line-clamp-2">
+                          {l.issueDescription}
+                        </div>
+                        {l.eventName && (
+                          <div className="text-[10px] text-[#1090F8] font-semibold mt-0.5 truncate">
+                            Event: {l.eventName}
+                          </div>
+                        )}
+                      </td>
 
-                    <td className="py-3 px-3 whitespace-nowrap">
-                      <span className="font-extrabold text-[var(--ink)]">{l.downtimeDays}</span>
-                      <span className="text-[10px] text-[#24252c]/50 ml-1">days</span>
-                    </td>
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <div className="font-semibold text-[var(--ink)]">{formatDateWords(l.quarantineDate) || l.quarantineDate}</div>
+                        <div className="text-[10px] text-[#24252c]/50">
+                          {l.restoredDate ? `Restored: ${formatDateWords(l.restoredDate)}` : 'Currently Active'}
+                        </div>
+                      </td>
 
-                    <td className="py-3 px-3 whitespace-nowrap">
-                      <div className="font-bold text-[var(--ink)]">₱{l.estimatedCost.toLocaleString()}</div>
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <span className="font-extrabold text-[var(--ink)]">{l.downtimeDays}</span>
+                        <span className="text-[10px] text-[#24252c]/50 ml-1">days</span>
+                      </td>
+
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <div className="font-bold text-[var(--ink)]">₱{l.estimatedCost.toLocaleString()}</div>
+                        <span
+                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full inline-block mt-0.5 ${
+                            l.clientLiability === 'Client Liable'
+                              ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                              : 'bg-zinc-100 text-zinc-700'
+                          }`}
+                        >
+                          {l.clientLiability}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
+                            l.status === 'In Repair'
+                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                              : l.status === 'Restored'
+                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                              : 'bg-zinc-800 text-white'
+                          }`}
+                        >
+                          {l.status === 'In Repair' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
+                          {l.status === 'Restored' && <IconCheck className="w-3 h-3 text-emerald-600" />}
+                          {l.status}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedEntryDetail(l)}
+                          className="text-[11px] font-semibold text-[#1090F8] hover:underline cursor-pointer"
+                        >
+                          View Audit Log
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View (Zero Horizontal Scrollbar) */}
+            <div className="block lg:hidden p-4 space-y-3">
+              {filteredLogs.map((l) => (
+                <div
+                  key={l.id}
+                  className="p-4 rounded-2xl bg-[var(--mist)]/40 border border-[#24252c]/[0.08] space-y-3 text-xs"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-zinc-100 text-zinc-800 border border-zinc-200 inline-block mb-1">
+                        {l.serialId}
+                      </span>
+                      <div className="font-bold text-sm text-[var(--ink)]">{l.modelName}</div>
+                      <div className="text-[10px] text-[#24252c]/50">{l.category} · {l.brand}</div>
+                    </div>
+
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 shrink-0 ${
+                        l.status === 'In Repair'
+                          ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                          : l.status === 'Restored'
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                          : 'bg-zinc-800 text-white'
+                      }`}
+                    >
+                      {l.status === 'In Repair' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
+                      {l.status === 'Restored' && <IconCheck className="w-3 h-3 text-emerald-600" />}
+                      {l.status}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-white border border-[#24252c]/[0.06] text-xs">
+                    <p className="font-medium text-[var(--ink)]">{l.issueDescription}</p>
+                    {l.eventName && (
+                      <p className="text-[10px] text-[#1090F8] font-semibold mt-1">Event: {l.eventName}</p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
+                    <div>
+                      <span className="text-[#24252c]/50 block text-[10px] uppercase font-bold">Quarantine Date</span>
+                      <strong className="text-[var(--ink)]">{formatDateWords(l.quarantineDate) || l.quarantineDate}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[#24252c]/50 block text-[10px] uppercase font-bold">Downtime</span>
+                      <strong className="text-[var(--ink)]">{l.downtimeDays} Days</strong>
+                    </div>
+                    <div>
+                      <span className="text-[#24252c]/50 block text-[10px] uppercase font-bold">Estimated Cost</span>
+                      <strong className="text-[var(--ink)]">₱{l.estimatedCost.toLocaleString()}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[#24252c]/50 block text-[10px] uppercase font-bold">Liability</span>
                       <span
                         className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full inline-block mt-0.5 ${
                           l.clientLiability === 'Client Liable'
@@ -526,38 +683,20 @@ export default function MaintenanceReportsPage({ go }: { go: (p: Page) => void }
                       >
                         {l.clientLiability}
                       </span>
-                    </td>
+                    </div>
+                  </div>
 
-                    <td className="py-3 px-3 whitespace-nowrap">
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
-                          l.status === 'In Repair'
-                            ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                            : l.status === 'Restored'
-                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                            : 'bg-zinc-800 text-white'
-                        }`}
-                      >
-                        {l.status === 'In Repair' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
-                        {l.status === 'Restored' && <IconCheck className="w-3 h-3 text-emerald-600" />}
-                        {l.status}
-                      </span>
-                    </td>
-
-                    <td className="py-3 px-4 text-right whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedEntryDetail(l)}
-                        className="text-[11px] font-semibold text-[#1090F8] hover:underline cursor-pointer"
-                      >
-                        View Audit Log
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEntryDetail(l)}
+                    className="w-full bg-white border border-[#24252c]/15 hover:border-[#1090F8] text-[var(--ink)] text-xs font-bold py-2 rounded-xl transition-colors cursor-pointer text-center mt-1"
+                  >
+                    View Complete Audit Log →
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -588,8 +727,18 @@ export default function MaintenanceReportsPage({ go }: { go: (p: Page) => void }
                   <span className="font-bold text-[var(--ink)]">{selectedEntryDetail.status}</span>
                 </div>
                 <div>
+                  <span className="text-[#24252c]/50 text-[10px] uppercase font-bold block">Quarantine Date</span>
+                  <span className="font-bold text-[var(--ink)]">{formatDateWords(selectedEntryDetail.quarantineDate)}</span>
+                </div>
+                <div>
                   <span className="text-[#24252c]/50 text-[10px] uppercase font-bold block">Downtime</span>
                   <span className="font-bold text-[var(--ink)]">{selectedEntryDetail.downtimeDays} Days</span>
+                </div>
+                <div>
+                  <span className="text-[#24252c]/50 text-[10px] uppercase font-bold block">Restoration</span>
+                  <span className="font-bold text-[var(--ink)]">
+                    {selectedEntryDetail.restoredDate ? formatDateWords(selectedEntryDetail.restoredDate) : 'Ongoing'}
+                  </span>
                 </div>
                 <div>
                   <span className="text-[#24252c]/50 text-[10px] uppercase font-bold block">Estimated Cost</span>
@@ -673,7 +822,7 @@ export default function MaintenanceReportsPage({ go }: { go: (p: Page) => void }
                 </span>
                 <p className="mt-2 text-zinc-600 font-medium">Date Generated: {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
                 <p className="text-zinc-600 font-medium">
-                  Reporting Period: {startDate || endDate ? `${startDate || 'Start'} to ${endDate || 'Present'}` : 'All Recorded Dates'}
+                  Reporting Period: {formatRangeWords(startDate, endDate)}
                 </p>
                 <p className="text-zinc-600 font-medium">Scope: Full Warehouse Fleet Audit</p>
               </div>

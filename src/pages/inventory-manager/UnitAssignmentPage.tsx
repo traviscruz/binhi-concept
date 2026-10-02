@@ -9,6 +9,7 @@ import {
   IconClock,
   IconChevronUp,
   IconChevronDown,
+  IconX,
 } from '../../components/shared/icons';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { supabase } from '../../lib/supabase';
@@ -98,6 +99,13 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [expandedRef, setExpandedRef] = useState<string | null>(null);
   const [swappingSerial, setSwappingSerial] = useState(false);
+
+  // Success Notification State
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const showSuccess = (msg: string) => {
+    setSuccessMessage(msg);
+    setTimeout(() => setSuccessMessage(null), 4500);
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -440,6 +448,7 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
       });
 
       await fetchData();
+      showSuccess(`Replaced unit ${oldSerialId} with available unit ${newSerialId} for "${gearName}".`);
       window.dispatchEvent(new Event('inventory-updated'));
     } catch (err) {
       console.error('Failed to swap unit:', err);
@@ -502,6 +511,26 @@ export default function UnitAssignmentPage({ go }: { go: (p: Page) => void }) {
           Manage Unit Quarantine in Catalog
         </button>
       </div>
+
+      {/* Operation Success Notification Banner */}
+      {successMessage && (
+        <div className="flex items-center justify-between gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold shadow-xs animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-2.5">
+            <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-700 flex items-center justify-center shrink-0">
+              <IconCheck className="w-3.5 h-3.5 text-emerald-700" />
+            </span>
+            <span>{successMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSuccessMessage(null)}
+            className="text-emerald-700 hover:text-emerald-900 p-1 rounded-full hover:bg-emerald-100/50 cursor-pointer transition-colors"
+            title="Dismiss notification"
+          >
+            <IconX className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Top Conflict Warning Banner if Any Booking Has Under-Repair Units */}
       {totalConflictBookings > 0 && (
