@@ -105,6 +105,38 @@ export default function App() {
   const [wishlistIds, setWishlistIds] = useState<string[]>(() => getLocalWishlistIds());
   const [packages, setPackages] = useState<PackageData[]>(FEATURED_PACKAGES);
 
+  // Capture partner referral code from URL ?ref=... on initial visit & persist for the current session only
+  useEffect(() => {
+    try {
+      // Clear any legacy persistent localStorage so restarting browser always starts clean
+      localStorage.removeItem('binhi_ref_code');
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const refParam = urlParams.get('ref');
+      const pageParam = urlParams.get('page');
+      // Only capture affiliate partner referral codes (ignore booking/payment internal tracking references)
+      if (
+        refParam &&
+        refParam.trim() &&
+        pageParam !== 'booking-status' &&
+        pageParam !== 'payment-success' &&
+        pageParam !== 'payment-failure' &&
+        pageParam !== 'payment-cancel'
+      ) {
+        const cleanRef = refParam.trim().toUpperCase();
+        sessionStorage.setItem('binhi_ref_code', cleanRef);
+
+        // Clean '?ref=...' from the browser URL address bar so it does not persist on future reloads
+        urlParams.delete('ref');
+        const searchStr = urlParams.toString();
+        const newUrl = window.location.pathname + (searchStr ? `?${searchStr}` : '') + window.location.hash;
+        window.history.replaceState({}, document.title, newUrl);
+      }
+    } catch (e) {
+      console.warn('Error capturing referral code from URL:', e);
+    }
+  }, []);
+
   // Check active banner vouchers for header spacing
   useEffect(() => {
     async function checkBanner() {

@@ -247,6 +247,7 @@ export default function CheckoutPage({
             setPromoOpen(true);
             setAffiliateNotice(`Partner referral active: ${discRate}% discount applied via ${p.partnerName} (${p.businessName || 'Event Partner'})!`);
             sessionStorage.setItem('binhi_ref_code', p.referralCode);
+            localStorage.removeItem('binhi_ref_code');
           }
         }
       } catch (e) {
@@ -288,6 +289,7 @@ export default function CheckoutPage({
       setPromoInput('');
       setAffiliateNotice(`Partner referral active: ${discRate}% partner discount applied via ${p.partnerName}!`);
       sessionStorage.setItem('binhi_ref_code', p.referralCode);
+      localStorage.removeItem('binhi_ref_code');
       return;
     }
 
@@ -304,6 +306,7 @@ export default function CheckoutPage({
     setPromoError('');
     setAffiliateNotice('');
     sessionStorage.removeItem('binhi_ref_code');
+    localStorage.removeItem('binhi_ref_code');
   };
 
   const handleToggleBundle = (bundle: CrossSellBundle) => {
@@ -1256,6 +1259,8 @@ export default function CheckoutPage({
         try {
           sessionStorage.removeItem('binhi_checkout_event_desc');
           sessionStorage.removeItem('binhi_checkout_event_type');
+          sessionStorage.removeItem('binhi_ref_code');
+          localStorage.removeItem('binhi_ref_code');
           localStorage.removeItem('binhi_selected_event_date');
           localStorage.removeItem('binhi_selected_start_time');
           localStorage.removeItem('binhi_selected_end_time');

@@ -183,8 +183,8 @@ export default function PartnerDashboardPage({ go }: { go: (p: Page) => void }) 
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
       {/* ── 1. Top Header & Quick Actions (System Admin Standard) ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.06]">
-        <div>
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.06]">
+        <div className="max-w-2xl">
           <MonoBadge icon={IconTicket}>Affiliate &amp; Partner Commission Management</MonoBadge>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ink)] mt-1.5">
             Partner System Overview &amp; Earnings
@@ -194,34 +194,35 @@ export default function PartnerDashboardPage({ go }: { go: (p: Page) => void }) 
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+        {/* Top-Right Responsive Action Buttons */}
+        <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap justify-start lg:justify-end shrink-0 w-full lg:w-auto">
           <button
             type="button"
             onClick={loadPartnerData}
             disabled={loading}
-            className="px-4 py-2.5 rounded-full bg-white hover:bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/10 text-xs font-semibold transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
+            className="flex-1 sm:flex-initial px-4 py-2.5 rounded-full bg-white hover:bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/10 text-xs font-semibold transition-all shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60 active:scale-95"
             title="Refresh dashboard data"
           >
-            <span className={`inline-block ${loading ? 'animate-spin' : ''}`}>↻</span>
+            <span className={`inline-block text-sm ${loading ? 'animate-spin' : ''}`}>↻</span>
             <span>Refresh</span>
           </button>
 
           <button
             type="button"
             onClick={handleCopyLink}
-            className="px-4 py-2.5 rounded-full bg-white hover:bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/10 text-xs font-semibold transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
+            className="flex-1 sm:flex-initial px-4 py-2.5 rounded-full bg-white hover:bg-[var(--mist)] text-[var(--ink)] border border-[#24252c]/10 text-xs font-semibold transition-all shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap active:scale-95"
           >
-            <IconExternal className="w-3.5 h-3.5 text-[#1090F8]" />
+            <IconExternal className="w-3.5 h-3.5 text-[#1090F8] shrink-0" />
             <span>{copiedLink ? 'Link Copied!' : 'Copy Referral Link'}</span>
           </button>
 
           <button
             type="button"
             onClick={handleCopyCode}
-            className="bg-[#1090F8] hover:bg-[#0c78d1] text-white text-xs font-bold px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+            className="w-full sm:w-auto px-5 py-2.5 rounded-full bg-[#1090F8] hover:bg-[#0c78d1] text-white text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap active:scale-95"
           >
-            <IconTicket className="w-3.5 h-3.5" />
-            <span>{copiedCode ? 'Code Copied!' : `Promo Code: ${partner?.referralCode}`}</span>
+            <IconTicket className="w-3.5 h-3.5 shrink-0" />
+            <span>{copiedCode ? 'Code Copied!' : `Promo Code: ${partner?.referralCode || 'PARTNER'}`}</span>
           </button>
         </div>
       </div>
@@ -742,20 +743,20 @@ export default function PartnerDashboardPage({ go }: { go: (p: Page) => void }) 
 
       {/* ── Lightbox Modal: Proof of Payment Slip ── */}
       <ModalOverlay isOpen={!!viewingProof} onClose={() => setViewingProof(null)}>
-        <div className="bg-white rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative space-y-4 animate-scale-in">
+        <div className="bg-white rounded-[2.5rem] p-6 sm:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative space-y-4 text-left">
           <button
             type="button"
             onClick={() => setViewingProof(null)}
-            className="absolute top-4 right-4 p-1.5 rounded-full hover:bg-[var(--mist)] text-[#24252c]/40 cursor-pointer"
+            className="absolute top-6 right-6 text-[#24252c]/40 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors cursor-pointer"
           >
             <IconX className="w-5 h-5" />
           </button>
 
           <div className="text-center space-y-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+            <span className="text-[10px] font-extrabold tracking-widest text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full uppercase inline-block">
               Verified Commission Disbursement
             </span>
-            <h3 className="text-lg font-black text-[var(--ink)] mt-1">Official Proof of Payment</h3>
+            <h3 className="text-xl font-extrabold tracking-tight text-[var(--ink)] mt-2">Official Proof of Payment</h3>
             <p className="text-xs text-[#24252c]/60">
               Reference: <strong className="font-mono text-[var(--ink)]">{viewingProof?.ref}</strong>
             </p>
@@ -763,19 +764,19 @@ export default function PartnerDashboardPage({ go }: { go: (p: Page) => void }) 
 
           {viewingProof && (
             <div className="space-y-4">
-              <div className="p-2 bg-slate-50 rounded-xl border border-[#24252c]/10 flex items-center justify-center max-h-80 overflow-hidden">
+              <div className="p-2 bg-slate-50 rounded-2xl border border-[#24252c]/10 flex items-center justify-center max-h-80 overflow-hidden">
                 <img
                   src={viewingProof.url}
                   alt={`Proof slip ${viewingProof.ref}`}
-                  className="max-h-72 w-auto object-contain rounded-lg shadow-2xs"
+                  className="max-h-72 w-auto object-contain rounded-xl shadow-2xs"
                 />
               </div>
 
-              <div className="p-4 bg-[var(--mist)] rounded-xl border border-[#24252c]/[0.06] space-y-1.5 text-xs">
+              <div className="p-4 bg-[var(--mist)] rounded-2xl border border-[#24252c]/[0.06] space-y-2 text-xs">
                 {viewingProof.amount !== undefined && (
-                  <div className="flex justify-between font-bold text-[var(--ink)]">
+                  <div className="flex justify-between items-center font-bold text-[var(--ink)]">
                     <span>Disbursed Amount:</span>
-                    <span className="text-emerald-700 font-black text-sm">
+                    <span className="text-emerald-700 font-extrabold text-base">
                       ₱{viewingProof.amount.toLocaleString()}
                     </span>
                   </div>
@@ -783,20 +784,30 @@ export default function PartnerDashboardPage({ go }: { go: (p: Page) => void }) 
                 {viewingProof.date && (
                   <div className="flex justify-between text-[#24252c]/70 text-[11px]">
                     <span>Processed Date:</span>
-                    <span>{viewingProof.date}</span>
+                    <span className="font-medium">{viewingProof.date}</span>
                   </div>
                 )}
                 {viewingProof.method && (
                   <div className="flex justify-between text-[#24252c]/70 text-[11px]">
                     <span>Channel &amp; Account:</span>
-                    <span>{viewingProof.method}</span>
+                    <span className="font-medium">{viewingProof.method}</span>
                   </div>
                 )}
                 {viewingProof.notes && (
-                  <div className="pt-1.5 border-t border-[#24252c]/10 text-[10px] text-[#24252c]/60">
+                  <div className="pt-2 border-t border-[#24252c]/10 text-[11px] text-[#24252c]/60 font-medium">
                     Memo: {viewingProof.notes}
                   </div>
                 )}
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setViewingProof(null)}
+                  className="w-full py-3 rounded-full bg-[var(--ink)] text-white text-xs font-bold hover:bg-[var(--ink-soft)] transition-colors cursor-pointer shadow-sm"
+                >
+                  Close Receipt
+                </button>
               </div>
             </div>
           )}
@@ -805,26 +816,29 @@ export default function PartnerDashboardPage({ go }: { go: (p: Page) => void }) 
 
       {/* ── Lightbox Modal: Partner InstaPay / GCash QR ── */}
       <ModalOverlay isOpen={!!enlargedQr} onClose={() => setEnlargedQr(null)}>
-        <div className="bg-white rounded-2xl p-6 sm:p-8 max-w-sm w-full shadow-2xl border border-[#24252c]/10 relative space-y-4 text-center animate-scale-in">
+        <div className="bg-white rounded-[2.5rem] p-6 sm:p-8 max-w-sm w-full shadow-2xl border border-[#24252c]/10 relative space-y-4 text-center">
           <button
             type="button"
             onClick={() => setEnlargedQr(null)}
-            className="absolute top-4 right-4 p-1.5 rounded-full hover:bg-[var(--mist)] text-[#24252c]/40 cursor-pointer"
+            className="absolute top-6 right-6 text-[#24252c]/40 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors cursor-pointer"
           >
             <IconX className="w-5 h-5" />
           </button>
 
           <div>
-            <h4 className="font-extrabold text-base text-[var(--ink)]">InstaPay / GCash QR</h4>
+            <span className="text-[10px] font-extrabold tracking-widest text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1 rounded-full uppercase inline-block">
+              InstaPay / GCash QR
+            </span>
+            <h4 className="font-extrabold text-xl tracking-tight text-[var(--ink)] mt-2">Payout QR Code</h4>
             <p className="text-xs text-[#24252c]/60 mt-0.5">{enlargedQr?.subtitle}</p>
           </div>
 
           {enlargedQr && (
-            <div className="p-3 bg-slate-50 rounded-xl border border-[#24252c]/10 flex items-center justify-center">
+            <div className="p-3.5 bg-gradient-to-b from-amber-50 to-white rounded-3xl border-2 border-amber-300 shadow-inner inline-block">
               <img
                 src={enlargedQr.url}
                 alt="Enlarged QR Code"
-                className="w-64 h-64 object-contain rounded-lg"
+                className="w-64 h-64 object-contain rounded-2xl bg-white p-2"
               />
             </div>
           )}
@@ -832,6 +846,16 @@ export default function PartnerDashboardPage({ go }: { go: (p: Page) => void }) 
           <p className="text-[11px] text-[#24252c]/50">
             Registered for direct 1-click scan payouts from BINHI Concept administration.
           </p>
+
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => setEnlargedQr(null)}
+              className="w-full py-3 rounded-full bg-[var(--ink)] text-white text-xs font-bold hover:bg-[var(--ink-soft)] transition-colors cursor-pointer shadow-sm"
+            >
+              Close
+            </button>
+          </div>
         </div>
       </ModalOverlay>
     </div>

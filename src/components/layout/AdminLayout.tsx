@@ -1,7 +1,22 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import type { Page } from '../../types';
 import { Logo } from './Logo';
-import { IconBox, IconTicket, IconShield, IconLogOut, IconMenu, IconX, IconCalendar, IconMail, IconUser } from '../shared/icons';
+import {
+  IconBox,
+  IconTicket,
+  IconShield,
+  IconLogOut,
+  IconMenu,
+  IconX,
+  IconCalendar,
+  IconMail,
+  IconUser,
+  IconTruck,
+  IconBan,
+  IconHeart,
+  IconStar,
+  IconFileSpreadsheet,
+} from '../shared/icons';
 import { supabase } from '../../utils/supabase';
 
 export function AdminLayout({
@@ -223,21 +238,56 @@ export function AdminLayout({
             </button>
           </div>
 
-          <nav className="space-y-1">
-            {navItem('Overview & KPIs', 'admin-dashboard', <IconBox className="w-4 h-4" />)}
-            {navItem('Bookings Manager', 'admin-bookings', <IconShield className="w-4 h-4" />, liveBookingsCount)}
-            {navItem('Package Builder', 'admin-packages', <IconTicket className="w-4 h-4" />)}
-            {navItem('Transport Fee Rules', 'admin-transport', <IconBox className="w-4 h-4" />)}
-            {navItem('Cancellation Policy', 'admin-cancellation-policy', <IconShield className="w-4 h-4" />)}
-            {navItem('Staff & Accounts', 'admin-staff', <IconUser className="w-4 h-4" />)}
-            {navItem('Event Calendar', 'admin-calendar', <IconCalendar className="w-4 h-4" />)}
-            {navItem('Revenue Analytics', 'admin-reports', <IconTicket className="w-4 h-4" />)}
-            {navItem('Inquiry Inbox', 'admin-inquiries', <IconMail className="w-4 h-4" />, liveInquiryCount)}
-            {navItem('Voucher Codes', 'admin-vouchers', <IconTicket className="w-4 h-4" />)}
-            {navItem('Loyalty Settings', 'admin-loyalty', <IconShield className="w-4 h-4" />)}
-            {navItem('Review Moderation', 'admin-reviews', <IconTicket className="w-4 h-4" />)}
-            {navItem('Affiliates & Partners', 'admin-affiliates', <IconTicket className="w-4 h-4" />)}
-            {navItem('Audit Trail & Logs', 'admin-audit-logs', <IconShield className="w-4 h-4" />)}
+          <nav className="space-y-4">
+            {/* Category 1: Operations & Bookings */}
+            <div className="space-y-1">
+              <div className="px-3 pb-1">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#24252c]/40 select-none block">
+                  Operations &amp; Bookings
+                </span>
+              </div>
+              {navItem('Overview & KPIs', 'admin-dashboard', <IconBox className="w-4 h-4" />)}
+              {navItem('Bookings Manager', 'admin-bookings', <IconShield className="w-4 h-4" />, liveBookingsCount)}
+              {navItem('Event Calendar', 'admin-calendar', <IconCalendar className="w-4 h-4" />)}
+              {navItem('Inquiry Inbox', 'admin-inquiries', <IconMail className="w-4 h-4" />, liveInquiryCount)}
+            </div>
+
+            {/* Category 2: Catalog & Event Services */}
+            <div className="space-y-1">
+              <div className="px-3 pb-1 pt-2 border-t border-[#24252c]/[0.06]">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#24252c]/40 select-none block">
+                  Catalog &amp; Services
+                </span>
+              </div>
+              {navItem('Package Builder', 'admin-packages', <IconTicket className="w-4 h-4" />)}
+              {navItem('Transport Fee Rules', 'admin-transport', <IconTruck className="w-4 h-4" />)}
+              {navItem('Cancellation Policy', 'admin-cancellation-policy', <IconBan className="w-4 h-4" />)}
+            </div>
+
+            {/* Category 3: Marketing & Customer Loyalty */}
+            <div className="space-y-1">
+              <div className="px-3 pb-1 pt-2 border-t border-[#24252c]/[0.06]">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#24252c]/40 select-none block">
+                  Marketing &amp; Growth
+                </span>
+              </div>
+              {navItem('Voucher Codes', 'admin-vouchers', <IconTicket className="w-4 h-4" />)}
+              {navItem('Loyalty Settings', 'admin-loyalty', <IconHeart className="w-4 h-4" />)}
+              {navItem('Affiliates & Partners', 'admin-affiliates', <IconUser className="w-4 h-4" />)}
+              {navItem('Review Moderation', 'admin-reviews', <IconStar className="w-4 h-4" />)}
+            </div>
+
+            {/* Category 4: Analytics & System Governance */}
+            <div className="space-y-1">
+              <div className="px-3 pb-1 pt-2 border-t border-[#24252c]/[0.06]">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#24252c]/40 select-none block">
+                  Analytics &amp; System
+                </span>
+              </div>
+              {navItem('Revenue Analytics', 'admin-reports', <IconFileSpreadsheet className="w-4 h-4" />)}
+              {navItem('Staff & Accounts', 'admin-staff', <IconUser className="w-4 h-4" />)}
+              {navItem('Audit Trail & Logs', 'admin-audit-logs', <IconShield className="w-4 h-4" />)}
+            </div>
           </nav>
         </div>
 

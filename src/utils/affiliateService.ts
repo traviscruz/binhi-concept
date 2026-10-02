@@ -340,8 +340,17 @@ export async function applyForAffiliateProgram(params: {
   const currentSettings = await fetchAffiliateSettings();
   const generatedId = existingDeactivatedId && isValidUuid(existingDeactivatedId) ? existingDeactivatedId : generateValidUuid();
 
+  let resolvedUserId: string | undefined = undefined;
+  try {
+    const { data: authUserData } = await supabase.auth.getUser();
+    if (authUserData?.user?.email?.toLowerCase() === cleanEmail) {
+      resolvedUserId = authUserData.user.id;
+    }
+  } catch { }
+
   const partnerData: AffiliatePartner = {
     id: generatedId,
+    userId: resolvedUserId,
     partnerName: params.partnerName.trim(),
     businessName: params.businessName?.trim() || undefined,
     email: cleanEmail,
@@ -433,6 +442,7 @@ export async function applyForAffiliateProgram(params: {
         payout_bank_name: partnerData.payoutBankName,
         status: partnerData.status,
       };
+      if (partnerData.userId) insertPayload.user_id = partnerData.userId;
       if (partnerData.isPhoneVerified !== undefined) insertPayload.is_phone_verified = partnerData.isPhoneVerified;
       if (partnerData.payoutQrUrl !== undefined) insertPayload.payout_qr_url = partnerData.payoutQrUrl;
 
@@ -440,6 +450,7 @@ export async function applyForAffiliateProgram(params: {
 
       if (error) {
         // Fallback retry without optional columns in case table hasn't been altered
+        delete insertPayload.user_id;
         delete insertPayload.is_phone_verified;
         delete insertPayload.payout_qr_url;
         const retry = await supabase.from('affiliates').insert(insertPayload).select().single();
@@ -873,6 +884,7 @@ export async function updateAffiliateProfile(params: {
   partnerName?: string;
   businessName?: string;
   phone?: string;
+  isPhoneVerified?: boolean;
   profession?: string;
   payoutMethod?: string;
   payoutAccountName?: string;
@@ -893,6 +905,7 @@ export async function updateAffiliateProfile(params: {
     partnerName: params.partnerName ?? existing.partnerName,
     businessName: params.businessName !== undefined ? params.businessName : existing.businessName,
     phone: params.phone ?? existing.phone,
+    isPhoneVerified: params.isPhoneVerified !== undefined ? params.isPhoneVerified : existing.isPhoneVerified,
     profession: params.profession ?? existing.profession,
     payoutMethod: (params.payoutMethod as any) ?? existing.payoutMethod,
     payoutAccountName: params.payoutAccountName ?? existing.payoutAccountName,
@@ -907,6 +920,7 @@ export async function updateAffiliateProfile(params: {
       if (params.partnerName !== undefined) payload.partner_name = params.partnerName;
       if (params.businessName !== undefined) payload.business_name = params.businessName;
       if (params.phone !== undefined) payload.phone = params.phone;
+      if (params.isPhoneVerified !== undefined) payload.is_phone_verified = params.isPhoneVerified;
       if (params.profession !== undefined) payload.profession = params.profession;
       if (params.payoutMethod !== undefined) payload.payout_method = params.payoutMethod;
       if (params.payoutAccountName !== undefined) payload.payout_account_name = params.payoutAccountName;
@@ -1444,13 +1458,49 @@ export async function rejectAffiliatePartner(params: {
   adminEmail?: string;
 }): Promise<{ success: boolean; message: string }> {
   const affs = getLocalAffiliates();
-  const partner = affs.find((a) => a.id === params.partnerId);
+  let partner = affs.find((a) => a.id === params.partnerId);
+
+  // If partner is not found locally or lacks userId/email, fetch from Supabase
+  if ((!partner || !partner.userId || !partner.email) && isValidUuid(params.partnerId)) {
+    try {
+      const { data: remoteData } = await supabase
+        .from('affiliates')
+        .select('*')
+        .eq('id', params.partnerId)
+        .maybeSingle();
+      if (remoteData) {
+        partner = {
+          ...(partner || {}),
+          id: remoteData.id,
+          userId: remoteData.user_id || partner?.userId,
+          partnerName: remoteData.partner_name || partner?.partnerName || 'Partner',
+          email: remoteData.email || partner?.email,
+          phone: remoteData.phone || partner?.phone,
+          status: remoteData.status,
+          commissionRate: Number(remoteData.commission_rate || 5),
+          clientDiscountRate: Number(remoteData.client_discount_rate || 5),
+          payoutMethod: remoteData.payout_method || 'GCash',
+          payoutAccountName: remoteData.payout_account_name || '',
+          payoutAccountNumber: remoteData.payout_account_number || '',
+          referralCode: remoteData.referral_code || '',
+          profession: remoteData.profession || '',
+          totalEarnings: 0,
+          totalPaid: 0,
+          pendingBalance: 0,
+          totalReferralsCount: 0,
+          createdAt: remoteData.created_at || new Date().toISOString(),
+        };
+      }
+    } catch (remoteErr) {
+      console.warn('Could not fetch affiliate from DB before rejection:', remoteErr);
+    }
+  }
 
   if (!partner) {
     return { success: false, message: 'Affiliate partner record not found.' };
   }
 
-  // 1. Send rejection notification email BEFORE deleting (so we still have the data)
+  // 1. Send rejection notification email BEFORE deleting
   try {
     await sendPartnerRejectionEmail({
       partnerName: partner.partnerName,
@@ -1461,7 +1511,7 @@ export async function rejectAffiliatePartner(params: {
     console.warn('Could not dispatch partner rejection email:', emailErr);
   }
 
-  // 2. Delete from Supabase (cascades referrals & payouts via FK)
+  // 2. Delete from Supabase Database (cascades referrals & payouts via FK)
   try {
     if (isValidUuid(params.partnerId)) {
       const { error } = await supabase
@@ -1476,14 +1526,19 @@ export async function rejectAffiliatePartner(params: {
     console.warn('Supabase delete affiliate on reject fallback:', err);
   }
 
-  // 3. Also remove from Supabase Auth (best-effort — requires service_role key in production)
-  try {
-    if (partner.userId && isValidUuid(partner.userId)) {
-      await supabase.auth.admin.deleteUser(partner.userId);
+  // 3. Remove from Supabase Auth & public.profiles via manage-staff Edge Function
+  if (partner.userId || partner.email) {
+    try {
+      await supabase.functions.invoke('manage-staff', {
+        body: {
+          action: 'delete',
+          userId: partner.userId,
+          email: partner.email,
+        },
+      });
+    } catch (authErr) {
+      console.warn('Could not delete auth user on rejection via edge function:', authErr);
     }
-  } catch (authErr) {
-    // Not critical — auth cleanup may fail without service_role; record is already deleted from affiliates
-    console.warn('Could not delete auth user on rejection (non-critical):', authErr);
   }
 
   // 4. Remove from local storage
@@ -1504,7 +1559,7 @@ export async function rejectAffiliatePartner(params: {
 
   return {
     success: true,
-    message: `Application from ${partner.partnerName} has been rejected and permanently removed. A rejection notice was sent to ${partner.email}.`,
+    message: `Application from ${partner.partnerName} has been rejected and permanently removed. The account has been cleared from authentication so they may apply again in the future.`,
   };
 }
 
@@ -1512,6 +1567,30 @@ export async function rejectAffiliatePartner(params: {
  * Permanently delete a single affiliate partner and cascading records
  */
 export async function deleteAffiliatePartner(partnerId: string): Promise<{ success: boolean; message: string }> {
+  const affs = getLocalAffiliates();
+  let partner = affs.find((a) => a.id === partnerId);
+
+  if ((!partner || !partner.userId || !partner.email) && isValidUuid(partnerId)) {
+    try {
+      const { data: remoteData } = await supabase
+        .from('affiliates')
+        .select('id, user_id, email, partner_name')
+        .eq('id', partnerId)
+        .maybeSingle();
+      if (remoteData) {
+        partner = {
+          ...(partner || {}),
+          id: remoteData.id,
+          userId: remoteData.user_id || partner?.userId,
+          email: remoteData.email || partner?.email,
+          partnerName: remoteData.partner_name || partner?.partnerName || 'Partner',
+        } as any;
+      }
+    } catch (e) {
+      console.warn('Could not fetch remote affiliate info before deletion:', e);
+    }
+  }
+
   try {
     if (isValidUuid(partnerId)) {
       // Cascading foreign keys will also remove referral logs & payouts in Supabase
@@ -1524,9 +1603,24 @@ export async function deleteAffiliatePartner(partnerId: string): Promise<{ succe
     console.warn('Supabase delete affiliate fallback:', err);
   }
 
+  // Remove from Supabase Auth & public.profiles via manage-staff Edge Function
+  if (partner?.userId || partner?.email) {
+    try {
+      await supabase.functions.invoke('manage-staff', {
+        body: {
+          action: 'delete',
+          userId: partner.userId,
+          email: partner.email,
+        },
+      });
+    } catch (authErr) {
+      console.warn('Could not delete auth user on affiliate delete via edge function:', authErr);
+    }
+  }
+
   // Remove from local storage
-  const affs = getLocalAffiliates().filter((a) => a.id !== partnerId);
-  saveLocalAffiliates(affs);
+  const updatedAffs = getLocalAffiliates().filter((a) => a.id !== partnerId);
+  saveLocalAffiliates(updatedAffs);
 
   const refs = getLocalReferrals().filter((r) => r.affiliateId !== partnerId);
   saveLocalReferrals(refs);
@@ -1542,7 +1636,7 @@ export async function deleteAffiliatePartner(partnerId: string): Promise<{ succe
 
   return {
     success: true,
-    message: 'Affiliate partner account has been completely removed.',
+    message: 'Affiliate partner account has been completely removed from the database and authentication system.',
   };
 }
 
@@ -1579,6 +1673,26 @@ export async function clearAllAffiliateData(): Promise<{ success: boolean; messa
     console.warn('Could not check remote pending count, proceeding with local validation only:', err);
   }
 
+  // Fetch all affiliates to get their userId & email for auth cleanup
+  const allPartnersToPurge: Array<{ userId?: string; email?: string }> = currentAffs.map((a) => ({
+    userId: a.userId,
+    email: a.email,
+  }));
+
+  try {
+    const { data: remoteAffs } = await supabase.from('affiliates').select('user_id, email');
+    if (remoteAffs && remoteAffs.length > 0) {
+      remoteAffs.forEach((r: any) => {
+        if (!allPartnersToPurge.some((p) => (r.email && p.email?.toLowerCase() === r.email.toLowerCase()) || (r.user_id && p.userId === r.user_id))) {
+          allPartnersToPurge.push({ userId: r.user_id, email: r.email });
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('Could not fetch all remote affiliates before clearing:', err);
+  }
+
+  // Delete from Supabase Database
   try {
     await Promise.all([
       supabase.from('affiliate_payouts').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
@@ -1589,6 +1703,23 @@ export async function clearAllAffiliateData(): Promise<{ success: boolean; messa
     console.warn('Supabase clear all fallback:', err);
   }
 
+  // Delete all users from Supabase Auth & public.profiles
+  for (const partner of allPartnersToPurge) {
+    if (partner.userId || partner.email) {
+      try {
+        await supabase.functions.invoke('manage-staff', {
+          body: {
+            action: 'delete',
+            userId: partner.userId,
+            email: partner.email,
+          },
+        });
+      } catch (authErr) {
+        console.warn(`Could not delete auth user for ${partner.email}:`, authErr);
+      }
+    }
+  }
+
   // Clear local storage
   saveLocalAffiliates([]);
   saveLocalReferrals([]);
@@ -1597,7 +1728,7 @@ export async function clearAllAffiliateData(): Promise<{ success: boolean; messa
 
   return {
     success: true,
-    message: 'All settled affiliate accounts, referral records, and payouts have been successfully removed.',
+    message: 'All settled affiliate accounts, referral records, payouts, and authentication accounts have been successfully removed.',
   };
 }
 

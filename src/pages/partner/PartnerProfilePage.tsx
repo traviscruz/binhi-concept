@@ -14,6 +14,7 @@ import {
 } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { OtpInput } from '../../components/shared/OtpInput';
+import { sendOtp, verifyOtp } from '../../utils/smsService';
 import {
   getStoredPartnerSession,
   setStoredPartnerSession,
@@ -60,6 +61,8 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
   const [email, setEmail] = useState('');
   const [countryCode] = useState('+63');
   const [phoneDigits, setPhoneDigits] = useState('');
+  const [savedPhoneDigits, setSavedPhoneDigits] = useState('');
+  const [isEditingPhone, setIsEditingPhone] = useState(false);
   const [isPhoneVerified, setIsPhoneVerified] = useState(true);
   const [profession, setProfession] = useState(PROFESSIONS[0]);
 
@@ -70,13 +73,14 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
   const [payoutBankName, setPayoutBankName] = useState('');
   const [payoutQrUrl, setPayoutQrUrl] = useState<string>('');
 
-  // Phone Verification Modal State
+  // Phone Verification Modal State (PhilSMS OTP)
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [phoneOtpToken, setPhoneOtpToken] = useState('');
-  const [generatedPhoneOtp, setGeneratedPhoneOtp] = useState('');
+  const [phoneHmacToken, setPhoneHmacToken] = useState('');
+  const [sendingPhoneOtp, setSendingPhoneOtp] = useState(false);
   const [verifyingPhone, setVerifyingPhone] = useState(false);
-  const [phoneOtpError, setPhoneOtpError] = useState('');
-  const [phoneResendTimer, setPhoneResendTimer] = useState(0);
+  const [phoneModalError, setPhoneModalError] = useState('');
+  const [phoneModalInfo, setPhoneModalInfo] = useState('');
 
   // File Upload State for InstaPay QR
   const [qrFile, setQrFile] = useState<File | null>(null);
@@ -114,7 +118,9 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
     setPartnerName(session.partnerName || '');
     setBusinessName(session.businessName || '');
     setEmail(session.email || '');
-    setPhoneDigits(parseDigits(session.phone || ''));
+    const digits = parseDigits(session.phone || '');
+    setPhoneDigits(digits);
+    setSavedPhoneDigits(digits);
     setIsPhoneVerified(session.isPhoneVerified !== false);
     setProfession(session.profession || PROFESSIONS[0]);
     setPayoutMethod(session.payoutMethod || PAYOUT_METHODS[0]);
@@ -125,63 +131,129 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
     setQrPreview(session.payoutQrUrl || null);
   }, [go]);
 
-  // Resend Timer Countdown
-  useEffect(() => {
-    if (phoneResendTimer <= 0) return;
-    const interval = setInterval(() => {
-      setPhoneResendTimer((prev) => Math.max(0, prev - 1));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [phoneResendTimer]);
-
   const isPhoneValid = phoneDigits.length === 10 && phoneDigits.startsWith('9');
 
-  // Trigger Phone Verification Modal
-  const handleOpenPhoneVerification = () => {
-    if (!isPhoneValid) {
-      setErrorMessage('Please enter a valid 10-digit mobile number starting with 9 (e.g. 9171234567) first.');
+  // ── Phone Verification Handlers (PhilSMS OTP via Supabase Edge Function) ──
+  const handleStartPhoneVerification = async () => {
+    if (phoneDigits.length !== 10 || !phoneDigits.startsWith('9')) {
+      setErrorMessage('Please enter a valid 10-digit mobile number starting with 9 first (e.g. 9171234567).');
       return;
     }
+
     setErrorMessage(null);
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setGeneratedPhoneOtp(code);
+    setPhoneModalError('');
+    setPhoneModalInfo('');
     setPhoneOtpToken('');
-    setPhoneOtpError('');
-    setPhoneResendTimer(60);
     setShowPhoneModal(true);
+    setSendingPhoneOtp(true);
+
+    try {
+      const fullPhone = `${countryCode}${phoneDigits}`;
+      const res = await sendOtp(fullPhone, 'partner_phone_verification');
+
+      if (res.success && res.token) {
+        setPhoneHmacToken(res.token);
+        if (res.simulated) {
+          setPhoneModalInfo(
+            `Simulated OTP Mode: Use verification code ${res.simulatedCode || '123456'} (or check edge function logs).`
+          );
+        } else {
+          setPhoneModalInfo(`A 6-digit verification code has been dispatched via SMS to +63 ${phoneDigits}.`);
+        }
+      } else {
+        setPhoneModalError(res.error || 'Failed to dispatch verification SMS. Please try again.');
+      }
+    } catch (err: any) {
+      console.error('[PartnerProfilePage] Error sending phone OTP:', err);
+      setPhoneModalError(err?.message || 'Network error sending verification code.');
+    } finally {
+      setSendingPhoneOtp(false);
+    }
   };
 
-  // Confirm Phone OTP Verification
-  const handleConfirmPhoneVerification = () => {
-    setPhoneOtpError('');
-    if (phoneOtpToken.length !== 6) {
-      setPhoneOtpError('Please enter the complete 6-digit verification code.');
+  const handleResendPhoneOtp = async () => {
+    if (phoneDigits.length !== 10 || !phoneDigits.startsWith('9')) return;
+
+    setPhoneModalError('');
+    setPhoneOtpToken('');
+    setSendingPhoneOtp(true);
+
+    try {
+      const fullPhone = `${countryCode}${phoneDigits}`;
+      const res = await sendOtp(fullPhone, 'partner_phone_verification');
+
+      if (res.success && res.token) {
+        setPhoneHmacToken(res.token);
+        if (res.simulated) {
+          setPhoneModalInfo(
+            `Simulated OTP Mode: Use new verification code ${res.simulatedCode || '123456'}.`
+          );
+        } else {
+          setPhoneModalInfo('A new verification code has been sent to your phone via SMS!');
+        }
+      } else {
+        setPhoneModalError(res.error || 'Failed to resend verification code.');
+      }
+    } catch (err: any) {
+      setPhoneModalError(err?.message || 'Error resending code.');
+    } finally {
+      setSendingPhoneOtp(false);
+    }
+  };
+
+  const handleConfirmPhoneVerification = async () => {
+    if (phoneOtpToken.trim().length !== 6) {
+      setPhoneModalError('Please enter the full 6-digit verification code.');
       return;
     }
 
-    if (phoneOtpToken !== generatedPhoneOtp && phoneOtpToken !== '123456') {
-      setPhoneOtpError('Invalid verification code. Please check your SMS code.');
+    if (!phoneHmacToken) {
+      setPhoneModalError('Verification session expired. Please request a new code.');
       return;
     }
 
     setVerifyingPhone(true);
-    setTimeout(() => {
-      setVerifyingPhone(false);
+    setPhoneModalError('');
+
+    const formattedPhone = `${countryCode} ${phoneDigits}`;
+    const fullPhone = `${countryCode}${phoneDigits}`;
+
+    try {
+      const res = await verifyOtp(fullPhone, phoneOtpToken.trim(), phoneHmacToken);
+
+      if (!res.valid) {
+        setPhoneModalError(res.error || 'Incorrect or expired verification code. Please try again.');
+        setVerifyingPhone(false);
+        return;
+      }
+
+      // Validated! Persist to Partner Profile & Session
       setIsPhoneVerified(true);
+      setIsEditingPhone(false);
+      setSavedPhoneDigits(phoneDigits);
       setShowPhoneModal(false);
       setPhoneOtpToken('');
+      setPhoneHmacToken('');
+
+      if (partner?.id) {
+        const updateRes = await updateAffiliateProfile({
+          partnerId: partner.id,
+          phone: formattedPhone,
+          isPhoneVerified: true,
+        });
+        if (updateRes.partner) {
+          setPartner(updateRes.partner);
+        }
+      }
+
       setSuccessMessage('Mobile phone number verified successfully!');
       setTimeout(() => setSuccessMessage(null), 4000);
-    }, 500);
-  };
-
-  const handleResendPhoneOtp = () => {
-    if (phoneResendTimer > 0) return;
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setGeneratedPhoneOtp(code);
-    setPhoneOtpToken('');
-    setPhoneOtpError('');
-    setPhoneResendTimer(60);
+    } catch (err: any) {
+      console.error('[PartnerProfilePage] Error verifying phone OTP:', err);
+      setPhoneModalError(err?.message || 'Failed to verify OTP.');
+    } finally {
+      setVerifyingPhone(false);
+    }
   };
 
   // QR Upload Handler
@@ -263,12 +335,14 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
       }
 
       const formattedPhone = `${countryCode} ${phoneDigits}`;
+      const finalVerified = isEditingPhone && phoneDigits !== savedPhoneDigits ? false : isPhoneVerified;
 
       const res = await updateAffiliateProfile({
         partnerId: partner.id,
         partnerName: partnerName.trim(),
         businessName: businessName.trim() || undefined,
         phone: formattedPhone,
+        isPhoneVerified: finalVerified,
         profession: profession.trim(),
         payoutMethod,
         payoutAccountName: payoutAccountName.trim(),
@@ -280,6 +354,9 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
       if (res.success && res.partner) {
         setPartner(res.partner);
         setStoredPartnerSession(res.partner);
+        setSavedPhoneDigits(phoneDigits);
+        setIsEditingPhone(false);
+        setIsPhoneVerified(finalVerified);
         setPayoutQrUrl(res.partner.payoutQrUrl || '');
         setQrPreview(res.partner.payoutQrUrl || null);
         setQrFile(null);
@@ -420,28 +497,49 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
               {isPhoneVerified ? (
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
-                    <IconCheck className="w-3 h-3 stroke-[2.5]" />
-                    Verified
+                    Verified {isEditingPhone && <span className="text-[9px] text-amber-600 font-semibold">(Editing)</span>}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsPhoneVerified(false);
-                      setSuccessMessage('Phone unlocked. Enter your new number and click "Verify Now".');
-                      setTimeout(() => setSuccessMessage(null), 4000);
-                    }}
-                    className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 hover:bg-[#1090F8]/20 border border-[#1090F8]/20 px-2.5 py-0.5 rounded-full transition-colors cursor-pointer"
-                  >
-                    Edit Phone
-                  </button>
+                  {isEditingPhone ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditingPhone(false);
+                        setPhoneDigits(savedPhoneDigits);
+                      }}
+                      className="text-[10px] font-bold text-[#24252c]/60 hover:text-[var(--ink)] bg-[#EEEEEE] hover:bg-[#E0E0E0] px-2.5 py-0.5 rounded-full transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditingPhone(true);
+                        setSuccessMessage('Phone unlocked. Update your number below and click "Save Profile & Payout Details".');
+                        setTimeout(() => setSuccessMessage(null), 4000);
+                      }}
+                      className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 hover:bg-[#1090F8]/20 border border-[#1090F8]/20 px-2.5 py-0.5 rounded-full transition-colors cursor-pointer"
+                    >
+                      Edit Phone
+                    </button>
+                  )}
                 </div>
               ) : (
                 <button
                   type="button"
-                  onClick={handleOpenPhoneVerification}
-                  className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-full hover:bg-rose-100 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                  onClick={handleStartPhoneVerification}
+                  disabled={sendingPhoneOtp}
+                  className="group relative text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-300 hover:border-rose-400 px-3 py-1 rounded-full transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-sm"
+                  title="Click to verify this mobile number via SMS OTP"
                 >
-                  Unverified — Verify Now
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                  </span>
+                  <span>Unverified</span>
+                  <span className="font-semibold text-rose-700 bg-rose-200/70 group-hover:bg-rose-200 px-1.5 py-0.5 rounded-full text-[9px] transition-colors flex items-center gap-0.5">
+                    {sendingPhoneOtp ? 'Sending...' : 'Click to verify ↗'}
+                  </span>
                 </button>
               )}
             </div>
@@ -455,17 +553,17 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
                 inputMode="numeric"
                 maxLength={10}
                 value={phoneDigits}
-                readOnly={isPhoneVerified}
+                readOnly={isPhoneVerified && !isEditingPhone}
                 onChange={(e) => {
                   setPhoneDigits(e.target.value.replace(/\D/g, '').slice(0, 10));
                   setErrorMessage(null);
                 }}
                 placeholder="917 123 4567"
-                className={inputClass + ` flex-1 ${isPhoneVerified ? 'cursor-not-allowed opacity-90' : ''}`}
+                className={inputClass + ` flex-1 ${isPhoneVerified && !isEditingPhone ? 'cursor-not-allowed opacity-90' : ''}`}
               />
             </div>
 
-            {phoneDigits.length > 0 && (!isPhoneValid) && (
+            {phoneDigits.length > 0 && !isPhoneValid && (
               <p className="text-[11px] text-rose-500 ml-4 mt-1">
                 Mobile number must be exactly 10 digits starting with 9 (e.g. 9171234567).
               </p>
@@ -645,92 +743,89 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
         </div>
       </form>
 
-      {/* ── Mobile Phone OTP Verification Modal ── */}
+      {/* ── Mobile Phone OTP Verification Modal (PhilSMS OTP via Supabase Edge Function) ── */}
       <ModalOverlay isOpen={showPhoneModal} onClose={() => setShowPhoneModal(false)}>
-        <div className="bg-white rounded-[2rem] p-6 sm:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative space-y-4 animate-scale-in">
+        <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-md w-full shadow-2xl border border-[#24252c]/10 relative">
           <button
             type="button"
             onClick={() => setShowPhoneModal(false)}
-            className="absolute top-4 right-4 p-1 rounded-full hover:bg-[var(--mist)] text-[#24252c]/40 cursor-pointer"
+            className="absolute top-5 right-5 text-[#24252c]/50 hover:text-[var(--ink)] p-1 cursor-pointer"
           >
             <IconX className="w-5 h-5" />
           </button>
 
-          <div className="text-center space-y-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
-              Mobile Phone Verification
+          <div className="text-center mb-6">
+            <span className="w-12 h-12 rounded-full bg-[#1090F8]/10 text-[#1090F8] font-bold text-lg flex items-center justify-center mx-auto mb-3">
+              <IconShield className="w-6 h-6" />
             </span>
-            <h3 className="text-lg font-black text-[var(--ink)] mt-1">Verify Mobile Phone Number</h3>
-            <p className="text-xs text-[#24252c]/60">
-              We sent a 6-digit SMS verification code to <strong className="text-[var(--ink)]">+63 {phoneDigits}</strong>
+            <h3 className="text-2xl font-extrabold text-[var(--ink)]">Verify Mobile Number</h3>
+            <p className="text-xs text-[#24252c]/60 mt-1.5 leading-relaxed">
+              We sent a 6-digit verification code via SMS to{' '}
+              <strong className="text-[var(--ink)]">+63 {phoneDigits}</strong>.
             </p>
           </div>
 
-          {phoneOtpError && (
-            <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-center text-xs text-rose-900 font-semibold">
-              {phoneOtpError}
+          {phoneModalInfo && (
+            <div className="mb-4 p-3 rounded-xl text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 font-medium text-left">
+              {phoneModalInfo}
             </div>
           )}
 
-          <div className="flex justify-center py-2">
+          {phoneModalError && (
+            <div className="mb-4 p-3 rounded-xl text-xs bg-rose-50 border border-rose-200 text-rose-700 font-medium text-left">
+              {phoneModalError}
+            </div>
+          )}
+
+          <div className="my-6">
             <OtpInput
               value={phoneOtpToken}
-              onChange={setPhoneOtpToken}
-              disabled={verifyingPhone}
+              onChange={(val) => setPhoneOtpToken(val)}
+              onResend={handleResendPhoneOtp}
+              disabled={verifyingPhone || sendingPhoneOtp}
             />
           </div>
 
           <button
             type="button"
-            disabled={phoneOtpToken.length !== 6 || verifyingPhone}
             onClick={handleConfirmPhoneVerification}
-            className="w-full py-3.5 rounded-2xl bg-[var(--ink)] text-white text-xs font-bold hover:bg-black/80 transition-colors cursor-pointer shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
+            disabled={verifyingPhone || phoneOtpToken.length < 6 || !phoneHmacToken}
+            className="w-full bg-[var(--ink)] text-white font-semibold py-3.5 rounded-full hover:bg-[var(--ink-soft)] transition-colors text-xs cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {verifyingPhone ? (
-              <>
-                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                <span>Verifying...</span>
-              </>
+              <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
             ) : (
-              'Confirm Mobile Number'
+              'Confirm & Verify Phone Number'
             )}
           </button>
-
-          <div className="text-center text-[11px]">
-            <button
-              type="button"
-              onClick={handleResendPhoneOtp}
-              disabled={phoneResendTimer > 0}
-              className="font-semibold text-[#1090F8] hover:underline disabled:text-[#24252c]/40 cursor-pointer disabled:cursor-not-allowed"
-            >
-              {phoneResendTimer > 0 ? `Resend Code in ${phoneResendTimer}s` : 'Resend SMS Code'}
-            </button>
-          </div>
         </div>
       </ModalOverlay>
 
       {/* ── Enlarged QR Code Lightbox Modal ── */}
       <ModalOverlay isOpen={!!enlargedQr} onClose={() => setEnlargedQr(null)}>
-        <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl border border-[#24252c]/10 relative space-y-4 text-center animate-scale-in">
+        <div className="bg-white rounded-[2.5rem] p-6 sm:p-8 max-w-sm w-full shadow-2xl border border-[#24252c]/10 relative space-y-4 text-center">
           <button
             type="button"
             onClick={() => setEnlargedQr(null)}
-            className="absolute top-4 right-4 p-1.5 rounded-full hover:bg-[var(--mist)] text-[#24252c]/50 cursor-pointer"
+            className="absolute top-6 right-6 text-[#24252c]/40 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors cursor-pointer"
           >
             <IconX className="w-5 h-5" />
           </button>
 
           <div>
-            <h4 className="font-extrabold text-base text-[var(--ink)]">InstaPay / GCash QR</h4>
+            <span className="text-[10px] font-extrabold tracking-widest text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1 rounded-full uppercase inline-block">
+              InstaPay / GCash QR
+            </span>
+            <h4 className="font-extrabold text-xl tracking-tight text-[var(--ink)] mt-2">Payout QR Code</h4>
             <p className="text-xs text-[#24252c]/60 mt-0.5">{partner.payoutAccountName || partner.partnerName}</p>
           </div>
 
           {enlargedQr && (
-            <div className="p-3 bg-slate-50 rounded-2xl border border-[#24252c]/10 flex items-center justify-center">
+            <div className="p-3.5 bg-gradient-to-b from-amber-50 to-white rounded-3xl border-2 border-amber-300 shadow-inner inline-block">
               <img
                 src={enlargedQr}
                 alt="Enlarged QR Code"
-                className="w-64 h-64 object-contain rounded-xl"
+                className="w-64 h-64 object-contain rounded-2xl bg-white p-2"
               />
             </div>
           )}
@@ -738,6 +833,16 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
           <p className="text-[11px] text-[#24252c]/50">
             Scan using GCash, Maya, BDO, BPI, GoTyme, or any InstaPay-compliant banking app.
           </p>
+
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => setEnlargedQr(null)}
+              className="w-full py-3 rounded-full bg-[var(--ink)] text-white text-xs font-bold hover:bg-[var(--ink-soft)] transition-colors cursor-pointer shadow-sm"
+            >
+              Close
+            </button>
+          </div>
         </div>
       </ModalOverlay>
     </div>

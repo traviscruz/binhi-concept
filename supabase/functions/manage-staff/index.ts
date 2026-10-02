@@ -1,3 +1,6 @@
+// @ts-nocheck
+declare const Deno: any;
+
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
@@ -5,7 +8,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-Deno.serve(async (req) => {
+Deno.serve(async (req: any) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -117,22 +120,37 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'delete') {
-      const { userId } = payload;
+      const { userId, email } = payload;
+      let targetUserId = userId;
 
-      // Delete profiles record
-      await supabaseAdmin.from('profiles').delete().eq('id', userId);
-
-      // Delete Auth user
-      const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(userId);
-
-      if (deleteError) {
-        return new Response(JSON.stringify({ error: deleteError.message }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+      if (!targetUserId && email) {
+        const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+        if (!listError && usersData?.users) {
+          const found = usersData.users.find((u: any) => u.email?.toLowerCase() === email.trim().toLowerCase());
+          if (found) {
+            targetUserId = found.id;
+          }
+        }
       }
 
-      return new Response(JSON.stringify({ success: true }), {
+      if (targetUserId) {
+        // Delete profiles record
+        await supabaseAdmin.from('profiles').delete().eq('id', targetUserId);
+
+        // Delete Auth user
+        const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(targetUserId);
+
+        if (deleteError) {
+          return new Response(JSON.stringify({ error: deleteError.message }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      } else if (email) {
+        await supabaseAdmin.from('profiles').delete().eq('email', email.trim().toLowerCase());
+      }
+
+      return new Response(JSON.stringify({ success: true, deletedUserId: targetUserId }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -141,8 +159,8 @@ Deno.serve(async (req) => {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
+  } catch (err: any) {
+    return new Response(JSON.stringify({ error: err?.message || 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
