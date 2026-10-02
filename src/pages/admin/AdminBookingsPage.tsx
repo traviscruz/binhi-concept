@@ -1813,12 +1813,12 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
             <thead>
               <tr className="border-b border-[#24252c]/10 bg-[var(--mist)]/50 text-[#24252c]/60 font-bold uppercase text-[10px] tracking-wider whitespace-nowrap">
                 <th className="py-3.5 px-3.5 w-[14%]">Ref / Customer</th>
-                <th className="py-3.5 px-3 w-[16%]">Package & Venue</th>
-                <th className="py-3.5 px-3 w-[10%]">Schedule Date</th>
+                <th className="py-3.5 px-3 w-[15%]">Package & Venue</th>
+                <th className="py-3.5 px-3 w-[13%]">Schedule Date</th>
                 <th className="py-3.5 px-3 w-[11%]">Cost Breakdown</th>
                 <th className="py-3.5 px-3 w-[12%]">Assigned Crew</th>
-                <th className="py-3.5 px-2 w-[14%] text-center">Booking Status</th>
-                <th className="py-3.5 px-2 w-[11%] text-center">Payment Status</th>
+                <th className="py-3.5 px-2 w-[13%] text-center">Booking Status</th>
+                <th className="py-3.5 px-2 w-[10%] text-center">Payment Status</th>
                 <th className="py-3.5 px-3 w-[12%] text-center bg-gradient-to-l from-[var(--ink)]/[0.22] via-[var(--ink)]/[0.08] to-transparent">Actions</th>
               </tr>
             </thead>
@@ -1887,9 +1887,9 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
 
                       {/* Col 3: Event Date & Reschedule / Cancellation Alert */}
                       <td className="py-3 px-3 align-middle whitespace-nowrap">
-                        <div className="font-semibold text-[var(--ink)] flex items-center gap-1 text-[11px]">
+                        <div className="font-semibold text-[var(--ink)] flex items-center gap-1.5 text-[11px] whitespace-nowrap">
                           <IconCalendar className="w-3.5 h-3.5 text-[#1090F8] shrink-0" />
-                          <span className="truncate">{row.date}</span>
+                          <span className="whitespace-nowrap">{row.date}</span>
                         </div>
                         {row.cancellationStatus === 'requested' && (
                           <div className="mt-1 inline-flex items-center gap-1 bg-rose-600 text-white font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-2xs animate-pulse">

@@ -36,16 +36,6 @@ export function getPackagePhotoCount(pkg?: Partial<PackageData> | null): number 
     } catch (e) {}
   }
 
-  const validGalleryCount = photoList.filter((p) => {
-    const url = typeof p === 'string' ? p : p?.url || p?.src || p?.image_url;
-    return Boolean(
-      url &&
-      typeof url === 'string' &&
-      url.trim().length > 0 &&
-      !url.includes('picsum.photos')
-    );
-  }).length;
-
   const hasMainImg = Boolean(
     pkg.img &&
     typeof pkg.img === 'string' &&
@@ -53,7 +43,20 @@ export function getPackagePhotoCount(pkg?: Partial<PackageData> | null): number 
     !pkg.img.includes('picsum.photos')
   );
 
-  return validGalleryCount > 0 ? validGalleryCount : (hasMainImg ? 1 : 0);
+  const cleanMainUrl = hasMainImg ? pkg.img!.trim().toLowerCase() : '';
+
+  const validGalleryCount = photoList.filter((p) => {
+    const url = typeof p === 'string' ? p : p?.url || p?.src || p?.image_url;
+    return Boolean(
+      url &&
+      typeof url === 'string' &&
+      url.trim().length > 0 &&
+      !url.includes('picsum.photos') &&
+      url.trim().toLowerCase() !== cleanMainUrl
+    );
+  }).length;
+
+  return (hasMainImg ? 1 : 0) + validGalleryCount;
 }
 
 export const FEATURED_PACKAGES: PackageData[] = [

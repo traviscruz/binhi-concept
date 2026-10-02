@@ -607,7 +607,7 @@ export default function PackageDetailPage({
           <h3 className="text-sm font-semibold uppercase tracking-wider text-[#24252c]/50 mb-3 ml-1">
             Package Photo Gallery
           </h3>
-          <PhotoCarousel photos={pkg.photos} mainImage={pkg.img} />
+          <PhotoCarousel photos={pkg.photos} mainImage={pkg.img} name={pkg.name} category={pkg.tag} />
         </div>
 
         <div className="grid lg:grid-cols-12 gap-8 lg:gap-10">

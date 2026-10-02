@@ -11,7 +11,7 @@ import {
   IconSearch,
 } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
-import type { PackageData } from '../../data/packages';
+import { type PackageData, FEATURED_PACKAGES } from '../../data/packages';
 import { supabase } from '../../lib/supabase';
 import { logAuditEvent } from '../../utils/auditLogger';
 
@@ -33,6 +33,14 @@ interface GalleryPhoto {
   previewUrl?: string;
 }
 
+export interface MediaLibraryItem {
+  id: string;
+  url: string;
+  label: string;
+  source: string;
+  category: 'package' | 'gallery' | 'storage';
+}
+
 export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }) {
   const [packages, setPackages] = useState<PackageData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,6 +55,15 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
   const [editingPkg, setEditingPkg] = useState<PackageData | null>(null);
   const [deleteConfirmPkg, setDeleteConfirmPkg] = useState<PackageData | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Media Library Picker Modal State
+  const [showMediaPicker, setShowMediaPicker] = useState(false);
+  const [mediaPickerTarget, setMediaPickerTarget] = useState<'gallery' | 'cover'>('gallery');
+  const [availableMedia, setAvailableMedia] = useState<MediaLibraryItem[]>([]);
+  const [loadingMedia, setLoadingMedia] = useState(false);
+  const [mediaSearchQuery, setMediaSearchQuery] = useState('');
+  const [mediaCategoryFilter, setMediaCategoryFilter] = useState<'all' | 'package' | 'gallery' | 'storage'>('all');
+  const [selectedMediaForGallery, setSelectedMediaForGallery] = useState<MediaLibraryItem[]>([]);
 
   // Form Fields State
   const [pkgName, setPkgName] = useState('');
@@ -246,6 +263,201 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
     setGalleryPhotos((prev) =>
       prev.map((photo, i) => (i === index ? { ...photo, label } : photo))
     );
+  };
+
+  // =========================================================================
+  // MEDIA LIBRARY & PRE-UPLOADED PHOTO PICKER HELPERS
+  // =========================================================================
+  const loadAvailableMedia = async () => {
+    setLoadingMedia(true);
+    const mediaMap = new Map<string, MediaLibraryItem>();
+
+    // 1. Gather all photos from current packages in database
+    packages.forEach((pkg) => {
+      if (pkg.img && typeof pkg.img === 'string' && pkg.img.trim()) {
+        const clean = pkg.img.trim();
+        if (!clean.includes('picsum.photos') && !mediaMap.has(clean)) {
+          mediaMap.set(clean, {
+            id: `db-pkg-cover-${pkg.id}`,
+            url: clean,
+            label: `${pkg.name} Cover`,
+            source: pkg.name,
+            category: 'package',
+          });
+        }
+      }
+
+      if (Array.isArray(pkg.photos)) {
+        pkg.photos.forEach((ph, i) => {
+          const phUrl = typeof ph === 'string' ? ph : ph?.url;
+          const phLabel = typeof ph === 'string' ? `${pkg.name} Gallery ${i + 1}` : (ph?.label || `${pkg.name} Photo ${i + 1}`);
+          if (phUrl && typeof phUrl === 'string' && phUrl.trim() && !phUrl.includes('picsum.photos')) {
+            const clean = phUrl.trim();
+            if (!mediaMap.has(clean)) {
+              mediaMap.set(clean, {
+                id: `db-pkg-gal-${pkg.id}-${i}`,
+                url: clean,
+                label: phLabel,
+                source: pkg.name,
+                category: 'gallery',
+              });
+            }
+          }
+        });
+      }
+    });
+
+    // 2. Gather from FEATURED_PACKAGES preset list
+    FEATURED_PACKAGES.forEach((pkg) => {
+      if (pkg.img && typeof pkg.img === 'string' && pkg.img.trim() && !pkg.img.includes('picsum.photos')) {
+        const clean = pkg.img.trim();
+        if (!mediaMap.has(clean)) {
+          mediaMap.set(clean, {
+            id: `preset-cover-${pkg.id}`,
+            url: clean,
+            label: `${pkg.name} Preset Cover`,
+            source: `${pkg.name} (Preset)`,
+            category: 'package',
+          });
+        }
+      }
+
+      if (Array.isArray(pkg.photos)) {
+        pkg.photos.forEach((ph, i) => {
+          const phUrl = typeof ph === 'string' ? ph : ph?.url;
+          const phLabel = typeof ph === 'string' ? `${pkg.name} Preset ${i + 1}` : (ph?.label || `${pkg.name} Gallery ${i + 1}`);
+          if (phUrl && typeof phUrl === 'string' && phUrl.trim() && !phUrl.includes('picsum.photos')) {
+            const clean = phUrl.trim();
+            if (!mediaMap.has(clean)) {
+              mediaMap.set(clean, {
+                id: `preset-gal-${pkg.id}-${i}`,
+                url: clean,
+                label: phLabel,
+                source: `${pkg.name} (Preset)`,
+                category: 'gallery',
+              });
+            }
+          }
+        });
+      }
+    });
+
+    // 3. Gather directly from Supabase Storage buckets ('package-images' and 'equipment-images')
+    try {
+      const buckets = ['package-images', 'equipment-images'];
+      for (const bucketName of buckets) {
+        try {
+          // List root files
+          const { data: rootItems } = await supabase.storage.from(bucketName).list('', { limit: 100 });
+          if (rootItems) {
+            for (const item of rootItems) {
+              if (item.name && !item.name.startsWith('.')) {
+                // If it might be a folder (e.g., 'packages' or 'equipment')
+                if (!item.id || item.metadata === null) {
+                  const { data: subItems } = await supabase.storage.from(bucketName).list(item.name, { limit: 100 });
+                  if (subItems) {
+                    for (const sub of subItems) {
+                      if (sub.name && !sub.name.startsWith('.')) {
+                        const fullPath = `${item.name}/${sub.name}`;
+                        const { data: pUrl } = supabase.storage.from(bucketName).getPublicUrl(fullPath);
+                        if (pUrl?.publicUrl && !mediaMap.has(pUrl.publicUrl)) {
+                          mediaMap.set(pUrl.publicUrl, {
+                            id: `storage-${bucketName}-${sub.name}`,
+                            url: pUrl.publicUrl,
+                            label: sub.name.replace(/\.[^/.]+$/, '').replace(/pkg_\d+_/, '').replace(/\d+-/, ''),
+                            source: `${bucketName}/${item.name}`,
+                            category: 'storage',
+                          });
+                        }
+                      }
+                    }
+                  }
+                } else {
+                  const { data: pUrl } = supabase.storage.from(bucketName).getPublicUrl(item.name);
+                  if (pUrl?.publicUrl && !mediaMap.has(pUrl.publicUrl)) {
+                    mediaMap.set(pUrl.publicUrl, {
+                      id: `storage-${bucketName}-${item.name}`,
+                      url: pUrl.publicUrl,
+                      label: item.name.replace(/\.[^/.]+$/, '').replace(/pkg_\d+_/, ''),
+                      source: bucketName,
+                      category: 'storage',
+                    });
+                  }
+                }
+              }
+            }
+          }
+        } catch (bucketErr) {
+          console.warn(`Storage query warning for bucket ${bucketName}:`, bucketErr);
+        }
+      }
+    } catch (storageErr) {
+      console.warn('Storage media scanner error:', storageErr);
+    }
+
+    setAvailableMedia(Array.from(mediaMap.values()));
+    setLoadingMedia(false);
+  };
+
+  const handleOpenMediaPicker = (target: 'gallery' | 'cover') => {
+    setMediaPickerTarget(target);
+    setSelectedMediaForGallery([]);
+    setMediaSearchQuery('');
+    setMediaCategoryFilter('all');
+    setShowMediaPicker(true);
+    loadAvailableMedia();
+  };
+
+  const toggleSelectMediaForGallery = (item: MediaLibraryItem) => {
+    setSelectedMediaForGallery((prev) => {
+      const exists = prev.some((p) => p.url === item.url);
+      if (exists) {
+        return prev.filter((p) => p.url !== item.url);
+      }
+      return [...prev, item];
+    });
+  };
+
+  const handleQuickAddSinglePhotoToGallery = (item: MediaLibraryItem) => {
+    const isAlreadyInGallery = galleryPhotos.some((p) => p.url === item.url || p.previewUrl === item.url);
+    if (!isAlreadyInGallery) {
+      setGalleryPhotos((prev) => [
+        ...prev,
+        {
+          url: item.url,
+          label: item.label || 'Gallery Photo',
+          previewUrl: item.url,
+        },
+      ]);
+    }
+  };
+
+  const handleAddSelectedMediaToGallery = () => {
+    if (selectedMediaForGallery.length === 0) return;
+
+    const newToAdd: GalleryPhoto[] = [];
+    selectedMediaForGallery.forEach((item) => {
+      const isAlreadyInGallery = galleryPhotos.some((p) => p.url === item.url || p.previewUrl === item.url);
+      if (!isAlreadyInGallery) {
+        newToAdd.push({
+          url: item.url,
+          label: item.label || 'Gallery Photo',
+          previewUrl: item.url,
+        });
+      }
+    });
+
+    if (newToAdd.length > 0) {
+      setGalleryPhotos((prev) => [...prev, ...newToAdd]);
+    }
+    setShowMediaPicker(false);
+    setSelectedMediaForGallery([]);
+  };
+
+  const handleSelectCoverFromMedia = (item: MediaLibraryItem) => {
+    setCoverFile(null);
+    setCoverPreview(item.url);
+    setShowMediaPicker(false);
   };
 
   // =========================================================================
@@ -903,10 +1115,10 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
                   </div>
                 </div>
 
-                {/* Cover Image Upload Component (No External URL Input) */}
+                {/* Cover Image Upload Component (With Media Library Option) */}
                 <div className="pt-2">
                   <label className="font-semibold uppercase text-[#24252c]/50 block mb-1.5 text-[10px]">
-                    Package Cover Photo (Upload File)
+                    Package Cover Photo (Upload File or Select Existing)
                   </label>
                   <div className="flex flex-col sm:flex-row gap-4 items-center">
                     {/* Cover Preview Box */}
@@ -915,7 +1127,7 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
                         <img src={coverPreview} alt="Cover Preview" className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex flex-col items-center justify-center text-[#24252c]/40 text-xs p-2 text-center">
-                          <span>No Image Uploaded</span>
+                          <span>No Image Selected</span>
                         </div>
                       )}
                       <span className="absolute bottom-2 left-2 text-[9px] font-bold bg-black/60 text-white px-2 py-0.5 rounded-full backdrop-blur-md">
@@ -923,47 +1135,74 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
                       </span>
                     </div>
 
-                    {/* File Upload Controls */}
+                    {/* File Upload & Media Library Controls */}
                     <div className="flex-1 w-full space-y-2">
-                      <div className="flex items-center gap-3">
-                        <label className="bg-white border border-[#24252c]/20 hover:border-[#1090F8] text-[var(--ink)] text-xs font-bold px-5 py-2.5 rounded-full cursor-pointer transition-colors shadow-sm flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <label className="bg-white border border-[#24252c]/20 hover:border-[#1090F8] text-[var(--ink)] text-xs font-bold px-4 py-2.5 rounded-full cursor-pointer transition-colors shadow-sm flex items-center gap-2">
                           <IconBox className="w-4 h-4 text-[#1090F8]" />
-                          <span>Upload Cover Image</span>
+                          <span>Upload New File</span>
                           <input type="file" accept="image/*" onChange={handleCoverFileChange} className="hidden" />
                         </label>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenMediaPicker('cover')}
+                          className="bg-white border border-[#1090F8]/30 hover:bg-[#1090F8]/10 text-[#1090F8] text-xs font-bold px-4 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                        >
+                          <IconSearch className="w-3.5 h-3.5" />
+                          <span>Select from Uploaded Photos</span>
+                        </button>
                         {coverFile && (
                           <span className="text-xs text-emerald-600 font-bold flex items-center gap-1">
                             <IconCheck className="w-4 h-4" /> Ready to Upload
                           </span>
                         )}
                       </div>
+                      <p className="text-[10px] text-[#24252c]/45">
+                        Upload a fresh banner or reuse an existing production image already in the system.
+                      </p>
                     </div>
                   </div>
                 </div>
 
                 {/* Multiple Gallery Photos Section */}
                 <div className="pt-2 border-t border-[#24252c]/[0.08]">
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="font-semibold uppercase text-[#24252c]/50 block text-[10px]">
-                      Secondary Gallery Photos ({galleryPhotos.length} Added)
-                    </label>
-                    <label className="text-[10px] text-[#1090F8] font-bold hover:underline cursor-pointer flex items-center gap-1">
-                      <IconPlus className="w-3 h-3" />
-                      <span>+ Add Gallery Images</span>
-                      <input type="file" accept="image/*" multiple onChange={handleAddGalleryPhoto} className="hidden" />
-                    </label>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+                    <div>
+                      <label className="font-semibold uppercase text-[#24252c]/50 block text-[10px]">
+                        Secondary Gallery Photos ({galleryPhotos.length} Added)
+                      </label>
+                      <p className="text-[10px] text-[#24252c]/45">
+                        Include multi-angle event photos or gear closeups. Choose from already uploaded photos or add new ones.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenMediaPicker('gallery')}
+                        className="text-xs font-bold bg-white border border-[#1090F8]/30 hover:bg-[#1090F8]/10 text-[#1090F8] px-3.5 py-1.5 rounded-full transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <IconSearch className="w-3.5 h-3.5" />
+                        <span>Select from Uploaded Photos</span>
+                      </button>
+                      <label className="text-xs font-bold bg-[#1090F8] hover:bg-[#0b7cd0] text-white px-3.5 py-1.5 rounded-full transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer">
+                        <IconPlus className="w-3.5 h-3.5" />
+                        <span>+ Upload Files</span>
+                        <input type="file" accept="image/*" multiple onChange={handleAddGalleryPhoto} className="hidden" />
+                      </label>
+                    </div>
                   </div>
 
                   {galleryPhotos.length > 0 ? (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       {galleryPhotos.map((photo, idx) => (
-                        <div key={idx} className="bg-white p-2 rounded-2xl border border-[#24252c]/10 relative space-y-1.5">
+                        <div key={idx} className="bg-white p-2 rounded-2xl border border-[#24252c]/10 relative space-y-1.5 shadow-sm group">
                           <div className="aspect-[4/3] rounded-xl overflow-hidden bg-[var(--mist)] relative">
                             <img src={photo.previewUrl || photo.url} alt={photo.label} className="w-full h-full object-cover" />
                             <button
                               type="button"
                               onClick={() => handleRemoveGalleryPhoto(idx)}
-                              className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/60 hover:bg-red-600 text-white transition-colors cursor-pointer"
+                              className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/60 hover:bg-red-600 text-white transition-colors cursor-pointer shadow-sm"
+                              title="Remove Photo"
                             >
                               <IconX className="w-3.5 h-3.5" />
                             </button>
@@ -972,13 +1211,32 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
                             value={photo.label}
                             onChange={(e) => handleUpdateGalleryLabel(idx, e.target.value)}
                             placeholder="Photo label..."
-                            className="w-full text-[10px] px-2 py-1 bg-[#EEEEEE] rounded-lg border border-transparent focus:outline-none focus:border-[#1090F8]"
+                            className="w-full text-[10px] px-2 py-1 bg-[#EEEEEE] rounded-lg border border-transparent focus:outline-none focus:border-[#1090F8] text-[var(--ink)]"
                           />
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="text-[11px] text-[#24252c]/40 italic">No secondary photos added. Click above to upload gallery images.</p>
+                    <div className="p-6 rounded-2xl border-2 border-dashed border-[#24252c]/15 bg-white/50 text-center space-y-3">
+                      <div className="text-xs text-[#24252c]/60 font-medium">
+                        No secondary gallery photos added yet.
+                      </div>
+                      <div className="flex flex-wrap items-center justify-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenMediaPicker('gallery')}
+                          className="text-xs font-bold bg-[#1090F8]/10 hover:bg-[#1090F8]/20 text-[#1090F8] border border-[#1090F8]/30 px-4 py-2 rounded-full transition-colors cursor-pointer flex items-center gap-1.5"
+                        >
+                          <IconSearch className="w-3.5 h-3.5" />
+                          <span>Choose from Uploaded Photos</span>
+                        </button>
+                        <label className="text-xs font-bold bg-white border border-[#24252c]/20 hover:border-[#1090F8] text-[var(--ink)] px-4 py-2 rounded-full transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm">
+                          <IconPlus className="w-3.5 h-3.5 text-[#1090F8]" />
+                          <span>Upload Files from Computer</span>
+                          <input type="file" accept="image/*" multiple onChange={handleAddGalleryPhoto} className="hidden" />
+                        </label>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1356,6 +1614,285 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
             >
               {isSubmitting ? 'Deleting...' : 'Delete Package'}
             </button>
+          </div>
+        </div>
+      </ModalOverlay>
+
+      {/* Media Library / Uploaded Photos Picker Modal */}
+      <ModalOverlay isOpen={showMediaPicker} onClose={() => setShowMediaPicker(false)}>
+        <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[88vh] flex flex-col shadow-2xl border border-[#24252c]/10 overflow-hidden relative">
+          {/* Header */}
+          <div className="p-5 sm:p-6 border-b border-[#24252c]/10 flex items-center justify-between shrink-0 bg-white">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#1090F8] bg-[#1090F8]/10 px-2.5 py-0.5 rounded-md">
+                  Media Library
+                </span>
+                <span className="text-xs text-[#24252c]/50 font-mono font-medium">
+                  {availableMedia.length} Photos in Database & Storage
+                </span>
+              </div>
+              <h2 className="text-xl font-extrabold text-[var(--ink)] mt-1">
+                {mediaPickerTarget === 'cover' ? 'Select Package Cover Photo' : 'Select Secondary Gallery Photos'}
+              </h2>
+              <p className="text-xs text-[#24252c]/60 mt-0.5">
+                {mediaPickerTarget === 'cover'
+                  ? 'Click any previously uploaded photo to set as the main cover photo without duplicate upload.'
+                  : 'Select one or more previously uploaded photos across packages and storage without duplicate re-uploading.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowMediaPicker(false)}
+              className="text-[#24252c]/50 hover:text-[var(--ink)] p-2 rounded-full hover:bg-[var(--mist)] transition-colors cursor-pointer"
+              title="Close Media Library"
+            >
+              <IconX className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Search & Category Filter Bar */}
+          <div className="px-5 sm:px-6 py-3 bg-[var(--mist)] border-b border-[#24252c]/[0.08] flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+            <div className="relative w-full sm:w-80">
+              <IconSearch className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[#24252c]/40" />
+              <input
+                type="text"
+                value={mediaSearchQuery}
+                onChange={(e) => setMediaSearchQuery(e.target.value)}
+                placeholder="Filter by title, package name, or label..."
+                className="w-full pl-9 pr-8 py-2 text-xs rounded-full bg-white border border-[#24252c]/15 text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8]"
+              />
+              {mediaSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setMediaSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#24252c]/40 hover:text-[var(--ink)]"
+                >
+                  <IconX className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+              {[
+                { id: 'all', label: 'All Photos', count: availableMedia.length },
+                { id: 'package', label: 'Package Covers', count: availableMedia.filter((m) => m.category === 'package').length },
+                { id: 'gallery', label: 'Gallery Shots', count: availableMedia.filter((m) => m.category === 'gallery').length },
+                { id: 'storage', label: 'Storage Buckets', count: availableMedia.filter((m) => m.category === 'storage').length },
+              ].map((tab) => {
+                const isActive = mediaCategoryFilter === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setMediaCategoryFilter(tab.id as any)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                      isActive
+                        ? 'bg-[var(--ink)] text-white shadow-sm'
+                        : 'bg-white text-[#24252c]/60 hover:text-[var(--ink)] border border-[#24252c]/10'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-[#EEEEEE] text-[#24252c]/50'}`}>
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Photo Grid Content */}
+          <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4 modal-scroll">
+            {loadingMedia ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center space-y-3">
+                <div className="w-8 h-8 border-3 border-[#1090F8] border-t-transparent rounded-full animate-spin" />
+                <p className="text-xs text-[#24252c]/60 font-semibold">Scanning media library and Supabase storage...</p>
+              </div>
+            ) : availableMedia.filter((item) => {
+                const matchesCat = mediaCategoryFilter === 'all' || item.category === mediaCategoryFilter;
+                const q = mediaSearchQuery.toLowerCase().trim();
+                const matchesSearch = !q || item.label.toLowerCase().includes(q) || item.source.toLowerCase().includes(q) || item.url.toLowerCase().includes(q);
+                return matchesCat && matchesSearch;
+              }).length === 0 ? (
+              <div className="py-16 text-center space-y-2 bg-[var(--mist)] rounded-2xl border border-[#24252c]/10">
+                <p className="text-xs text-[#24252c]/60 font-semibold">No photos match your filter criteria.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMediaSearchQuery('');
+                    setMediaCategoryFilter('all');
+                  }}
+                  className="text-xs text-[#1090F8] font-bold hover:underline cursor-pointer"
+                >
+                  Reset filters
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5">
+                {availableMedia
+                  .filter((item) => {
+                    const matchesCat = mediaCategoryFilter === 'all' || item.category === mediaCategoryFilter;
+                    const q = mediaSearchQuery.toLowerCase().trim();
+                    const matchesSearch = !q || item.label.toLowerCase().includes(q) || item.source.toLowerCase().includes(q) || item.url.toLowerCase().includes(q);
+                    return matchesCat && matchesSearch;
+                  })
+                  .map((item) => {
+                    const isSelected = selectedMediaForGallery.some((s) => s.url === item.url);
+                    const isAlreadyInGallery = galleryPhotos.some((g) => g.url === item.url || g.previewUrl === item.url);
+                    const isCurrentCover = coverPreview === item.url;
+
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={() => {
+                          if (mediaPickerTarget === 'cover') {
+                            handleSelectCoverFromMedia(item);
+                          } else {
+                            toggleSelectMediaForGallery(item);
+                          }
+                        }}
+                        className={`group relative rounded-2xl overflow-hidden border transition-all cursor-pointer bg-white flex flex-col ${
+                          isSelected || (mediaPickerTarget === 'cover' && isCurrentCover)
+                            ? 'border-[#1090F8] ring-2 ring-[#1090F8]/30 shadow-md scale-[1.01]'
+                            : isAlreadyInGallery
+                            ? 'border-emerald-500/40 bg-emerald-50/20'
+                            : 'border-[#24252c]/10 hover:border-[#1090F8]/50 hover:shadow-md'
+                        }`}
+                      >
+                        {/* Image Frame */}
+                        <div className="aspect-[4/3] bg-[var(--mist)] relative overflow-hidden">
+                          <img
+                            src={item.url}
+                            alt={item.label}
+                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            loading="lazy"
+                          />
+
+                          {/* Top Badges */}
+                          <div className="absolute top-2 left-2 right-2 flex items-center justify-between gap-1 pointer-events-none">
+                            <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-black/60 text-white backdrop-blur-md truncate max-w-[120px]">
+                              {item.source}
+                            </span>
+
+                            {mediaPickerTarget === 'gallery' && (
+                              <>
+                                {isSelected ? (
+                                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-[#1090F8] text-white flex items-center gap-1 shadow-sm">
+                                    <IconCheck className="w-3 h-3" /> Selected
+                                  </span>
+                                ) : isAlreadyInGallery ? (
+                                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1 shadow-sm">
+                                    <IconCheck className="w-3 h-3" /> Added
+                                  </span>
+                                ) : null}
+                              </>
+                            )}
+
+                            {mediaPickerTarget === 'cover' && isCurrentCover && (
+                              <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-[#1090F8] text-white flex items-center gap-1 shadow-sm">
+                                <IconCheck className="w-3 h-3" /> Current Cover
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Card Info & Action Footer */}
+                        <div className="p-2.5 space-y-1.5 flex-1 flex flex-col justify-between">
+                          <div className="text-[11px] font-bold text-[var(--ink)] truncate" title={item.label}>
+                            {item.label}
+                          </div>
+
+                          <div className="pt-1 flex items-center justify-between gap-1">
+                            {mediaPickerTarget === 'gallery' ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleQuickAddSinglePhotoToGallery(item);
+                                }}
+                                disabled={isAlreadyInGallery}
+                                className={`text-[10px] font-bold px-2.5 py-1 rounded-full transition-colors w-full flex items-center justify-center gap-1 cursor-pointer ${
+                                  isAlreadyInGallery
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : 'bg-[#EEEEEE] hover:bg-[#1090F8] hover:text-white text-[var(--ink)]'
+                                }`}
+                              >
+                                {isAlreadyInGallery ? (
+                                  <>
+                                    <IconCheck className="w-3 h-3" /> In Gallery
+                                  </>
+                                ) : (
+                                  <>
+                                    <IconPlus className="w-3 h-3" /> Add to Gallery
+                                  </>
+                                )}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSelectCoverFromMedia(item);
+                                }}
+                                className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-[#1090F8] text-white hover:bg-[#0b7cd0] transition-colors w-full flex items-center justify-center gap-1 cursor-pointer"
+                              >
+                                <IconCheck className="w-3 h-3" /> Set as Cover
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+
+          {/* Footer with Batch Actions */}
+          <div className="p-4 sm:p-5 border-t border-[#24252c]/10 bg-white flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+            <div className="flex items-center gap-2 text-xs text-[#24252c]/60">
+              {mediaPickerTarget === 'gallery' ? (
+                <div className="flex items-center gap-3">
+                  <span>
+                    <strong className="text-[var(--ink)]">{selectedMediaForGallery.length}</strong> photo(s) selected
+                  </span>
+                  {selectedMediaForGallery.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMediaForGallery([])}
+                      className="text-xs text-red-600 hover:underline font-bold cursor-pointer"
+                    >
+                      Clear Selection
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <span>Click any image above to immediately select as the cover photo</span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2.5 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => setShowMediaPicker(false)}
+                className="flex-1 sm:flex-none px-5 py-2.5 rounded-full border border-[#24252c]/20 text-xs font-bold text-[var(--ink)] hover:bg-[#EEEEEE] transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+
+              {mediaPickerTarget === 'gallery' && (
+                <button
+                  type="button"
+                  onClick={handleAddSelectedMediaToGallery}
+                  disabled={selectedMediaForGallery.length === 0}
+                  className="flex-1 sm:flex-none px-6 py-2.5 rounded-full bg-[#1090F8] hover:bg-[#0b7cd0] text-white text-xs font-bold transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <IconPlus className="w-4 h-4" />
+                  <span>Add Selected ({selectedMediaForGallery.length}) to Gallery</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </ModalOverlay>
