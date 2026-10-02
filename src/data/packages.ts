@@ -71,7 +71,6 @@ export const FEATURED_PACKAGES: PackageData[] = [
       '4x LED Color Par Uplights',
       '2x UHF Wireless Host Microphones',
       '1x Digital 8-Channel Compact Audio Mixer',
-      'Full Load-in, Soundcheck & On-site Technician',
     ],
     recommendedFor: [
       'Simple Birthday Parties',
@@ -105,7 +104,6 @@ export const FEATURED_PACKAGES: PackageData[] = [
       '2x Frontal Warm White Face Lights with Stands',
       '2x UHF Wireless Handheld Mics',
       '1x 12-Channel Audio Mixer with Bluetooth & Aux',
-      'Full Technical Delivery, Cabling & Crew Support',
     ],
     recommendedFor: [
       'Simple Birthday Parties',
@@ -138,7 +136,6 @@ export const FEATURED_PACKAGES: PackageData[] = [
       '8x Multi-Color LED Par Lights',
       '2x Dual UHF Wireless Mics + 1x Backup Corded Mic',
       '1x 16-Channel Digital Sound Console',
-      'Full Sound Engineer & Lighting Operator',
     ],
     recommendedFor: [
       'Birthday Debut Parties',
@@ -172,7 +169,6 @@ export const FEATURED_PACKAGES: PackageData[] = [
       '8x Wireless LED Par Mood Uplights',
       '1x Professional Heavy Fog / Smoke Machine',
       '2x UHF Dual Wireless Microphones',
-      'Full Lighting Programmer & Sound Engineer',
     ],
     recommendedFor: [
       'Birthday Debut Parties (Themed Lighting)',
@@ -207,7 +203,6 @@ export const FEATURED_PACKAGES: PackageData[] = [
       '12x LED Par Fixtures (Stage & Ambient Wash)',
       '4x UHF Wireless Mics + Drum / Instrument Mic Kit',
       '1x High-Output Haze & Fog Machine',
-      'Dedicated Stage Director, Sound & Lighting Crew',
     ],
     recommendedFor: [
       'Grand Wedding Receptions',
@@ -243,7 +238,6 @@ export const FEATURED_PACKAGES: PackageData[] = [
       '6x UHF Dual Wireless Microphones + In-Ear Monitor System',
       '1x Live Band Full Backline & Multi-Track Recording Mixer',
       '2x Heavy-Duty Low-Lying Dry Ice Fog & Haze Generators',
-      'Complete Production Team (Audio Engineer, Master Electrician, Lighting VJ, Stage Hands)',
     ],
     recommendedFor: [
       'Grand Wedding Receptions (5-Star Ballrooms)',

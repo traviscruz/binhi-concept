@@ -290,12 +290,12 @@ export default function PackageCatalogPage({
                           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap text-[10px] font-bold text-[#1090F8]">
                             {pkg.specs?.venueSize && (
                               <span className="bg-[#1090F8]/8 border border-[#1090F8]/15 px-2 py-0.5 rounded-full">
-                                📐 {pkg.specs.venueSize}
+                                {pkg.specs.venueSize}
                               </span>
                             )}
                             {pkg.specs?.guestCapacity && (
                               <span className="bg-[#1090F8]/8 border border-[#1090F8]/15 px-2 py-0.5 rounded-full">
-                                👥 {pkg.specs.guestCapacity}
+                                {pkg.specs.guestCapacity}
                               </span>
                             )}
                           </div>
@@ -410,12 +410,12 @@ export default function PackageCatalogPage({
                         <div className="flex items-center gap-1.5 mt-1.5 flex-wrap text-[10px] font-bold text-[#1090F8]">
                           {pkg.specs?.venueSize && (
                             <span className="bg-[#1090F8]/8 border border-[#1090F8]/15 px-2 py-0.5 rounded-full">
-                              📐 {pkg.specs.venueSize}
+                              {pkg.specs.venueSize}
                             </span>
                           )}
                           {pkg.specs?.guestCapacity && (
                             <span className="bg-[#1090F8]/8 border border-[#1090F8]/15 px-2 py-0.5 rounded-full">
-                              👥 {pkg.specs.guestCapacity}
+                              {pkg.specs.guestCapacity}
                             </span>
                           )}
                         </div>

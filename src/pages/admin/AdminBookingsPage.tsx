@@ -1808,18 +1808,18 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
       </div>
 
       {/* Desktop Bookings Table - 100% Fluid Zero-Scroll Table */}
-      <div className="hidden lg:block bg-white rounded-3xl border border-[#24252c]/10 shadow-sm overflow-hidden isolate">
-          <table className="w-full text-left border-collapse text-xs table-fixed">
+      <div className="hidden lg:block bg-white rounded-3xl border border-[#24252c]/10 shadow-sm overflow-x-auto isolate">
+          <table className="w-full min-w-[1020px] text-left border-collapse text-xs table-fixed">
             <thead>
               <tr className="border-b border-[#24252c]/10 bg-[var(--mist)]/50 text-[#24252c]/60 font-bold uppercase text-[10px] tracking-wider whitespace-nowrap">
-                <th className="py-3.5 px-3.5 w-[15%]">Ref / Customer</th>
-                <th className="py-3.5 px-3 w-[17%]">Package & Venue</th>
-                <th className="py-3.5 px-3 w-[11%]">Schedule Date</th>
+                <th className="py-3.5 px-3.5 w-[14%]">Ref / Customer</th>
+                <th className="py-3.5 px-3 w-[16%]">Package & Venue</th>
+                <th className="py-3.5 px-3 w-[10%]">Schedule Date</th>
                 <th className="py-3.5 px-3 w-[11%]">Cost Breakdown</th>
-                <th className="py-3.5 px-3 w-[13%]">Assigned Crew</th>
-                <th className="py-3.5 px-2 w-[11%] text-center">Booking Status</th>
+                <th className="py-3.5 px-3 w-[12%]">Assigned Crew</th>
+                <th className="py-3.5 px-2 w-[14%] text-center">Booking Status</th>
                 <th className="py-3.5 px-2 w-[11%] text-center">Payment Status</th>
-                <th className="py-3.5 px-3 w-[11%] text-center bg-gradient-to-l from-[var(--ink)]/[0.22] via-[var(--ink)]/[0.08] to-transparent">Actions</th>
+                <th className="py-3.5 px-3 w-[12%] text-center bg-gradient-to-l from-[var(--ink)]/[0.22] via-[var(--ink)]/[0.08] to-transparent">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#24252c]/5">
@@ -1929,56 +1929,63 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                       </td>
 
                       {/* Col 6: Booking Status */}
-                      <td className="py-3 px-2 align-middle whitespace-nowrap text-center">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border shadow-2xs ${
-                            row.status === 'Ongoing'
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-extrabold'
-                              : row.status === 'Upcoming' || row.status === 'Confirmed'
-                              ? 'bg-blue-50 text-blue-700 border-blue-200'
-                              : row.status === 'Completed'
-                              ? 'bg-slate-100 text-slate-700 border-slate-300'
-                              : row.status === 'Cancelled'
-                              ? 'bg-rose-50 text-rose-700 border-rose-200'
-                              : 'bg-amber-50 text-amber-700 border-amber-200'
-                          }`}
-                        >
+                      <td className="py-3 px-2 align-middle text-center">
+                        <div className="flex justify-center w-full min-w-0">
                           <span
-                            className={`rounded-full ${
+                            className={`inline-flex items-center gap-1 max-w-full px-2.5 py-1 rounded-full text-[11px] font-bold border shadow-2xs leading-none shrink-0 ${
                               row.status === 'Ongoing'
-                                ? 'w-1.5 h-1.5 bg-emerald-500 animate-pulse'
-                                : 'w-1.5 h-1.5 bg-current'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-extrabold'
+                                : row.status === 'Upcoming' || row.status === 'Confirmed'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : row.status === 'Completed'
+                                ? 'bg-slate-100 text-slate-700 border-slate-300'
+                                : row.status === 'Cancelled'
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : 'bg-amber-50 text-amber-700 border-amber-200'
                             }`}
-                          />
-                          <span className="truncate">{row.status}</span>
-                        </span>
+                            title={row.status}
+                          >
+                            <span
+                              className={`rounded-full shrink-0 ${
+                                row.status === 'Ongoing'
+                                  ? 'w-1.5 h-1.5 bg-emerald-500 animate-pulse'
+                                  : 'w-1.5 h-1.5 bg-current'
+                              }`}
+                            />
+                            <span className="truncate">
+                              {row.status === 'Pending Technical Review' ? 'Pending Tech Review' : row.status}
+                            </span>
+                          </span>
+                        </div>
                       </td>
 
                       {/* Col 7: Payment Status */}
-                      <td className="py-3 px-2 align-middle whitespace-nowrap text-center">
-                        {(row.rawStatus === 'cancelled' || row.rawStatus === 'declined' || row.rawStatus === 'refunded' || row.status === 'Cancelled' || row.status === 'Declined & Refunded') ? (
-                          row.refundStatus === 'processed' ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-50 text-rose-800 border border-rose-300 text-[11px] font-bold shadow-2xs">
-                              <span className="w-1.5 h-1.5 rounded-full bg-rose-600" />
-                              <span className="truncate">Refunded</span>
+                      <td className="py-3 px-2 align-middle text-center">
+                        <div className="flex justify-center w-full min-w-0">
+                          {(row.rawStatus === 'cancelled' || row.rawStatus === 'declined' || row.rawStatus === 'refunded' || row.status === 'Cancelled' || row.status === 'Declined & Refunded') ? (
+                            row.refundStatus === 'processed' ? (
+                              <span className="inline-flex items-center gap-1 max-w-full px-2.5 py-1 rounded-full bg-rose-50 text-rose-800 border border-rose-300 text-[11px] font-bold shadow-2xs shrink-0">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-600 shrink-0" />
+                                <span className="truncate">Refunded</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 max-w-full px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold shadow-2xs shrink-0">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                                <span className="truncate">Cancelled</span>
+                              </span>
+                            )
+                          ) : row.isFullyPaid ? (
+                            <span className="inline-flex items-center gap-1 max-w-full px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold shadow-2xs shrink-0">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                              <span className="truncate">Fully Paid</span>
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold shadow-2xs">
-                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                              <span>Cancelled</span>
+                            <span className="inline-flex items-center gap-1 max-w-full px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-bold shadow-2xs shrink-0">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                              <span className="truncate">50% Dep</span>
                             </span>
-                          )
-                        ) : row.isFullyPaid ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold shadow-2xs">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                            <span>Fully Paid</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-bold shadow-2xs">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                            <span>50% Dep</span>
-                          </span>
-                        )}
+                          )}
+                        </div>
                       </td>
 
                       {/* Col 8: Actions with Darkened Progressive Gradient Fading to Left */}
@@ -2024,15 +2031,15 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                   <div key={row.dbId} className="bg-white rounded-2xl p-4 sm:p-5 border border-[#24252c]/10 shadow-sm space-y-3 relative overflow-visible flex flex-col justify-between">
                     <div>
                       {/* Header: Ref, Customer, Booking Status & Payment Status */}
-                      <div className="flex justify-between items-start gap-2">
-                        <div className="min-w-0">
+                      <div className="flex justify-between items-start gap-2.5">
+                        <div className="min-w-0 flex-1">
                           <span className="font-bold text-xs text-[#1090F8]">#{row.id}</span>
                           <h4 className="font-extrabold text-sm text-[var(--ink)] mt-0.5 truncate">{row.customer}</h4>
                           <div className="text-[11px] text-[#24252c]/60 truncate">{row.package}</div>
                         </div>
-                        <div className="flex flex-col items-end gap-1 shrink-0">
+                        <div className="flex flex-col items-end gap-1.5 shrink-0 max-w-[55%]">
                           <span
-                            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border inline-flex items-center gap-1 ${
+                            className={`text-[10px] font-bold px-2.5 py-1 rounded-full border inline-flex items-center gap-1 max-w-full truncate leading-none ${
                               row.status === 'Ongoing'
                                 ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-extrabold'
                                 : row.status === 'Upcoming' || row.status === 'Confirmed'
@@ -2043,18 +2050,25 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                                 ? 'bg-rose-50 text-rose-700 border-rose-200'
                                 : 'bg-amber-50 text-amber-700 border-amber-200'
                             }`}
+                            title={row.status}
                           >
                             {row.status === 'Ongoing' && (
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                             )}
-                            {row.status}
+                            <span className="truncate">
+                              {row.status === 'Pending Technical Review' ? 'Pending Tech Review' : row.status}
+                            </span>
                           </span>
-                          {row.isFullyPaid ? (
-                            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          {(row.rawStatus === 'cancelled' || row.rawStatus === 'declined' || row.rawStatus === 'refunded' || row.status === 'Cancelled' || row.status === 'Declined & Refunded') ? (
+                            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 shrink-0">
+                              Cancelled
+                            </span>
+                          ) : row.isFullyPaid ? (
+                            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
                               Fully Paid
                             </span>
                           ) : (
-                            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0">
                               50% Deposit
                             </span>
                           )}

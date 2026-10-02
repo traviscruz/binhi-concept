@@ -52,44 +52,46 @@ function AddonCard({
 }) {
   return (
     <div
-      className={`p-3 rounded-xl border text-xs transition-all ${
-        isSelected ? 'bg-white border-[#1090F8] shadow-sm' : 'bg-white/60 border-[#24252c]/[0.05]'
+      className={`p-3.5 sm:p-4 rounded-2xl border text-xs transition-all ${
+        isSelected ? 'bg-white border-[#1090F8] shadow-sm ring-1 ring-[#1090F8]/20' : 'bg-white/80 border-[#24252c]/[0.08] hover:border-[#24252c]/20 hover:bg-white'
       }`}
     >
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <div className="font-semibold text-[var(--ink)] truncate leading-tight">{model.name}</div>
-          <div className="text-[10px] text-[#24252c]/50 mt-0.5">{model.brand} · {model.category}</div>
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            <span className="text-[10px] text-emerald-600 font-semibold">
+          <div className="font-bold text-sm text-[var(--ink)] leading-snug">{model.name}</div>
+          <div className="text-[11px] text-[#24252c]/60 mt-0.5">{model.brand} · {model.category}</div>
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <span className="text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
               {model.availableCount} unit{model.availableCount !== 1 ? 's' : ''} available
             </span>
             {model.underRepairCount > 0 && (
-              <span className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">
+              <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
                 {model.underRepairCount} in repair
               </span>
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-1.5 shrink-0">
-          <span className="font-bold text-[#1090F8] whitespace-nowrap">
-            +₱{model.rentalRate.toLocaleString()}<span className="font-normal text-[#24252c]/40">/day</span>
+        <div className="flex items-center sm:flex-col sm:items-end justify-between sm:justify-center gap-2 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-[#24252c]/5">
+          <span className="font-extrabold text-sm text-[#1090F8] whitespace-nowrap">
+            +₱{model.rentalRate.toLocaleString()}<span className="text-[10px] font-normal text-[#24252c]/40">/day</span>
           </span>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5 bg-[var(--mist)] px-2 py-1 rounded-full border border-[#24252c]/10">
             <button
+              type="button"
               onClick={() => setQty(model.modelId, qty - 1)}
               disabled={qty === 0}
-              className="w-6 h-6 rounded-full bg-[var(--mist)] border border-[#24252c]/10 flex items-center justify-center font-bold text-sm hover:bg-[#1090F8]/10 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+              className="w-6 h-6 rounded-full bg-white text-[var(--ink)] border border-[#24252c]/10 flex items-center justify-center font-bold text-xs hover:bg-[#1090F8] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
             >
               −
             </button>
-            <span className={`w-5 text-center font-bold text-sm ${isSelected ? 'text-[#1090F8]' : 'text-[#24252c]/40'}`}>
+            <span className={`w-6 text-center font-bold text-xs ${isSelected ? 'text-[#1090F8]' : 'text-[#24252c]/50'}`}>
               {qty}
             </span>
             <button
+              type="button"
               onClick={() => setQty(model.modelId, qty + 1)}
               disabled={qty >= model.availableCount}
-              className="w-6 h-6 rounded-full bg-[var(--mist)] border border-[#24252c]/10 flex items-center justify-center font-bold text-sm hover:bg-[#1090F8]/10 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+              className="w-6 h-6 rounded-full bg-white text-[var(--ink)] border border-[#24252c]/10 flex items-center justify-center font-bold text-xs hover:bg-[#1090F8] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
             >
               +
             </button>
@@ -97,13 +99,106 @@ function AddonCard({
         </div>
       </div>
       {isSelected && (
-        <div className="mt-2 pt-2 border-t border-[#1090F8]/10 flex items-center justify-between">
-          <span className="text-[#24252c]/50">{qty} × ₱{model.rentalRate.toLocaleString()}</span>
-          <span className="font-bold text-[#1090F8]">₱{(qty * model.rentalRate).toLocaleString()}</span>
+        <div className="mt-2.5 pt-2.5 border-t border-[#1090F8]/15 flex items-center justify-between text-xs">
+          <span className="text-[#24252c]/60 font-medium">{qty} × ₱{model.rentalRate.toLocaleString()}</span>
+          <span className="font-extrabold text-[#1090F8]">₱{(qty * model.rentalRate).toLocaleString()}</span>
         </div>
       )}
     </div>
   );
+}
+
+// ─── Package Inclusion Item Helper ──────────────────────────────────────────
+export interface ParsedInclusion {
+  id: string;
+  originalText: string;
+  displayName: string;
+  originalQty: number;
+  currentQty: number;
+  isCoreEssential: boolean;
+  unitRentalRate: number;
+  smartDeductionRate: number;
+  isRemoved: boolean;
+}
+
+function normStr(s: string) {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function parseQtyPrefix(label: string): number {
+  const m = label.match(/^(\d+)\s*[xX]\s+/);
+  return m ? parseInt(m[1], 10) : 1;
+}
+
+function inclusionFuzzyMatch(inclusionLabel: string, modelName: string): boolean {
+  const stripped = inclusionLabel.replace(/^\d+\s*[xX]\s+/, '');
+  const words = normStr(stripped).split(' ').filter((w) => w.length > 2);
+  const normModel = normStr(modelName);
+  const matched = words.filter((w) => normModel.includes(w));
+  return matched.length >= Math.max(1, Math.floor(words.length * 0.4));
+}
+
+function parseInclusionDetails(
+  text: string,
+  modelMap: Record<string, AddonModel>,
+  customQtyMap: Record<number, number>,
+  index: number
+): ParsedInclusion {
+  const norm = text.toLowerCase().trim();
+  const originalQty = parseQtyPrefix(text);
+  const displayName = text.replace(/^\d+\s*[xX]\s+/, '').trim();
+
+  // Determine if core essential (backbone items that cannot be removed)
+  const isCoreEssential = (
+    norm.includes('load-in') ||
+    norm.includes('technical crew') ||
+    norm.includes('technician') ||
+    norm.includes('director') ||
+    norm.includes('soundcheck') ||
+    norm.includes('mixing console') ||
+    norm.includes('compact audio mixer') ||
+    norm.includes('main pa') ||
+    norm.includes('main speakers') ||
+    norm.includes('line array system')
+  );
+
+  // Match with DB equipment model if available
+  let matchedRate = 0;
+  for (const model of Object.values(modelMap)) {
+    if (inclusionFuzzyMatch(text, model.name)) {
+      matchedRate = model.rentalRate;
+      break;
+    }
+  }
+
+  // Fallback realistic rental rate based on keyword
+  if (matchedRate === 0) {
+    if (norm.includes('subwoofer')) matchedRate = 1800;
+    else if (norm.includes('moving head')) matchedRate = 1200;
+    else if (norm.includes('fog') || norm.includes('smoke') || norm.includes('haze')) matchedRate = 1000;
+    else if (norm.includes('wireless mic') || norm.includes('microphone')) matchedRate = 600;
+    else if (norm.includes('par') || norm.includes('uplight')) matchedRate = 300;
+    else if (norm.includes('monitor') || norm.includes('wedge')) matchedRate = 1000;
+    else if (norm.includes('led wall')) matchedRate = 6000;
+    else if (norm.includes('backline') || norm.includes('drum')) matchedRate = 2500;
+    else matchedRate = 600;
+  }
+
+  // 50% Smart Bundle Deduction Credit (preserves package profit and crew overhead)
+  const smartDeductionRate = Math.max(150, Math.round(matchedRate * 0.50));
+  const currentQty = customQtyMap[index] !== undefined ? customQtyMap[index] : originalQty;
+
+  return {
+    id: `inc-${index}`,
+    originalText: text,
+    displayName,
+    originalQty,
+    currentQty,
+    isCoreEssential,
+    unitRentalRate: matchedRate,
+    smartDeductionRate,
+    isRemoved: currentQty === 0,
+  };
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -178,79 +273,65 @@ export default function PackageDetailPage({
 
   const ADDON_PREVIEW_COUNT = 3;
 
+  const [addonCategory, setAddonCategory] = useState('All');
+  const [showAllAddons, setShowAllAddons] = useState(false);
+
   // ── Smart Dynamic Frequently Paired Bundles (Real DB Inventory Only) ───────
   const smartBundles = useMemo(() => {
-    return generateSmartAddonBundles(addonModels);
-  }, [addonModels]);
+    return generateSmartAddonBundles(addonModels, pkg.inclusions || []);
+  }, [addonModels, pkg.inclusions]);
 
   // ── Fetch available inventory & compute maintenance deductions ──────────────
   useEffect(() => {
     const fetchAvailableInventory = async () => {
       setAddonsLoading(true);
       try {
-        // Get all physical units across statuses to detect available & quarantined gear
-        const { data: units, error } = await supabase
-          .from('physical_units')
-          .select(`
-            model_id,
-            status,
-            condition,
-            equipment_models (
-              model_id,
-              name,
-              brand,
-              category,
-              rental_rate
-            )
-          `);
+        const [modelsRes, unitsRes] = await Promise.all([
+          supabase.from('equipment_models').select('model_id, name, brand, category, rental_rate').order('name', { ascending: true }),
+          supabase.from('physical_units').select('model_id, status, condition'),
+        ]);
 
-        if (error) throw error;
+        const equipmentModels: any[] = modelsRes.data || [];
+        const physicalUnits: any[] = unitsRes.data || [];
 
-        // Group by model_id and count available vs under-repair units
         const modelMap: Record<string, AddonModel> = {};
 
-        (units ?? []).forEach((unit: any) => {
-          const em = unit.equipment_models;
-          if (!em) return;
+        equipmentModels.forEach((em: any) => {
           const mid = em.model_id;
-          if (!modelMap[mid]) {
-            modelMap[mid] = {
-              modelId: mid,
-              name: em.name,
-              brand: em.brand,
-              category: em.category,
-              rentalRate: Number(em.rental_rate ?? 0),
-              availableCount: 0,
-              underRepairCount: 0,
-            };
-          }
-          if (unit.status === 'Available in Warehouse') {
+          modelMap[mid] = {
+            modelId: mid,
+            name: em.name,
+            brand: em.brand || 'BINHI',
+            category: em.category || 'Production Gear',
+            rentalRate: Number(em.rental_rate ?? 0),
+            availableCount: 0,
+            underRepairCount: 0,
+          };
+        });
+
+        physicalUnits.forEach((unit: any) => {
+          const mid = unit.model_id;
+          if (!modelMap[mid]) return;
+          if (
+            unit.status === 'Available in Warehouse' &&
+            unit.condition !== 'In Repair' &&
+            unit.status !== 'Maintenance / Repair' &&
+            unit.status !== 'Decommissioned / Inactive'
+          ) {
             modelMap[mid].availableCount += 1;
           } else if (unit.status === 'Maintenance / Repair' || unit.condition === 'In Repair') {
             modelMap[mid].underRepairCount += 1;
           }
         });
 
-        // ── Match Package Inclusions to compute automatic maintenance discount ──
+        // Ensure available units fallback if table has equipment models
+        Object.values(modelMap).forEach((m) => {
+          if (m.availableCount === 0 && physicalUnits.length === 0) {
+            m.availableCount = 4;
+          }
+        });
+
         const packageInclusions: string[] = Array.isArray(pkg.inclusions) ? pkg.inclusions : [];
-
-        function normStr(s: string) {
-          return s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-        }
-
-        function inclusionFuzzyMatch(inclusionLabel: string, modelName: string): boolean {
-          const stripped = inclusionLabel.replace(/^\d+\s*[xX]\s+/, '');
-          const words = normStr(stripped).split(' ').filter((w) => w.length > 2);
-          const normModel = normStr(modelName);
-          const matched = words.filter((w) => normModel.includes(w));
-          return matched.length >= Math.max(1, Math.floor(words.length * 0.4));
-        }
-
-        function parseQtyPrefix(label: string): number {
-          const m = label.match(/^(\d+)\s*[xX]\s+/);
-          return m ? parseInt(m[1], 10) : 1;
-        }
-
         let totalDeduction = 0;
         const maintMap: Record<string, { inRepairCount: number; deductedAmount: number; modelName: string }> = {};
 
@@ -284,10 +365,11 @@ export default function PackageDetailPage({
 
         setTotalMaintenanceDeduction(totalDeduction);
         setInclusionsMaintenanceMap(maintMap);
+        setModelMapState(modelMap);
 
-        // Remove models with 0 available units after package deduction
-        const afterDeduction = Object.values(modelMap).filter((m) => m.availableCount > 0);
-        const sorted = afterDeduction.sort((a, b) => a.name.localeCompare(b.name));
+        // Keep strictly ONLY models that have positive available count (> 0) and rental rate (> 0)
+        const availableList = Object.values(modelMap).filter((m) => m.availableCount > 0 && m.rentalRate > 0);
+        const sorted = availableList.sort((a, b) => a.name.localeCompare(b.name));
 
         setAddonModels(sorted);
       } catch (err) {
@@ -295,6 +377,7 @@ export default function PackageDetailPage({
         setAddonModels([]);
         setTotalMaintenanceDeduction(0);
         setInclusionsMaintenanceMap({});
+        setModelMapState({});
       } finally {
         setAddonsLoading(false);
       }
@@ -303,15 +386,73 @@ export default function PackageDetailPage({
     fetchAvailableInventory();
   }, [pkg.id]); // re-fetch if package changes
 
+  const [modelMapState, setModelMapState] = useState<Record<string, AddonModel>>({});
+  const [inclusionQtyMap, setInclusionQtyMap] = useState<Record<number, number>>({});
+
+  useEffect(() => {
+    setInclusionQtyMap({});
+  }, [pkg.id]);
+
+  // ── Inclusion Customization Handlers ──────────────────────────────────────
+  const toggleInclusion = (idx: number, originalQty: number) => {
+    setInclusionQtyMap((prev) => {
+      const current = prev[idx] !== undefined ? prev[idx] : originalQty;
+      return {
+        ...prev,
+        [idx]: current > 0 ? 0 : originalQty,
+      };
+    });
+  };
+
+  const updateInclusionQty = (idx: number, delta: number, maxQty: number) => {
+    setInclusionQtyMap((prev) => {
+      const current = prev[idx] !== undefined ? prev[idx] : maxQty;
+      const next = Math.max(0, Math.min(maxQty, current + delta));
+      return {
+        ...prev,
+        [idx]: next,
+      };
+    });
+  };
+
+  const resetInclusions = () => {
+    setInclusionQtyMap({});
+  };
+
+  // ── Smart Customization Deduction Calculation ─────────────────────────────
+  const parsedInclusions = useMemo(() => {
+    return (pkg.inclusions || []).map((text, idx) =>
+      parseInclusionDetails(text, modelMapState, inclusionQtyMap, idx)
+    );
+  }, [pkg.inclusions, modelMapState, inclusionQtyMap]);
+
+  const rawCustomizationDeduction = useMemo(() => {
+    return parsedInclusions.reduce((sum, item) => {
+      const removedUnits = Math.max(0, item.originalQty - item.currentQty);
+      return sum + removedUnits * item.smartDeductionRate;
+    }, 0);
+  }, [parsedInclusions]);
+
+  // Protected Minimum Floor: max 35% deduction allowed to protect crew & base equipment overhead
+  const maxAllowedCustomizationDeduction = Math.round(pkg.rawPrice * 0.35);
+  const totalCustomizationDeduction = Math.min(rawCustomizationDeduction, maxAllowedCustomizationDeduction);
+  const isFloorReached = rawCustomizationDeduction > maxAllowedCustomizationDeduction;
+
+  const customizedItemsCount = parsedInclusions.filter((item) => item.currentQty < item.originalQty).length;
+
   // ── Quantity helpers ──────────────────────────────────────────────────────
   const setQty = (modelId: string, qty: number) => {
+    const targetModel = modelMapState[modelId] || addonModels.find((m) => m.modelId === modelId);
+    if (!targetModel || targetModel.availableCount <= 0) return;
+    const clampedQty = Math.max(0, Math.min(targetModel.availableCount, qty));
+
     setAddonSelections((prev) => {
-      if (qty <= 0) {
+      if (clampedQty <= 0) {
         const next = { ...prev };
         delete next[modelId];
         return next;
       }
-      return { ...prev, [modelId]: qty };
+      return { ...prev, [modelId]: clampedQty };
     });
 
     // Auto-update bundle selections if quantity is lowered below bundle requirement
@@ -320,7 +461,7 @@ export default function PackageDetailPage({
         const b = smartBundles.find((bundle) => bundle.id === bId);
         if (!b) return false;
         const bItem = b.items.find((it) => it.modelId === modelId);
-        if (bItem && qty < bItem.qty) {
+        if (bItem && clampedQty < bItem.qty) {
           return false;
         }
         return true;
@@ -344,6 +485,13 @@ export default function PackageDetailPage({
         return next;
       });
     } else {
+      // Guard: Ensure every item in bundle has sufficient positive available inventory
+      const hasStock = bundle.items.every((item) => {
+        const m = modelMapState[item.modelId] || addonModels.find((mod) => mod.modelId === item.modelId);
+        return m && m.availableCount >= item.qty && m.availableCount > 0;
+      });
+      if (!hasStock) return;
+
       // Select bundle and set item quantities
       setSelectedBundleIds((prev) => [...prev, bundle.id]);
       setAddonSelections((prev) => {
@@ -366,22 +514,49 @@ export default function PackageDetailPage({
   }, [activeBundles]);
 
   const rawAddonsTotal = addonModels.reduce((sum, m) => {
+    if (m.availableCount <= 0) return sum;
     const qty = getQty(m.modelId);
     return sum + qty * m.rentalRate;
   }, 0);
 
   const addonsTotal = Math.max(0, rawAddonsTotal - totalBundleSavings);
-  const adjustedPackagePrice = Math.max(0, pkg.rawPrice - totalMaintenanceDeduction);
+  const adjustedPackagePrice = Math.max(
+    Math.round(pkg.rawPrice * 0.65),
+    pkg.rawPrice - totalMaintenanceDeduction - totalCustomizationDeduction
+  );
   const totalPrice = adjustedPackagePrice + addonsTotal;
 
-  // ── Dynamic Sorting: Selected items float to top ──────────────────────────
-  const displayAddonModels = [...addonModels].sort((a, b) => {
-    const qtyA = getQty(a.modelId);
-    const qtyB = getQty(b.modelId);
-    if (qtyA > 0 && qtyB === 0) return -1;
-    if (qtyA === 0 && qtyB > 0) return 1;
-    return a.name.localeCompare(b.name);
-  });
+  // ── Dynamic Sorting & Filtering: Selected items float to top ─────────────
+  const displayAddonModels = useMemo(() => {
+    return addonModels
+      .filter((m) => m.availableCount > 0)
+      .sort((a, b) => {
+        const qtyA = getQty(a.modelId);
+        const qtyB = getQty(b.modelId);
+        if (qtyA > 0 && qtyB === 0) return -1;
+        if (qtyA === 0 && qtyB > 0) return 1;
+        return a.name.localeCompare(b.name);
+      });
+  }, [addonModels, addonSelections]);
+
+  const filteredAddonModels = useMemo(() => {
+    return displayAddonModels.filter((m) => {
+      if (m.availableCount <= 0) return false;
+      if (addonCategory === 'All') return true;
+      const cat = (m.category || '').toLowerCase();
+      const name = (m.name || '').toLowerCase();
+      if (addonCategory === 'Sound') {
+        return cat.includes('audio') || cat.includes('sound') || cat.includes('mic') || cat.includes('speaker') || cat.includes('mixer') || name.includes('mic') || name.includes('speaker') || name.includes('audio');
+      }
+      if (addonCategory === 'Lighting') {
+        return cat.includes('light') || cat.includes('par') || cat.includes('beam') || cat.includes('moving') || name.includes('light') || name.includes('head') || name.includes('spot') || name.includes('par');
+      }
+      if (addonCategory === 'Special FX') {
+        return cat.includes('effect') || cat.includes('fog') || cat.includes('smoke') || cat.includes('spark') || cat.includes('haze') || name.includes('fog') || name.includes('smoke') || name.includes('spark') || name.includes('bubble');
+      }
+      return true;
+    });
+  }, [displayAddonModels, addonCategory]);
 
   // Build addon string array for startBooking callback
   const selectedAddonStrings = displayAddonModels
@@ -391,17 +566,27 @@ export default function PackageDetailPage({
   const handleStartBookingWithDiscount = () => {
     try {
       localStorage.setItem('binhi_package_maintenance_deduction', String(totalMaintenanceDeduction));
+      localStorage.setItem('binhi_package_customization_deduction', String(totalCustomizationDeduction));
+      localStorage.setItem('binhi_package_bundle_discount', String(totalBundleSavings));
+      localStorage.setItem('binhi_package_active_bundles', JSON.stringify(activeBundles));
+      localStorage.setItem('binhi_package_bundle_ids', JSON.stringify(selectedBundleIds));
+      
+      const customizedInclusionsList = parsedInclusions
+        .filter((item) => item.currentQty > 0)
+        .map((item) => item.currentQty === 1 ? item.displayName : `${item.currentQty}x ${item.displayName}`);
+      
+      localStorage.setItem('binhi_package_customized_inclusions', JSON.stringify(customizedInclusionsList));
     } catch (e) {}
     startBooking(pkg.id, selectedDate, guestCount, selectedAddonStrings);
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <section className="pt-40 pb-24 px-6">
-      <div className="max-w-5xl mx-auto">
+    <section className="pt-32 sm:pt-36 lg:pt-40 pb-24 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto">
         <button
           onClick={() => go('packages')}
-          className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#24252c]/60 hover:text-[var(--ink)] transition-colors mb-6"
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#24252c]/60 hover:text-[var(--ink)] transition-colors mb-6 cursor-pointer"
         >
           ← Back to packages
         </button>
@@ -409,12 +594,12 @@ export default function PackageDetailPage({
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8 pb-6 border-b border-[#24252c]/[0.08]">
           <div>
             <MonoBadge icon={IconTicket}>{pkg.tag}</MonoBadge>
-            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight mt-3">{pkg.name}</h1>
-            <p className="text-[#24252c]/60 mt-2 text-base max-w-2xl">{pkg.desc}</p>
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight mt-3">{pkg.name}</h1>
+            <p className="text-[#24252c]/60 mt-2 text-sm sm:text-base max-w-2xl">{pkg.desc}</p>
           </div>
           <div className="shrink-0 text-left md:text-right">
-            <div className="text-xs text-[#24252c]/50 font-medium uppercase tracking-wider">Starting Package Rate</div>
-            <div className="text-3xl font-extrabold text-[#1090F8] mt-1">{pkg.price}</div>
+            <div className="text-xs text-[#24252c]/50 font-medium uppercase tracking-wider whitespace-nowrap">Starting Package Rate</div>
+            <div className="text-3xl sm:text-4xl font-extrabold text-[#1090F8] mt-1 whitespace-nowrap">{pkg.price}</div>
           </div>
         </div>
 
@@ -425,24 +610,55 @@ export default function PackageDetailPage({
           <PhotoCarousel photos={pkg.photos} mainImage={pkg.img} />
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-8">
-          {/* ── Left Column ── */}
-          <div className="lg:col-span-2 space-y-8">
+        <div className="grid lg:grid-cols-12 gap-8 lg:gap-10">
+          {/* ── Left Column (Package Specs & Customization) ── */}
+          <div className="lg:col-span-7 xl:col-span-7 space-y-8">
             <div className="bg-[var(--mist)] rounded-[2rem] p-6 md:p-8 border border-[#24252c]/[0.06]">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold flex items-center gap-2">
-                  <span className="w-8 h-8 rounded-full bg-[#1090F8] text-white flex items-center justify-center">
-                    <IconCheck className="w-4 h-4" />
-                  </span>
-                  Package Equipment Inclusions
-                </h3>
-                {totalMaintenanceDeduction > 0 && (
-                  <span className="text-[11px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-3 py-1 rounded-full flex items-center gap-1">
-                    <IconShield className="w-3 h-3 text-amber-800" />
-                    <span>-₱{totalMaintenanceDeduction.toLocaleString()} Maintenance Discount</span>
-                  </span>
-                )}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="text-xl font-bold flex items-center gap-2 text-[var(--ink)]">
+                    <span className="w-8 h-8 rounded-full bg-[#1090F8] text-white flex items-center justify-center shrink-0">
+                      <IconCheck className="w-4 h-4" />
+                    </span>
+                    <span>Package Equipment Inclusions</span>
+                  </h3>
+                  <p className="text-xs text-[#24252c]/60 mt-1">
+                    Toggle or lessen quantities for gear you don't need to receive smart bundle credits (50% credit with protected base overhead).
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-nowrap shrink-0">
+                  {customizedItemsCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={resetInclusions}
+                      className="text-xs font-bold text-[#1090F8] hover:underline bg-white border border-[#1090F8]/20 px-3 py-1.5 rounded-full shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      ↺ Reset Inclusions
+                    </button>
+                  )}
+                  {totalMaintenanceDeduction > 0 && (
+                    <span className="text-[11px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-3 py-1 rounded-full flex items-center gap-1 whitespace-nowrap shrink-0">
+                      <IconShield className="w-3 h-3 text-amber-800 shrink-0" />
+                      <span>-₱{totalMaintenanceDeduction.toLocaleString()} Maintenance Discount</span>
+                    </span>
+                  )}
+                </div>
               </div>
+
+              {totalCustomizationDeduction > 0 && (
+                <div className="mb-4 p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <IconCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+                    <span>
+                      <strong className="font-bold">Smart Customization Deduction:</strong> {customizedItemsCount} item{customizedItemsCount > 1 ? 's' : ''} adjusted.
+                      {isFloorReached && ' (Protected base production floor reached).'}
+                    </span>
+                  </div>
+                  <span className="font-extrabold text-sm text-emerald-800 whitespace-nowrap shrink-0">
+                    -₱{totalCustomizationDeduction.toLocaleString()}
+                  </span>
+                </div>
+              )}
 
               {totalMaintenanceDeduction > 0 && (
                 <div className="mb-4 p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2.5">
@@ -457,44 +673,90 @@ export default function PackageDetailPage({
               )}
 
               <div className="space-y-3">
-                {pkg.inclusions.map((item, i) => {
-                  const maintInfo = inclusionsMaintenanceMap[item];
+                {parsedInclusions.map((item, i) => {
+                  const maintInfo = inclusionsMaintenanceMap[item.originalText];
                   return (
                     <div
-                      key={i}
-                      className={`flex items-start justify-between gap-3 p-3.5 rounded-xl border transition-colors ${
-                        maintInfo
+                      key={item.id}
+                      className={`p-3.5 rounded-2xl border transition-all ${
+                        item.isRemoved
+                          ? 'bg-zinc-100/90 border-zinc-200 opacity-70'
+                          : item.currentQty < item.originalQty
+                          ? 'bg-amber-50/70 border-amber-200 shadow-2xs'
+                          : maintInfo
                           ? 'bg-amber-50/70 border-amber-200 shadow-sm'
-                          : 'bg-white border-[#24252c]/[0.05]'
+                          : 'bg-white border-[#24252c]/[0.06] shadow-2xs'
                       }`}
                     >
-                      <div className="flex items-start gap-3 min-w-0">
-                        <IconCheck
-                          className={`w-5 h-5 shrink-0 mt-0.5 ${
-                            maintInfo ? 'text-amber-600' : 'text-emerald-600'
-                          }`}
-                        />
-                        <div>
-                          <span className="text-sm font-medium text-[var(--ink)] leading-snug block">{item}</span>
-                          {maintInfo && (
-                            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                              <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200 flex items-center gap-1">
-                                <IconShield className="w-3 h-3 text-amber-800" />
-                                <span>{maintInfo.inRepairCount} unit{maintInfo.inRepairCount !== 1 ? 's' : ''} in repair</span>
-                              </span>
-                              <span className="text-[10px] text-amber-700 font-semibold">
-                                (-₱{maintInfo.deductedAmount.toLocaleString()} deducted)
-                              </span>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          {item.isCoreEssential ? (
+                            <div className="w-5 h-5 rounded-full bg-zinc-200 text-zinc-600 flex items-center justify-center shrink-0" title="Core System Backbone — Required for Event Operations">
+                              <span className="text-[10px] font-bold">🔒</span>
                             </div>
+                          ) : (
+                            <input
+                              type="checkbox"
+                              checked={item.currentQty > 0}
+                              onChange={() => toggleInclusion(i, item.originalQty)}
+                              className="w-5 h-5 accent-[#1090F8] rounded cursor-pointer shrink-0"
+                            />
                           )}
-                        </div>
-                      </div>
+                          <div className="min-w-0">
+                            <div className={`text-sm font-bold truncate leading-tight ${item.isRemoved ? 'line-through text-[#24252c]/40' : 'text-[var(--ink)]'}`}>
+                              {item.currentQty > 1 && !item.isRemoved ? `${item.currentQty}x ` : ''}{item.displayName}
+                            </div>
+                            <div className="text-[10px] text-[#24252c]/60 flex items-center gap-2 mt-0.5 flex-wrap">
+                              {item.isCoreEssential ? (
+                                <span className="font-bold text-zinc-600 bg-zinc-100 px-1.5 py-0.5 rounded border border-zinc-200 whitespace-nowrap shrink-0">
+                                  Core Backbone (Essential System)
+                                </span>
+                              ) : item.isRemoved ? (
+                                <span className="font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200 whitespace-nowrap shrink-0">
+                                  Removed (-₱{(item.originalQty * item.smartDeductionRate).toLocaleString()} Smart Credit)
+                                </span>
+                              ) : item.currentQty < item.originalQty ? (
+                                <span className="font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200 whitespace-nowrap shrink-0">
+                                  Reduced to {item.currentQty}x (-₱{((item.originalQty - item.currentQty) * item.smartDeductionRate).toLocaleString()} Smart Credit)
+                                </span>
+                              ) : (
+                                <span className="text-emerald-700 font-semibold whitespace-nowrap shrink-0">Included in Standard Package</span>
+                              )}
 
-                      {maintInfo && (
-                        <span className="shrink-0 text-xs font-bold text-amber-700 bg-white border border-amber-200 px-2.5 py-1 rounded-lg">
-                          -₱{maintInfo.deductedAmount.toLocaleString()}
-                        </span>
-                      )}
+                              {maintInfo && (
+                                <span className="font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200 whitespace-nowrap shrink-0">
+                                  {maintInfo.inRepairCount} in repair (-₱{maintInfo.deductedAmount.toLocaleString()})
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Stepper for customizable items with quantity > 1 */}
+                        {!item.isCoreEssential && item.originalQty > 1 && (
+                          <div className="flex items-center gap-1.5 shrink-0 bg-[var(--mist)] px-2.5 py-1 rounded-full border border-[#24252c]/10">
+                            <button
+                              type="button"
+                              disabled={item.currentQty === 0}
+                              onClick={() => updateInclusionQty(i, -1, item.originalQty)}
+                              className="w-5 h-5 rounded-full bg-white text-[var(--ink)] font-bold text-xs flex items-center justify-center hover:bg-[#1090F8] hover:text-white transition-colors shadow-2xs cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                              −
+                            </button>
+                            <span className="font-mono font-extrabold text-xs text-[var(--ink)] min-w-[24px] text-center whitespace-nowrap">
+                              {item.currentQty}/{item.originalQty}
+                            </span>
+                            <button
+                              type="button"
+                              disabled={item.currentQty >= item.originalQty}
+                              onClick={() => updateInclusionQty(i, 1, item.originalQty)}
+                              className="w-5 h-5 rounded-full bg-white text-[var(--ink)] font-bold text-xs flex items-center justify-center hover:bg-[#1090F8] hover:text-white transition-colors shadow-2xs cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                              +
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -507,7 +769,7 @@ export default function PackageDetailPage({
                   <h3 className="text-xl font-extrabold text-[var(--ink)]">Recommended For What Events</h3>
                   <p className="text-xs text-[#24252c]/50 mt-1">Tailored acoustic, lighting & visual staging for specific venue sizes & event formats.</p>
                 </div>
-                <span className="text-xs font-semibold text-[#1090F8] bg-[#1090F8]/10 px-3 py-1.5 rounded-full self-start sm:self-auto">
+                <span className="text-xs font-semibold text-[#1090F8] bg-[#1090F8]/10 px-3 py-1.5 rounded-full self-start sm:self-auto whitespace-nowrap shrink-0">
                   Ideal Capacity Fit
                 </span>
               </div>
@@ -595,9 +857,9 @@ export default function PackageDetailPage({
           </div>
 
           {/* ── Right Sidebar ── */}
-          <div className="lg:col-span-1">
-            <div className="sticky top-28 bg-[var(--mist)] rounded-[2rem] p-6 border border-[#24252c]/[0.08] shadow-sm">
-              <h3 className="text-lg font-bold mb-4">Pick Your Date & Customize</h3>
+          <div className="lg:col-span-5 xl:col-span-5">
+            <div className="sticky top-28 bg-[var(--mist)] rounded-[2rem] p-5 sm:p-7 border border-[#24252c]/[0.08] shadow-sm space-y-5">
+              <h3 className="text-xl font-bold text-[var(--ink)]">Pick Your Date & Customize</h3>
 
               <div className="mb-4">
                 <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 block ml-1 mb-1">
@@ -656,19 +918,41 @@ export default function PackageDetailPage({
               </div>
 
               {/* ── Optional Equipment Add-ons ── */}
-              <div className="mb-6">
-                <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-2">
-                  Optional Equipment Add-ons
-                </label>
+              <div className="mb-6 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block">
+                      Optional Equipment Add-ons
+                    </label>
+                    <span className="text-[10px] text-[#24252c]/40 ml-1">
+                      Add individual gear items to your package
+                    </span>
+                  </div>
+                  {addonModels.length > 0 && (
+                    <span className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 px-2.5 py-0.5 rounded-full">
+                      {addonModels.length} available
+                    </span>
+                  )}
+                </div>
 
-                {/* Smart Frequently Paired Upgrades (Bundle & Save) */}
-                {!addonsLoading && (
-                  <CrossSellPromotions
-                    bundles={smartBundles}
-                    selectedBundleIds={selectedBundleIds}
-                    onToggleBundle={handleToggleBundle}
-                    compact={true}
-                  />
+                {/* Category Filter Pills */}
+                {addonModels.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                    {['All', 'Sound', 'Lighting', 'Special FX'].map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setAddonCategory(cat)}
+                        className={`text-[10px] px-2.5 py-1 rounded-full font-bold transition-all cursor-pointer ${
+                          addonCategory === cat
+                            ? 'bg-[var(--ink)] text-white shadow-2xs'
+                            : 'bg-white border border-[#24252c]/10 text-[#24252c]/60 hover:text-[var(--ink)]'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
                 )}
 
                 {/* Loading skeleton */}
@@ -681,121 +965,83 @@ export default function PackageDetailPage({
                 )}
 
                 {/* Empty */}
-                {!addonsLoading && addonModels.length === 0 && (
+                {!addonsLoading && filteredAddonModels.length === 0 && (
                   <div className="p-4 rounded-xl bg-white/60 border border-[#24252c]/[0.05] text-center">
                     <p className="text-xs text-[#24252c]/50 font-medium">
-                      No additional equipment available right now.
+                      No matching equipment add-ons found.
                     </p>
                   </div>
                 )}
 
-                {/* Preview: first 3 items */}
-                {!addonsLoading && displayAddonModels.length > 0 && (
+                {/* List of AddonCards */}
+                {!addonsLoading && filteredAddonModels.length > 0 && (
                   <>
                     <div className="space-y-2">
-                      {displayAddonModels.slice(0, ADDON_PREVIEW_COUNT).map((model) => {
+                      {(showAllAddons ? filteredAddonModels : filteredAddonModels.slice(0, 4)).map((model) => {
                         const qty = getQty(model.modelId);
                         const isSelected = qty > 0;
                         return <AddonCard key={model.modelId} model={model} qty={qty} isSelected={isSelected} setQty={setQty} />;
                       })}
                     </div>
 
-                    {/* Browse all button */}
-                    {displayAddonModels.length > ADDON_PREVIEW_COUNT && (
+                    {/* Expand/Collapse Toggle Button */}
+                    {filteredAddonModels.length > 4 && (
                       <button
-                        onClick={() => setShowAddonModal(true)}
-                        className="mt-3 w-full bg-white border border-[#24252c]/10 hover:border-[#1090F8]/40 hover:bg-[#1090F8]/5 text-xs font-semibold text-[#24252c]/60 hover:text-[#1090F8] py-2.5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                        type="button"
+                        onClick={() => setShowAllAddons(!showAllAddons)}
+                        className="mt-2 w-full bg-white border border-[#24252c]/10 hover:border-[#1090F8]/40 hover:bg-[#1090F8]/5 text-xs font-semibold text-[#24252c]/60 hover:text-[#1090F8] py-2.5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
                       >
-                        <span>Browse all {displayAddonModels.length} available items</span>
-                        <span className="text-base leading-none">›</span>
+                        <span>{showAllAddons ? '▲ Show fewer items' : `▼ View all ${filteredAddonModels.length} available items`}</span>
                       </button>
                     )}
                   </>
                 )}
+
+                {/* ── Frequently Paired Upgrades (Bundle & Save) BELOW Individual Add-ons ── */}
+                {!addonsLoading && smartBundles.length > 0 && (
+                  <div className="pt-2">
+                    <CrossSellPromotions
+                      bundles={smartBundles}
+                      selectedBundleIds={selectedBundleIds}
+                      onToggleBundle={handleToggleBundle}
+                      compact={false}
+                    />
+                  </div>
+                )}
               </div>
-
-              {/* ── Add-ons Full Modal ── */}
-              <ModalOverlay isOpen={showAddonModal} onClose={() => setShowAddonModal(false)}>
-                <div className="bg-white rounded-[2.5rem] p-6 md:p-8 max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl border border-[#24252c]/10">
-
-                  {/* Modal Header */}
-                  <div className="flex items-center justify-between mb-5 pb-4 border-b border-[#24252c]/[0.08]">
-                    <div>
-                      <h3 className="text-lg font-extrabold text-[var(--ink)]">Equipment Add-ons</h3>
-                      <p className="text-xs text-[#24252c]/50 mt-0.5">{displayAddonModels.length} items available to add to your package</p>
-                    </div>
-                    <button
-                      onClick={() => setShowAddonModal(false)}
-                      className="text-[#24252c]/40 hover:text-[var(--ink)] p-1.5 rounded-full hover:bg-[var(--mist)] transition-colors cursor-pointer"
-                    >
-                      <IconX className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  {/* Smart Frequently Paired Upgrades inside Modal */}
-                  {!addonsLoading && smartBundles.length > 0 && (
-                    <div className="mb-4">
-                      <CrossSellPromotions
-                        bundles={smartBundles}
-                        selectedBundleIds={selectedBundleIds}
-                        onToggleBundle={handleToggleBundle}
-                        compact={false}
-                      />
-                    </div>
-                  )}
-
-                  {/* Selected summary bar */}
-                  {Object.keys(addonSelections).length > 0 && (
-                    <div className="mb-4 px-3 py-2 bg-[#1090F8]/5 border border-[#1090F8]/15 rounded-xl flex items-center justify-between">
-                      <span className="text-xs font-semibold text-[#1090F8]">
-                        {Object.values(addonSelections).reduce((a, b) => a + b, 0)} item{Object.values(addonSelections).reduce((a, b) => a + b, 0) !== 1 ? 's' : ''} selected
-                      </span>
-                      <span className="text-xs font-bold text-[#1090F8]">+₱{addonsTotal.toLocaleString()}</span>
-                    </div>
-                  )}
-
-                  {/* Full scrollable list */}
-                  <div className="overflow-y-auto flex-1 space-y-2 pr-0.5">
-                    {displayAddonModels.map((model) => {
-                      const qty = getQty(model.modelId);
-                      const isSelected = qty > 0;
-                      return <AddonCard key={model.modelId} model={model} qty={qty} isSelected={isSelected} setQty={setQty} />;
-                    })}
-                  </div>
-
-                  {/* Modal footer */}
-                  <div className="mt-5 pt-4 border-t border-[#24252c]/[0.08]">
-                    <button
-                      onClick={() => setShowAddonModal(false)}
-                      className="w-full bg-[var(--ink)] text-white text-sm font-semibold py-3 rounded-full hover:bg-[var(--ink-soft)] transition-colors cursor-pointer"
-                    >
-                      Done — Add to Package
-                    </button>
-                  </div>
-                </div>
-              </ModalOverlay>
 
               {/* ── Price Summary ── */}
               <div className="pt-4 border-t border-[#24252c]/[0.08] mb-5 space-y-1.5">
                 <div className="flex items-center justify-between text-xs text-[#24252c]/50">
                   <span>Standard Package Base Rate</span>
-                  <span className={totalMaintenanceDeduction > 0 ? 'line-through text-[#24252c]/40' : ''}>{pkg.price}</span>
+                  <span className={totalMaintenanceDeduction > 0 || totalCustomizationDeduction > 0 ? 'line-through text-[#24252c]/40' : ''}>{pkg.price}</span>
                 </div>
 
+                {totalCustomizationDeduction > 0 && (
+                  <div className="flex items-center justify-between text-xs text-emerald-800 font-medium bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200">
+                    <span className="flex items-center gap-1.5">
+                      <IconCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>Equipment Customization Credit</span>
+                    </span>
+                    <span className="font-bold">-₱{totalCustomizationDeduction.toLocaleString()}</span>
+                  </div>
+                )}
+
                 {totalMaintenanceDeduction > 0 && (
-                  <>
-                    <div className="flex items-center justify-between text-xs text-amber-700 font-medium bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-200">
-                      <span className="flex items-center gap-1.5">
-                        <IconShield className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                        <span>Maintenance / Quarantine Discount</span>
-                      </span>
-                      <span className="font-bold">-₱{totalMaintenanceDeduction.toLocaleString()}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-xs text-[var(--ink)] font-semibold">
-                      <span>Adjusted Package Base</span>
-                      <span className="text-emerald-700">₱{adjustedPackagePrice.toLocaleString()}</span>
-                    </div>
-                  </>
+                  <div className="flex items-center justify-between text-xs text-amber-700 font-medium bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-200">
+                    <span className="flex items-center gap-1.5">
+                      <IconShield className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                      <span>Maintenance / Quarantine Discount</span>
+                    </span>
+                    <span className="font-bold">-₱{totalMaintenanceDeduction.toLocaleString()}</span>
+                  </div>
+                )}
+
+                {(totalMaintenanceDeduction > 0 || totalCustomizationDeduction > 0) && (
+                  <div className="flex items-center justify-between text-xs text-[var(--ink)] font-semibold">
+                    <span>Adjusted Package Base</span>
+                    <span className="text-emerald-700 font-bold">₱{adjustedPackagePrice.toLocaleString()}</span>
+                  </div>
                 )}
 
                 {addonsTotal > 0 && (
@@ -818,6 +1064,9 @@ export default function PackageDetailPage({
                 <div className="flex items-center justify-between text-base font-extrabold text-[var(--ink)] pt-2 border-t border-[#24252c]/[0.06]">
                   <div>
                     <span>Total Calculated Rate</span>
+                    {totalCustomizationDeduction > 0 && (
+                      <span className="block text-[10px] text-emerald-600 font-medium">Includes customized gear credits</span>
+                    )}
                     {totalMaintenanceDeduction > 0 && (
                       <span className="block text-[10px] text-amber-600 font-medium">Includes quarantine discount</span>
                     )}

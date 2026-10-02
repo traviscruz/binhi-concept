@@ -29,56 +29,70 @@ export interface AddonInventoryItem {
   availableCount: number;
 }
 
+function normStr(s: string) {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function inclusionMatchesModel(inclusion: string, modelName: string): boolean {
+  const stripped = inclusion.replace(/^\d+\s*[xX]\s+/, '');
+  const words = normStr(stripped).split(' ').filter((w) => w.length > 2);
+  const normModel = normStr(modelName);
+  const matched = words.filter((w) => normModel.includes(w));
+  return matched.length >= Math.max(1, Math.floor(words.length * 0.4));
+}
+
 /**
  * Smart engine to discover and construct real frequently paired add-on bundles
  * from actual available inventory in the database.
- * If no matching available equipment pairs are found, returns an empty array.
+ * Strictly excludes any equipment already included in the default package inclusions.
  */
 export function generateSmartAddonBundles(
-  availableModels: AddonInventoryItem[]
+  availableModels: AddonInventoryItem[],
+  existingInclusions: string[] = []
 ): CrossSellBundle[] {
   if (!availableModels || availableModels.length < 2) return [];
 
-  // Filter only items with positive available inventory
-  const available = availableModels.filter((m) => m.availableCount > 0 && m.rentalRate > 0);
+  // 1. Strictly filter to only items with positive available inventory AND that do NOT belong to the package's default inclusions
+  const available = availableModels.filter((m) => {
+    if (!m || m.availableCount <= 0 || m.rentalRate <= 0) return false;
+    if (existingInclusions.some((inc) => inclusionMatchesModel(inc, m.name))) {
+      return false;
+    }
+    return true;
+  });
+
   if (available.length < 2) return [];
 
   const bundles: CrossSellBundle[] = [];
+  const usedModelPairs = new Set<string>();
 
-  const norm = (s?: string) => (s || '').toLowerCase();
+  const createBundle = (
+    itemA: AddonInventoryItem,
+    itemB: AddonInventoryItem,
+    titleHint?: string
+  ): CrossSellBundle | null => {
+    if (!itemA || !itemB || itemA.modelId === itemB.modelId) return null;
+    if (itemA.availableCount <= 0 || itemB.availableCount <= 0) return null;
 
-  // 1. Atmosphere & Special FX Duo (e.g. Smoke/Fog/Haze + Cold Sparks / Bubbles / Pyros)
-  const fogModel = available.find((m) => {
-    const text = `${norm(m.name)} ${norm(m.category)} ${norm(m.brand)}`;
-    return text.includes('fog') || text.includes('smoke') || text.includes('haze') || text.includes('cloud');
-  });
+    const pairKey = [itemA.modelId, itemB.modelId].sort().join('___');
+    if (usedModelPairs.has(pairKey)) return null;
+    usedModelPairs.add(pairKey);
 
-  const fxModel = available.find((m) => {
-    if (m.modelId === fogModel?.modelId) return false;
-    const text = `${norm(m.name)} ${norm(m.category)} ${norm(m.brand)}`;
-    return (
-      text.includes('spark') ||
-      text.includes('pyro') ||
-      text.includes('bubble') ||
-      text.includes('flame') ||
-      text.includes('confetti') ||
-      text.includes('co2')
-    );
-  });
+    const qtyA = 1;
+    const qtyB = Math.min(2, Math.max(1, itemB.availableCount));
 
-  if (fogModel && fxModel) {
     const items: CrossSellBundleItem[] = [
       {
-        modelId: fogModel.modelId,
-        name: fogModel.name,
-        qty: 1,
-        rentalRate: fogModel.rentalRate,
+        modelId: itemA.modelId,
+        name: itemA.name,
+        qty: qtyA,
+        rentalRate: itemA.rentalRate,
       },
       {
-        modelId: fxModel.modelId,
-        name: fxModel.name,
-        qty: Math.min(2, fxModel.availableCount),
-        rentalRate: fxModel.rentalRate,
+        modelId: itemB.modelId,
+        name: itemB.name,
+        qty: qtyB,
+        rentalRate: itemB.rentalRate,
       },
     ];
 
@@ -86,170 +100,82 @@ export function generateSmartAddonBundles(
     const bundlePrice = Math.round(originalPrice * 0.8); // 20% bundle discount
     const savings = originalPrice - bundlePrice;
 
-    bundles.push({
-      id: 'bundle-atmosphere-vip',
-      title: 'Atmosphere VIP Special Effects Bundle',
-      subtitle: `${fogModel.name} + ${items[1].qty}x ${fxModel.name}`,
-      tag: 'Frequently Paired for Weddings & Debuts',
-      originalPrice,
-      bundlePrice,
-      savings,
-      items,
-      inclusions: [
-        `${fogModel.name} (Low-lying clouds / ambient haze for grand entrance)`,
-        `${items[1].qty}x ${fxModel.name} (Indoor non-flammable pyrotechnic/effect)`,
-        'Dedicated operator technician & trigger accessories included',
-      ],
-    });
-  }
-
-  // 2. Live Vocal & Acoustic Stage Monitor Duo (e.g. Wireless Microphones + Active Stage Monitors)
-  const micModel = available.find((m) => {
-    const text = `${norm(m.name)} ${norm(m.category)} ${norm(m.brand)}`;
-    return (
-      text.includes('mic') ||
-      text.includes('wireless') ||
-      text.includes('uhf') ||
-      text.includes('shure') ||
-      text.includes('sennheiser')
-    );
-  });
-
-  const monitorModel = available.find((m) => {
-    if (m.modelId === micModel?.modelId) return false;
-    const text = `${norm(m.name)} ${norm(m.category)} ${norm(m.brand)}`;
-    return (
-      text.includes('monitor') ||
-      text.includes('wedge') ||
-      text.includes('in-ear') ||
-      text.includes('subwoofer') ||
-      text.includes('stage speaker')
-    );
-  });
-
-  if (micModel && monitorModel) {
-    const items: CrossSellBundleItem[] = [
-      {
-        modelId: micModel.modelId,
-        name: micModel.name,
-        qty: Math.min(2, micModel.availableCount),
-        rentalRate: micModel.rentalRate,
-      },
-      {
-        modelId: monitorModel.modelId,
-        name: monitorModel.name,
-        qty: Math.min(2, monitorModel.availableCount),
-        rentalRate: monitorModel.rentalRate,
-      },
-    ];
-
-    const originalPrice = items.reduce((sum, it) => sum + it.rentalRate * it.qty, 0);
-    const bundlePrice = Math.round(originalPrice * 0.8); // 20% bundle discount
-    const savings = originalPrice - bundlePrice;
-
-    bundles.push({
-      id: 'bundle-acoustic-live',
-      title: 'Live Acoustic & Vocal Monitor Bundle',
-      subtitle: `${items[0].qty}x ${micModel.name} + ${items[1].qty}x ${monitorModel.name}`,
-      tag: 'Recommended for Live Bands & Performers',
-      originalPrice,
-      bundlePrice,
-      savings,
-      items,
-      inclusions: [
-        `${items[0].qty}x ${micModel.name} (Pro handheld wireless UHF microphones)`,
-        `${items[1].qty}x ${monitorModel.name} (Active performer floor wedges)`,
-        'High-grade balanced XLR cabling & RF antenna management',
-      ],
-    });
-  }
-
-  // 3. Stage Lighting & Visuals Duo (e.g. Moving Heads + LED Wash/Par)
-  const movingHeadModel = available.find((m) => {
-    const text = `${norm(m.name)} ${norm(m.category)} ${norm(m.brand)}`;
-    return text.includes('moving') || text.includes('beam') || text.includes('sharpy') || text.includes('spot');
-  });
-
-  const washModel = available.find((m) => {
-    if (m.modelId === movingHeadModel?.modelId) return false;
-    const text = `${norm(m.name)} ${norm(m.category)} ${norm(m.brand)}`;
-    return (
-      text.includes('par') ||
-      text.includes('wash') ||
-      text.includes('ambient') ||
-      text.includes('led bar') ||
-      text.includes('strobe')
-    );
-  });
-
-  if (movingHeadModel && washModel) {
-    const items: CrossSellBundleItem[] = [
-      {
-        modelId: movingHeadModel.modelId,
-        name: movingHeadModel.name,
-        qty: Math.min(2, movingHeadModel.availableCount),
-        rentalRate: movingHeadModel.rentalRate,
-      },
-      {
-        modelId: washModel.modelId,
-        name: washModel.name,
-        qty: Math.min(4, washModel.availableCount),
-        rentalRate: washModel.rentalRate,
-      },
-    ];
-
-    const originalPrice = items.reduce((sum, it) => sum + it.rentalRate * it.qty, 0);
-    const bundlePrice = Math.round(originalPrice * 0.8); // 20% bundle discount
-    const savings = originalPrice - bundlePrice;
-
-    bundles.push({
-      id: 'bundle-lighting-pro',
-      title: 'Concert Lighting & Beam FX Bundle',
-      subtitle: `${items[0].qty}x ${movingHeadModel.name} + ${items[1].qty}x ${washModel.name}`,
-      tag: 'High Impact Stage Illumination',
-      originalPrice,
-      bundlePrice,
-      savings,
-      items,
-      inclusions: [
-        `${items[0].qty}x ${movingHeadModel.name} (Dynamic moving light heads)`,
-        `${items[1].qty}x ${washModel.name} (Full-spectrum stage color wash)`,
-        'Synchronized DMX lighting programming & master stage controller',
-      ],
-    });
-  }
-
-  // 4. Dynamic Pair Fallback: If no preset pairs matched, group top 2 available items from different categories
-  if (bundles.length === 0) {
-    const categories = Array.from(new Set(available.map((m) => m.category || 'General')));
-    if (categories.length >= 2) {
-      const itemA = available.find((m) => m.category === categories[0]);
-      const itemB = available.find((m) => m.category === categories[1]);
-      if (itemA && itemB) {
-        const items: CrossSellBundleItem[] = [
-          { modelId: itemA.modelId, name: itemA.name, qty: 1, rentalRate: itemA.rentalRate },
-          { modelId: itemB.modelId, name: itemB.name, qty: 1, rentalRate: itemB.rentalRate },
-        ];
-        const originalPrice = items.reduce((sum, it) => sum + it.rentalRate * it.qty, 0);
-        const bundlePrice = Math.round(originalPrice * 0.8);
-        const savings = originalPrice - bundlePrice;
-
-        bundles.push({
-          id: 'bundle-production-duo',
-          title: 'Frequently Paired Equipment Duo',
-          subtitle: `${itemA.name} + ${itemB.name}`,
-          tag: 'Smart Synergy Production Bundle',
-          originalPrice,
-          bundlePrice,
-          savings,
-          items,
-          inclusions: [
-            `1x ${itemA.name} (${itemA.category})`,
-            `1x ${itemB.name} (${itemB.category})`,
-            '20% Package Bundle Discount Included',
-          ],
-        });
+    // Generate dynamic readable title based on the paired items & categories
+    const catA = itemA.category || 'Gear';
+    const catB = itemB.category || 'Gear';
+    let title = titleHint;
+    if (!title) {
+      if (catA !== catB) {
+        title = `${itemA.name} & ${itemB.name} Combo`;
+      } else {
+        title = `${itemA.name} & ${itemB.name} Duo Pack`;
       }
+    }
+
+    return {
+      id: `bundle-${itemA.modelId}-${itemB.modelId}`,
+      title,
+      subtitle: `${itemA.name} + ${qtyB > 1 ? `${qtyB}x ` : ''}${itemB.name}`,
+      tag: '20% OFF Combo',
+      originalPrice,
+      bundlePrice,
+      savings,
+      items,
+      inclusions: [
+        `1x ${itemA.name}`,
+        `${qtyB}x ${itemB.name}`,
+        '20% group rental discount applied',
+      ],
+    };
+  };
+
+  // Categorize available non-included add-ons
+  const fxItems = available.filter((m) => {
+    const text = `${normStr(m.name)} ${normStr(m.category || '')}`;
+    return text.includes('fog') || text.includes('smoke') || text.includes('haze') || text.includes('spark') || text.includes('bubble') || text.includes('effect') || text.includes('pyro');
+  });
+
+  const lightingItems = available.filter((m) => {
+    const text = `${normStr(m.name)} ${normStr(m.category || '')}`;
+    return (text.includes('light') || text.includes('par') || text.includes('beam') || text.includes('moving') || text.includes('head') || text.includes('spot') || text.includes('wash') || text.includes('laser')) && !fxItems.some(f => f.modelId === m.modelId);
+  });
+
+  const audioItems = available.filter((m) => {
+    const text = `${normStr(m.name)} ${normStr(m.category || '')}`;
+    return (text.includes('mic') || text.includes('speaker') || text.includes('subwoofer') || text.includes('monitor') || text.includes('audio') || text.includes('sound') || text.includes('mixer')) && !fxItems.some(f => f.modelId === m.modelId) && !lightingItems.some(l => l.modelId === m.modelId);
+  });
+
+  // Strategy 1: Special FX + Lighting
+  if (fxItems.length > 0 && lightingItems.length > 0) {
+    const b = createBundle(fxItems[0], lightingItems[0], 'Atmospheric & Lighting Enhancement Pack');
+    if (b) bundles.push(b);
+  }
+
+  // Strategy 2: Audio + Lighting or Audio + Special FX
+  if (audioItems.length > 0 && lightingItems.length > 1) {
+    const b = createBundle(audioItems[0], lightingItems[1], 'Stage Audio & Visuals Pack');
+    if (b) bundles.push(b);
+  } else if (audioItems.length > 0 && fxItems.length > 1) {
+    const b = createBundle(audioItems[0], fxItems[1], 'Audio & Atmospheric FX Pack');
+    if (b) bundles.push(b);
+  } else if (audioItems.length > 1) {
+    const b = createBundle(audioItems[0], audioItems[1], 'Audio Rig Expansion Pack');
+    if (b) bundles.push(b);
+  }
+
+  // Dynamic Fallback: Pair remaining top available items from different categories or different models
+  if (bundles.length < 2 && available.length >= 2) {
+    for (let i = 0; i < available.length - 1; i++) {
+      for (let j = i + 1; j < available.length; j++) {
+        const itemA = available[i];
+        const itemB = available[j];
+        const b = createBundle(itemA, itemB);
+        if (b) {
+          bundles.push(b);
+          if (bundles.length >= 2) break;
+        }
+      }
+      if (bundles.length >= 2) break;
     }
   }
 
@@ -289,12 +215,12 @@ export function CrossSellPromotions({
             Frequently Paired Upgrades (Bundle &amp; Save)
           </h4>
         </div>
-        <span className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 px-2 py-0.5 rounded-full">
+        <span className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 px-2.5 py-0.5 rounded-full whitespace-nowrap shrink-0">
           Save 20%
         </span>
       </div>
 
-      <div className={`grid gap-2.5 ${compact ? 'grid-cols-1' : 'sm:grid-cols-2'}`}>
+      <div className={`grid gap-3 ${compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2'}`}>
         {bundles.map((b) => {
           const isSelected = selectedBundleIds.includes(b.id);
           return (
@@ -308,11 +234,11 @@ export function CrossSellPromotions({
               }`}
             >
               <div>
-                <div className="flex items-center justify-between gap-1.5 flex-wrap">
-                  <span className="text-[9px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                <div className="flex items-center justify-between gap-1.5 flex-nowrap">
+                  <span className="text-[9px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 whitespace-nowrap shrink-0">
                     {b.tag}
                   </span>
-                  <div className="text-right whitespace-nowrap">
+                  <div className="text-right whitespace-nowrap shrink-0">
                     <span className="text-[10px] text-[#24252c]/40 line-through mr-1">
                       ₱{b.originalPrice.toLocaleString()}
                     </span>
@@ -335,13 +261,13 @@ export function CrossSellPromotions({
                 </ul>
               </div>
 
-              <div className="pt-2 border-t border-[#24252c]/[0.06] flex items-center justify-between">
-                <span className="text-[10px] font-bold text-emerald-600">
+              <div className="pt-2 border-t border-[#24252c]/[0.06] flex items-center justify-between gap-2 flex-nowrap">
+                <span className="text-[10px] font-bold text-emerald-600 whitespace-nowrap shrink-0">
                   Save ₱{b.savings.toLocaleString()}
                 </span>
                 <button
                   type="button"
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition-colors cursor-pointer flex items-center gap-1 ${
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0 ${
                     isSelected
                       ? 'bg-[#1090F8] text-white'
                       : 'bg-[var(--mist)] text-[var(--ink)] hover:bg-[#1090F8]/10 hover:text-[#1090F8]'

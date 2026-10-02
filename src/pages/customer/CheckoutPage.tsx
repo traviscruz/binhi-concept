@@ -195,7 +195,14 @@ export default function CheckoutPage({
   const [venueAddress, setVenueAddress] = useState('');
   const [isLocationValid, setIsLocationValid] = useState(true);
   const [selectedAddons, setSelectedAddons] = useState<string[]>(initialAddons);
-  const [selectedBundles, setSelectedBundles] = useState<CrossSellBundle[]>([]);
+  const [selectedBundles, setSelectedBundles] = useState<CrossSellBundle[]>(() => {
+    try {
+      const saved = localStorage.getItem('binhi_package_active_bundles');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [receiptUploaded, setReceiptUploaded] = useState(false);
   const [paymentType, setPaymentType] = useState<'deposit' | 'full'>('deposit');
 
@@ -1132,15 +1139,16 @@ export default function CheckoutPage({
         return acc;
       }, 0);
 
-      const currentBundlesCost = selectedBundles.reduce((acc, b) => acc + b.bundlePrice, 0);
-      const combinedAddonStrings = [
-        ...selectedAddons,
-        ...selectedBundles.map((b) => `Bundle: ${b.title} (₱${b.bundlePrice.toLocaleString()})`),
-      ];
+      const maintenanceDeduction = Number(localStorage.getItem('binhi_package_maintenance_deduction') || 0);
+      const customizationDeduction = Number(localStorage.getItem('binhi_package_customization_deduction') || 0);
+      const bundleDiscount = Number(localStorage.getItem('binhi_package_bundle_discount') || 0);
+      const totalPackageDeductions = maintenanceDeduction + customizationDeduction;
 
-      const currentPkgPrice = (pkg as any)?.rawPrice ?? (pkg as any)?.raw_price ?? (pkg?.price ? parseInt(String(pkg.price).replace(/[^\d]/g, ''), 10) || 0 : 0);
+      const baseRaw = (pkg as any)?.rawPrice ?? (pkg as any)?.raw_price ?? (pkg?.price ? parseInt(String(pkg.price).replace(/[^\d]/g, ''), 10) || 0 : 0);
+      const currentPkgPrice = Math.max(Math.round(baseRaw * 0.65), baseRaw - totalPackageDeductions);
 
-      const subtotalBeforeDiscount = currentPkgPrice + currentAddonsCost + currentBundlesCost + fee;
+      const netAddonsCost = Math.max(0, currentAddonsCost - bundleDiscount);
+      const subtotalBeforeDiscount = currentPkgPrice + netAddonsCost + fee;
       
       let voucherDiscountAmount = 0;
       if (appliedVoucher) {
@@ -1199,12 +1207,131 @@ export default function CheckoutPage({
         if (appliedVoucher) descriptionNotes.push(`[Voucher: ${appliedVoucher.code} (-₱${voucherDiscountAmount.toLocaleString()})]`);
         if (appliedAffiliate) descriptionNotes.push(`[Affiliate Partner: ${appliedAffiliate.referralCode} - ${appliedAffiliate.partnerName} (-₱${affiliateDiscountAmount.toLocaleString()})]`);
 
+        // Extract active inclusions (excluding removed items and respecting decreased quantities)
+        const customizedInclusionsRaw = localStorage.getItem('binhi_package_customized_inclusions');
+        let activeInclusions: string[] = [];
+        if (customizedInclusionsRaw) {
+          try {
+            const parsed = JSON.parse(customizedInclusionsRaw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              activeInclusions = parsed;
+            }
+          } catch {}
+        }
+        if (activeInclusions.length === 0) {
+          activeInclusions = Array.isArray(pkg.inclusions) ? pkg.inclusions : [];
+        }
+
+        // Generate unit-level assignments directly for active inclusions & add-ons (strictly omitting removed items)
+        const initialAssignedUnits: any[] = [];
+        try {
+          const [modelsRes, unitsRes] = await Promise.all([
+            supabase.from('equipment_models').select('model_id, name, category'),
+            supabase.from('physical_units').select('serial_id, model_id, status, condition'),
+          ]);
+
+          const equipmentModels: any[] = modelsRes.data || [];
+          const physicalUnits: any[] = unitsRes.data || [];
+
+          const modelMap: Record<string, { name: string; category: string; availableSerials: string[] }> = {};
+          equipmentModels.forEach((m: any) => {
+            modelMap[m.model_id] = {
+              name: m.name,
+              category: m.category || 'Production Gear',
+              availableSerials: [],
+            };
+          });
+
+          physicalUnits.forEach((u: any) => {
+            const isOperational =
+              u.status === 'Available in Warehouse' &&
+              u.condition !== 'In Repair' &&
+              u.status !== 'Maintenance / Repair' &&
+              u.status !== 'Decommissioned / Inactive';
+
+            if (isOperational && modelMap[u.model_id]) {
+              modelMap[u.model_id].availableSerials.push(u.serial_id);
+            }
+          });
+
+          function normStr(s: string) {
+            return s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+          }
+
+          function fuzzyMatch(inclusionLabel: string, modelName: string): boolean {
+            const stripped = inclusionLabel.replace(/^\d+\s*[xX]\s+/, '');
+            const words = normStr(stripped).split(' ').filter((w) => w.length > 2);
+            const normModel = normStr(modelName);
+            const matched = words.filter((w) => normModel.includes(w));
+            return matched.length >= Math.max(1, Math.floor(words.length * 0.4));
+          }
+
+          function parseQty(raw: string): { qty: number; label: string } {
+            if (!raw) return { qty: 1, label: 'Equipment Item' };
+            let str = String(raw).trim();
+            str = str.replace(/(\s*[\(\[-]\s*(\+?\s*₱|\+?\s*PHP)\s*[\d,]+(\.\d{2})?(\s*each|\s*\/unit)?\s*[\)\]]?)/gi, '').trim();
+            const qtyMatch = str.match(/^(\d+)\s*(?:[xX]|\s*units?\s+of)\s+(.+)$/i);
+            let explicitQty = 1;
+            if (qtyMatch) {
+              explicitQty = parseInt(qtyMatch[1], 10) || 1;
+              str = qtyMatch[2].trim();
+            }
+            return { qty: explicitQty, label: str };
+          }
+
+          const usedSerials = new Set<string>();
+          const allItemsToAssign = [
+            ...activeInclusions.map((inc, i) => ({ text: inc, isAddon: false, idx: i })),
+            ...selectedAddons.map((add, i) => ({ text: add, isAddon: true, idx: activeInclusions.length + i })),
+          ];
+
+          allItemsToAssign.forEach((item) => {
+            const { qty, label } = parseQty(item.text);
+            if (qty <= 0) return; // Skip any 0 quantity / removed items
+
+            let matchedModelId: string | null = null;
+            let matchedCategory = item.isAddon ? 'Add-on Gear' : 'Sound & Lighting';
+
+            for (const [mid, mData] of Object.entries(modelMap)) {
+              if (fuzzyMatch(label, mData.name)) {
+                matchedModelId = mid;
+                matchedCategory = mData.category;
+                break;
+              }
+            }
+
+            const availablePool = matchedModelId ? modelMap[matchedModelId].availableSerials : [];
+
+            for (let k = 0; k < qty; k++) {
+              let pickedSerial = availablePool.find((s) => !usedSerials.has(s));
+              if (!pickedSerial) {
+                pickedSerial = `PU-${matchedModelId || 'EQP'}-${k + 1}`;
+              } else {
+                usedSerials.add(pickedSerial);
+              }
+
+              initialAssignedUnits.push({
+                serial_id: pickedSerial,
+                unit_id: `${refNum}__${label.replace(/[^a-zA-Z0-9]/g, '_')}__${item.idx}__${k}__${pickedSerial}`,
+                name: label,
+                raw_name: item.text,
+                category: matchedCategory,
+                is_addon: item.isAddon,
+                condition: 'Operational (Good)',
+                checked: false,
+              });
+            }
+          });
+        } catch (unitErr) {
+          console.warn('Error computing initial unit assignments:', unitErr);
+        }
+
         await supabase.from('bookings').insert({
           user_id: userId || null,
           package_id: pkg.id,
           package_name: pkg.name,
           package_price: currentPkgPrice,
-          addons_cost: currentAddonsCost + currentBundlesCost,
+          addons_cost: netAddonsCost,
           event_type: eventType,
           event_date: eventDate,
           start_time: startTime,
@@ -1225,7 +1352,8 @@ export default function CheckoutPage({
           customer_email: email || '',
           customer_phone: phoneDigits ? `+63 ${phoneDigits}` : '',
           guest_count: 100,
-          selected_addons: combinedAddonStrings,
+          selected_addons: selectedAddons,
+          assigned_units: initialAssignedUnits,
           affiliate_id: appliedAffiliate?.id || null,
           affiliate_code: appliedAffiliate?.referralCode || null,
           affiliate_discount_amount: affiliateDiscountAmount,
@@ -1323,13 +1451,16 @@ export default function CheckoutPage({
     return sum;
   }, 0);
 
-  const bundlesCost = selectedBundles.reduce((sum, b) => sum + b.bundlePrice, 0);
-
+  const bundleDiscount = Number(localStorage.getItem('binhi_package_bundle_discount') || 0);
   const maintenanceDeduction = Number(localStorage.getItem('binhi_package_maintenance_deduction') || 0);
-  const baseRawPackagePrice = (pkg as any)?.rawPrice ?? (pkg as any)?.raw_price ?? (pkg?.price ? parseInt(String(pkg.price).replace(/[^\d]/g, ''), 10) || 0 : 0);
-  const parsedPackagePrice = Math.max(0, baseRawPackagePrice - maintenanceDeduction);
+  const customizationDeduction = Number(localStorage.getItem('binhi_package_customization_deduction') || 0);
+  const totalPackageDeductions = maintenanceDeduction + customizationDeduction;
 
-  const packageAndAddonPrice = parsedPackagePrice + addonsCost + bundlesCost;
+  const baseRawPackagePrice = (pkg as any)?.rawPrice ?? (pkg as any)?.raw_price ?? (pkg?.price ? parseInt(String(pkg.price).replace(/[^\d]/g, ''), 10) || 0 : 0);
+  const parsedPackagePrice = Math.max(Math.round(baseRawPackagePrice * 0.65), baseRawPackagePrice - totalPackageDeductions);
+
+  const netAddonsCost = Math.max(0, addonsCost - bundleDiscount);
+  const packageAndAddonPrice = parsedPackagePrice + netAddonsCost;
   const subtotalBeforeDiscount = packageAndAddonPrice + transportFee;
 
   let voucherDiscountAmount = 0;
@@ -1441,10 +1572,20 @@ export default function CheckoutPage({
                   <span className="font-bold text-[var(--ink)] block">{pkg.name}</span>
                   <span className="text-[#24252c]/50 text-[11px]">Standard Package Base Rate</span>
                 </div>
-                <span className={`font-bold ${maintenanceDeduction > 0 ? 'line-through text-[#24252c]/40' : 'text-[var(--ink)]'}`}>
+                <span className={`font-bold ${totalPackageDeductions > 0 ? 'line-through text-[#24252c]/40' : 'text-[var(--ink)]'}`}>
                   ₱{(Number(pkg.rawPrice) || 33500).toLocaleString()}
                 </span>
               </div>
+
+              {customizationDeduction > 0 && (
+                <div className="flex items-center justify-between text-emerald-800 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200">
+                  <span className="font-semibold text-[11px] flex items-center gap-1.5">
+                    <IconCheck className="w-3 h-3 text-emerald-700 inline shrink-0" />
+                    <span>Equipment Customization Credit (50% Bundle Discount)</span>
+                  </span>
+                  <span className="font-bold text-[11px]">-₱{customizationDeduction.toLocaleString()}</span>
+                </div>
+              )}
 
               {maintenanceDeduction > 0 && (
                 <div className="flex items-center justify-between text-amber-800 bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-200">
@@ -1458,9 +1599,14 @@ export default function CheckoutPage({
 
               {selectedAddons.length > 0 ? (
                 <div className="pt-2 border-t border-[#24252c]/[0.06] space-y-1.5">
-                  <span className="text-[10px] font-extrabold text-[#1090F8] uppercase tracking-wider block">
-                    Selected Optional Equipment Add-ons ({selectedAddons.length})
-                  </span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-extrabold text-[#1090F8] uppercase tracking-wider block">
+                      Selected Optional Equipment Add-ons ({selectedAddons.length})
+                    </span>
+                    <span className="text-xs font-bold text-[#1090F8]">
+                      +₱{addonsCost.toLocaleString()}
+                    </span>
+                  </div>
                   {selectedAddons.map((addonStr, idx) => (
                     <div key={idx} className="flex justify-between text-[#24252c]/80 text-[11px] font-medium pl-1">
                       <span>• {addonStr}</span>
@@ -1473,22 +1619,21 @@ export default function CheckoutPage({
                 </div>
               )}
 
-              {selectedBundles.length > 0 && (
-                <div className="pt-2 border-t border-[#24252c]/[0.06] space-y-1.5">
-                  <span className="text-[10px] font-extrabold text-amber-600 uppercase tracking-wider block">
-                    Selected Production Upgrades ({selectedBundles.length})
+              {bundleDiscount > 0 && (
+                <div className="flex items-center justify-between text-emerald-800 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200">
+                  <span className="font-semibold text-[11px] flex items-center gap-1.5">
+                    <IconCheck className="w-3.5 h-3.5 text-emerald-600 inline shrink-0" />
+                    <span>
+                      Bundle &amp; Save Special Discount (20% Off
+                      {selectedBundles.length > 0 ? ` · ${selectedBundles.map((b) => b.title).join(', ')}` : ''})
+                    </span>
                   </span>
-                  {selectedBundles.map((b) => (
-                    <div key={b.id} className="flex justify-between text-[#24252c]/80 text-[11px] font-medium pl-1">
-                      <span>• {b.title}</span>
-                      <span className="font-bold text-[var(--ink)]">+₱{b.bundlePrice.toLocaleString()}</span>
-                    </div>
-                  ))}
+                  <span className="font-bold text-[11px] whitespace-nowrap">-₱{bundleDiscount.toLocaleString()}</span>
                 </div>
               )}
 
               <div className="pt-2 border-t border-[#24252c]/[0.08] flex items-center justify-between">
-                <span className="font-extrabold text-[var(--ink)]">Package & Add-ons Price</span>
+                <span className="font-extrabold text-[var(--ink)]">Package &amp; Add-ons Price</span>
                 <span className="text-base font-extrabold text-[#1090F8]">₱{packageAndAddonPrice.toLocaleString()}</span>
               </div>
             </div>
@@ -2553,8 +2698,24 @@ export default function CheckoutPage({
             <div className="p-4 sm:p-5 rounded-2xl bg-[var(--mist)]/70 border border-[#24252c]/[0.06] space-y-2.5 text-xs">
               <div className="flex justify-between text-[#24252c]/70">
                 <span>{pkg.name} Base Rate</span>
-                <span className="font-semibold text-[var(--ink)]">₱{(Number(pkg.rawPrice) || 33500).toLocaleString()}</span>
+                <span className={`font-semibold ${totalPackageDeductions > 0 ? 'line-through text-[#24252c]/40' : 'text-[var(--ink)]'}`}>
+                  ₱{(Number(pkg.rawPrice) || 33500).toLocaleString()}
+                </span>
               </div>
+
+              {customizationDeduction > 0 && (
+                <div className="flex justify-between text-emerald-600 font-semibold">
+                  <span>Equipment Customization Credit</span>
+                  <span>-₱{customizationDeduction.toLocaleString()}</span>
+                </div>
+              )}
+
+              {maintenanceDeduction > 0 && (
+                <div className="flex justify-between text-amber-700 font-semibold">
+                  <span>Maintenance / Quarantine Discount</span>
+                  <span>-₱{maintenanceDeduction.toLocaleString()}</span>
+                </div>
+              )}
 
               {addonsCost > 0 && (
                 <div className="flex justify-between text-[#24252c]/70">
@@ -2563,10 +2724,13 @@ export default function CheckoutPage({
                 </div>
               )}
 
-              {selectedBundles.length > 0 && (
-                <div className="flex justify-between text-amber-700">
-                  <span>Production Upgrades ({selectedBundles.length})</span>
-                  <span className="font-semibold">+₱{bundlesCost.toLocaleString()}</span>
+              {bundleDiscount > 0 && (
+                <div className="flex justify-between text-emerald-600 font-semibold">
+                  <span>
+                    Bundle &amp; Save Special Discount (20% Off
+                    {selectedBundles.length > 0 ? ` · ${selectedBundles.map((b) => b.title).join(', ')}` : ''})
+                  </span>
+                  <span>-₱{bundleDiscount.toLocaleString()}</span>
                 </div>
               )}
 

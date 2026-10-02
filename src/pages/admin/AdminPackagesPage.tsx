@@ -287,9 +287,6 @@ export default function AdminPackagesPage({ go: _go }: { go: (p: Page) => void }
       }
     });
 
-    if (crewSizeDigits) {
-      mapped.push(`Full Load-in, Technical Crew (${crewSizeDigits} Technicians) & On-site Soundcheck`);
-    }
     return mapped;
   };
 
