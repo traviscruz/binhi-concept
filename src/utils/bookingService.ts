@@ -78,6 +78,58 @@ export async function fetchDbBookedDates(): Promise<DBBooking[]> {
   return [];
 }
 
+export function getTodayIso(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function getDefaultEventDate(savedDate?: string | null): string {
+  const cleanSaved = normalizeDateToIso(savedDate);
+  if (cleanSaved && !isPastDate(cleanSaved)) {
+    return cleanSaved;
+  }
+  return getTodayIso();
+}
+
+export function getEarliestAvailableDate(
+  savedDate?: string | null,
+  dbBookings: DBBooking[] = [],
+  bookingSettings?: any,
+  scheduleOverrides: any[] = []
+): string {
+  const cleanSaved = normalizeDateToIso(savedDate);
+  if (cleanSaved && !isPastDate(cleanSaved)) {
+    return cleanSaved;
+  }
+
+  const today = new Date();
+  for (let i = 0; i < 90; i++) {
+    const candidate = new Date(today);
+    candidate.setDate(today.getDate() + i);
+    const y = candidate.getFullYear();
+    const m = String(candidate.getMonth() + 1).padStart(2, '0');
+    const d = String(candidate.getDate()).padStart(2, '0');
+    const iso = `${y}-${m}-${d}`;
+
+    if (bookingSettings) {
+      // Check schedule override closed
+      const isOverrideClosed = scheduleOverrides.some((o: any) => o.override_date === iso && o.is_closed);
+      if (isOverrideClosed) continue;
+    }
+
+    // Check count of bookings on this day (if max bookings reached)
+    const dayCount = dbBookings.filter((b) => (b.event_date || '').split('T')[0] === iso).length;
+    if (dayCount < 3) {
+      return iso;
+    }
+  }
+
+  return getTodayIso();
+}
+
 export function isPastDate(dateIsoStr: string): boolean {
   if (!dateIsoStr) return false;
   const iso = normalizeDateToIso(dateIsoStr);

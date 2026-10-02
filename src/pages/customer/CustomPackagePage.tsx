@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconArrow, IconCheck, IconTicket, IconSearch, IconX } from '../../components/shared/icons';
+import { IconArrow, IconCheck, IconTicket, IconSearch, IconX, IconBox } from '../../components/shared/icons';
 import { supabase } from '../../lib/supabase';
-import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
+import { fetchDbBookedDates, isPastDate, getDefaultEventDate, getEarliestAvailableDate, type DBBooking } from '../../utils/bookingService';
 import {
   fetchBookingSettings,
   fetchScheduleOverrides,
@@ -13,6 +13,7 @@ import {
   DEFAULT_BOOKING_SETTINGS,
 } from '../../utils/bookingEngine';
 import { EQUIPMENT_ITEMS } from '../../data/equipment';
+import { AvailabilityDatePicker } from '../../components/shared/AvailabilityDatePicker';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,7 @@ interface GearModel {
   rentalRate: number;
   availableCount: number;
   description: string;
+  img?: string;
 }
 
 interface ItemQuantityMap {
@@ -52,21 +54,35 @@ function GearCard({
       }`}
     >
       <div>
-        <div className="flex items-center justify-between gap-1.5 mb-1.5">
-          <span className="text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-[var(--mist)] text-[#24252c]/60">
-            {model.category}
-          </span>
-          <span className="text-[9px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200">
-            {model.availableCount} in stock
-          </span>
+        <div className="flex items-center gap-2.5 mb-2">
+          {model.img ? (
+            <img
+              src={model.img}
+              alt={model.name}
+              className="w-11 h-11 rounded-lg object-cover border border-[#24252c]/10 shrink-0 shadow-2xs"
+            />
+          ) : (
+            <div className="w-11 h-11 rounded-lg bg-[var(--mist)] border border-[#24252c]/10 flex items-center justify-center text-[#1090F8] shrink-0">
+              <IconBox className="w-5 h-5" />
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-1 mb-0.5">
+              <span className="text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md bg-[var(--mist)] text-[#24252c]/60">
+                {model.category}
+              </span>
+              <span className="text-[9px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200">
+                {model.availableCount} in stock
+              </span>
+            </div>
+            <h4 className="font-bold text-xs sm:text-sm text-[var(--ink)] leading-snug line-clamp-1">
+              {model.name}
+            </h4>
+            <p className="text-[10px] text-[#24252c]/50 truncate">
+              {model.brand}
+            </p>
+          </div>
         </div>
-
-        <h4 className="font-bold text-xs sm:text-sm text-[var(--ink)] leading-snug line-clamp-1">
-          {model.name}
-        </h4>
-        <p className="text-[10px] text-[#24252c]/50 mt-0.5 truncate">
-          {model.brand}
-        </p>
       </div>
 
       <div className="mt-3 pt-2.5 border-t border-[#24252c]/[0.06] flex items-center justify-between gap-1.5">
@@ -123,7 +139,7 @@ export default function CustomPackagePage({
   startBooking: (id: string, date: string, guestCount: number, addons: string[]) => void;
 }) {
   const [selectedDate, setSelectedDate] = useState(() => {
-    return localStorage.getItem('binhi_selected_event_date') || '2026-09-14';
+    return getDefaultEventDate(localStorage.getItem('binhi_selected_event_date'));
   });
   const [guestCount, setGuestCount] = useState(100);
   const [gearList, setGearList] = useState<GearModel[]>([]);
@@ -147,6 +163,11 @@ export default function CustomPackagePage({
         setDbBookings(bookings);
         setBookingSettings(settings);
         setScheduleOverrides(overrides);
+
+        const saved = localStorage.getItem('binhi_selected_event_date');
+        const earliest = getEarliestAvailableDate(saved, bookings, settings, overrides);
+        setSelectedDate(earliest);
+        localStorage.setItem('binhi_selected_event_date', earliest);
       } catch (e) {
         console.warn('Failed loading engine data in CustomPackagePage:', e);
       }
@@ -191,6 +212,7 @@ export default function CustomPackagePage({
               rentalRate: rate > 0 ? rate : fallback?.rawPrice || 2500,
               availableCount: Math.max(1, availCount),
               description: m.description || fallback?.desc || 'Professional production grade event equipment.',
+              img: m.image_url || fallback?.img || '',
             };
           });
 
@@ -205,6 +227,7 @@ export default function CustomPackagePage({
             rentalRate: item.rawPrice || 3500,
             availableCount: 4,
             description: item.desc,
+            img: item.img || '',
           }));
           setGearList(staticMapped);
         }
@@ -499,29 +522,17 @@ export default function CustomPackagePage({
 
               {/* Event Date */}
               <div>
-                <div className="flex items-center justify-between ml-1 mb-1">
-                  <label className="text-[10px] font-semibold uppercase tracking-wider text-[#24252c]/50">
-                    Event Date
-                  </label>
-                  {selectedDate && !isPastDate(selectedDate) && (
-                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${dayStatus.badgeClass}`}>
-                      {dayStatus.label}
-                    </span>
-                  )}
-                </div>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  min={new Date().toISOString().split('T')[0]}
-                  onChange={(e) => {
-                    setSelectedDate(e.target.value);
-                    localStorage.setItem('binhi_selected_event_date', e.target.value);
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-[#24252c]/50 block ml-1 mb-1">
+                  Event Date
+                </label>
+                <AvailabilityDatePicker
+                  selectedDate={selectedDate}
+                  onChange={(d) => {
+                    setSelectedDate(d);
+                    localStorage.setItem('binhi_selected_event_date', d);
                   }}
-                  className={`w-full rounded-full border px-3.5 py-2.5 text-xs focus:outline-none ${
-                    isPastDate(selectedDate) || isDateFullyBooked
-                      ? 'border-rose-400 bg-rose-50 text-rose-800 font-bold'
-                      : 'border-transparent bg-white text-[var(--ink)] focus:border-[#1090F8]'
-                  }`}
+                  placeholder="Select Event Date"
+                  showAvailabilityBadge={false}
                 />
                 {isPastDate(selectedDate) ? (
                   <p className="text-[10px] font-bold text-rose-600 mt-1 ml-1.5">

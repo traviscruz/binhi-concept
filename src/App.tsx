@@ -72,6 +72,7 @@ import PartnerProfilePage from './pages/partner/PartnerProfilePage';
 import { FEATURED_PACKAGES, type PackageData } from './data/packages';
 import { supabase } from './lib/supabase';
 import { fetchWishlistFromDb, toggleWishlistDb, syncLocalWishlistToDb, getLocalWishlistIds } from './utils/wishlistService';
+import { getDefaultEventDate } from './utils/bookingService';
 
 export default function App() {
   const [page, setPage] = useState<Page>(() => {
@@ -99,7 +100,7 @@ export default function App() {
     return localStorage.getItem('binhi_selected_item_id') || 'led-wall';
   });
 
-  const [bookingDate, setBookingDate] = useState('September 14, 2026');
+  const [bookingDate, setBookingDate] = useState(() => getDefaultEventDate(localStorage.getItem('binhi_selected_event_date')));
   const [bookingAddons, setBookingAddons] = useState<string[]>(['add-smoke']);
   const [isCustomerSession, setIsCustomerSession] = useState(false);
   const [hasBannerVouchers, setHasBannerVouchers] = useState(false);

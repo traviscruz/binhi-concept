@@ -430,42 +430,51 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
   // Helper: Upload File to Supabase Storage Bucket ('equipment-images')
   const uploadImageToSupabase = async (file: File): Promise<string> => {
     try {
-      const fileExt = file.name.split('.').pop();
+      const fileExt = file.name.split('.').pop() || 'jpg';
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
       const filePath = `equipment/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('equipment-images')
+      let bucketName = 'equipment-images';
+      let { error: uploadError } = await supabase.storage
+        .from(bucketName)
         .upload(filePath, file, { upsert: true });
 
       if (uploadError) {
-        console.warn('Supabase Storage Upload Warning:', uploadError);
-        return '';
+        bucketName = 'package-images';
+        const fallbackRes = await supabase.storage
+          .from(bucketName)
+          .upload(filePath, file, { upsert: true });
+
+        if (fallbackRes.error) {
+          console.warn('Supabase Storage Upload Warning:', uploadError, fallbackRes.error);
+          return '';
+        }
       }
 
       const { data } = supabase.storage
-        .from('equipment-images')
+        .from(bucketName)
         .getPublicUrl(filePath);
 
-      return data.publicUrl || '';
+      return data?.publicUrl || '';
     } catch (err) {
       console.error('Storage upload error:', err);
       return '';
     }
   };
 
-  // Helper: Delete File from Supabase Storage Bucket ('equipment-images')
+  // Helper: Delete File from Supabase Storage Bucket
   const deleteImageFromSupabaseStorage = async (imageUrl: string) => {
-    if (!imageUrl || !imageUrl.includes('equipment-images/')) return;
+    if (!imageUrl) return;
     try {
-      const parts = imageUrl.split('equipment-images/');
-      if (parts.length >= 2) {
-        const filePath = parts[1];
-        const { error } = await supabase.storage
-          .from('equipment-images')
-          .remove([filePath]);
-        if (error) {
-          console.warn('Supabase Storage file deletion note:', error);
+      const bucketMatches = ['equipment-images', 'package-images'];
+      for (const bucket of bucketMatches) {
+        if (imageUrl.includes(`${bucket}/`)) {
+          const parts = imageUrl.split(`${bucket}/`);
+          if (parts.length >= 2) {
+            const filePath = parts[1];
+            await supabase.storage.from(bucket).remove([filePath]);
+            break;
+          }
         }
       }
     } catch (err) {
@@ -1104,13 +1113,25 @@ export default function InventoryItemsPage({ go: _go }: { go: (p: Page) => void 
   ) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (!file.type.startsWith('image/')) {
+        if (isEdit) setEditFormError('Please select a valid image file (JPEG, PNG, WEBP).');
+        else setAddFormError('Please select a valid image file (JPEG, PNG, WEBP).');
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        if (isEdit) setEditFormError('Image file size must be less than 5MB.');
+        else setAddFormError('Image file size must be less than 5MB.');
+        return;
+      }
       const previewUrl = URL.createObjectURL(file);
       if (isEdit) {
         setEditFile(file);
         setEditFilePreview(previewUrl);
+        setEditFormError('');
       } else {
         setAddFile(file);
         setAddFilePreview(previewUrl);
+        setAddFormError('');
       }
     }
   };

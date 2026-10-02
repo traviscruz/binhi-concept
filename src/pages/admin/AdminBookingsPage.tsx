@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
+import { createPortal } from 'react-dom';
 import type { Page } from '../../types';
 import { MonoBadge } from '../../components/shared/Badges';
 import {
@@ -74,7 +75,43 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
-  const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
+  const [actionMenuState, setActionMenuState] = useState<{
+    booking: any;
+    top: number;
+    right: number;
+    popUpwards: boolean;
+  } | null>(null);
+  const [expandedVenueIds, setExpandedVenueIds] = useState<Set<string>>(new Set());
+
+  const handleToggleActionMenu = (e: React.MouseEvent<HTMLButtonElement>, booking: any) => {
+    e.stopPropagation();
+    if (actionMenuState?.booking.dbId === booking.dbId) {
+      setActionMenuState(null);
+    } else {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const popUpwards = spaceBelow < 340 && rect.top > 340;
+      const rightPos = Math.max(16, window.innerWidth - rect.right);
+      setActionMenuState({
+        booking,
+        top: popUpwards ? rect.top - 6 : rect.bottom + 6,
+        right: rightPos,
+        popUpwards,
+      });
+    }
+  };
+
+  const toggleExpandVenue = (dbId: string) => {
+    setExpandedVenueIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(dbId)) {
+        next.delete(dbId);
+      } else {
+        next.add(dbId);
+      }
+      return next;
+    });
+  };
 
   // ── Reschedule States ────────────────────────────────────────────────────
   const [rescheduleBooking, setRescheduleBooking] = useState<any | null>(null);
@@ -341,25 +378,36 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
   // Reset pagination to page 1 whenever search, filter, or page size changes
   useEffect(() => {
     setCurrentPage(1);
+    setActionMenuState(null);
   }, [search, statusFilter, pageSize]);
 
-  // Close action dropdown menu when clicking outside or pressing Escape
+  // Close action dropdown menu when clicking outside, scrolling, or pressing Escape
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (!(e.target as HTMLElement).closest('.booking-action-menu')) {
-        setOpenActionMenuId(null);
+        setActionMenuState(null);
       }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setOpenActionMenuId(null);
+        setActionMenuState(null);
       }
     };
+    const handleScrollOrResize = (e: Event) => {
+      if ((e.target as HTMLElement)?.closest?.('.booking-action-menu')) return;
+      setActionMenuState(null);
+    };
+
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('resize', handleScrollOrResize);
+
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('resize', handleScrollOrResize);
     };
   }, []);
 
@@ -1628,8 +1676,8 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
   const activeSelectedReceipt = selectedReceipt || { id: '', customer: '', slipRef: '', deposit: '', date: '' };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.06]">
+    <div className="space-y-6 min-w-0 w-full">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-[#24252c]/[0.06]">
         <div>
           <MonoBadge icon={IconCalendar}>Bookings Management</MonoBadge>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--ink)] mt-1.5">
@@ -1644,17 +1692,17 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           <button
             type="button"
             onClick={() => go('admin-cancellation-policy')}
-            className="inline-flex items-center gap-1.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold px-4 py-2.5 rounded-full hover:bg-rose-100 transition-colors shadow-2xs cursor-pointer"
+            className="inline-flex items-center gap-1.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-full hover:bg-rose-100 transition-colors shadow-2xs cursor-pointer whitespace-nowrap"
             title="Configure Tiered Cancellation & Refund Policy"
           >
-            <IconShield className="w-3.5 h-3.5" />
+            <IconShield className="w-3.5 h-3.5 shrink-0" />
             <span>Policy Rules</span>
           </button>
 
           <button
             type="button"
             onClick={() => go('admin-reports')}
-            className="inline-flex items-center gap-1.5 bg-[var(--mist)] border border-[#24252c]/10 text-[var(--ink)] text-xs font-semibold px-4 py-2.5 rounded-full hover:bg-gray-200 transition-colors shadow-2xs cursor-pointer"
+            className="inline-flex items-center gap-1.5 bg-[var(--mist)] border border-[#24252c]/10 text-[var(--ink)] text-xs font-semibold px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-full hover:bg-gray-200 transition-colors shadow-2xs cursor-pointer whitespace-nowrap"
             title="Open Financial Ledger & Reports"
           >
             <span>Ledger & Reports →</span>
@@ -1663,10 +1711,10 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           <button
             type="button"
             onClick={handleExportBookingsExcel}
-            className="inline-flex items-center gap-1.5 bg-emerald-600 text-white text-xs font-bold px-4 py-2.5 rounded-full hover:bg-emerald-700 transition-all shadow-sm cursor-pointer"
+            className="inline-flex items-center gap-1.5 bg-emerald-600 text-white text-xs font-bold px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-full hover:bg-emerald-700 transition-all shadow-sm cursor-pointer whitespace-nowrap"
             title="Export filtered bookings to Excel"
           >
-            <IconFileSpreadsheet className="w-4 h-4 text-white" />
+            <IconFileSpreadsheet className="w-4 h-4 text-white shrink-0" />
             <span>Export Excel</span>
           </button>
 
@@ -1674,7 +1722,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
             type="button"
             onClick={loadBookings}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 bg-white border border-[#24252c]/15 text-[var(--ink)] text-xs font-bold px-3 py-2.5 rounded-full hover:bg-[var(--mist)] transition-all shadow-2xs cursor-pointer disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 bg-white border border-[#24252c]/15 text-[var(--ink)] text-xs font-bold px-3 py-2 sm:py-2.5 rounded-full hover:bg-[var(--mist)] transition-all shadow-2xs cursor-pointer disabled:opacity-50 shrink-0"
             title="Refresh bookings data"
           >
             <span className={loading ? 'animate-spin inline-block' : ''}>↻</span>
@@ -1683,7 +1731,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           <button
             type="button"
             onClick={() => go('admin-manual-booking')}
-            className="inline-flex items-center gap-2 bg-[#1090F8] text-white text-xs font-bold px-4.5 py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-all shadow-sm hover:shadow-md cursor-pointer shrink-0"
+            className="inline-flex items-center gap-1.5 bg-[#1090F8] text-white text-xs font-bold px-4 sm:px-4.5 py-2 sm:py-2.5 rounded-full hover:bg-[#1090F8]/90 transition-all shadow-sm hover:shadow-md cursor-pointer shrink-0 whitespace-nowrap"
           >
             <span className="text-base font-bold leading-none">+</span>
             <span>Manual Booking</span>
@@ -1711,8 +1759,8 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
       )}
 
       {/* Filter & Search Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-[#24252c]/[0.08] shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-1.5 flex-wrap w-full sm:w-auto">
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-[#24252c]/[0.08] shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 sm:gap-4">
+        <div className="flex items-center gap-1.5 flex-wrap overflow-x-auto pb-1 md:pb-0">
           {['All', 'Pending Approval', 'Upcoming', 'Ongoing', 'Completed', 'Cancelled'].map((st) => {
             const pendingCount = bookings.filter((b) => b.status.includes('Pending')).length;
             const isPendingTab = st === 'Pending Approval';
@@ -1724,7 +1772,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                   setStatusFilter(st);
                   setCurrentPage(1);
                 }}
-                className={`text-xs px-3.5 py-1.5 rounded-full font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                className={`text-xs px-3 sm:px-3.5 py-1.5 rounded-full font-medium transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                   statusFilter === st
                     ? 'bg-[var(--ink)] text-white shadow-sm font-semibold'
                     : 'bg-[var(--mist)] text-[#24252c]/60 hover:text-[var(--ink)]'
@@ -1745,7 +1793,7 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           })}
         </div>
 
-        <div className="relative w-full sm:w-64">
+        <div className="relative w-full md:w-64 shrink-0">
           <IconSearch className="w-4 h-4 text-[#24252c]/40 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             value={search}
@@ -1759,98 +1807,232 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
         </div>
       </div>
 
-        {/* Desktop Bookings Table */}
-        <div className="hidden sm:block bg-white rounded-3xl border border-[#24252c]/10 shadow-sm overflow-visible">
-          <div className="w-full">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-[#24252c]/10 bg-[var(--mist)]/50 text-[#24252c]/60 font-bold uppercase text-[10px] tracking-wider">
-                  <th className="py-4 px-4">Ref / Customer</th>
-                  <th className="py-4 px-4">Package & Venue</th>
-                  <th className="py-4 px-4">Schedule Date</th>
-                  <th className="py-4 px-4">Cost Breakdown</th>
-                  <th className="py-4 px-4">Assigned Crew</th>
-                  <th className="py-4 px-4">Booking Status</th>
-                  <th className="py-4 px-4">Payment Status</th>
-                  <th className="py-4 px-4 text-right">Actions</th>
+      {/* Desktop Bookings Table - 100% Fluid Zero-Scroll Table */}
+      <div className="hidden lg:block bg-white rounded-3xl border border-[#24252c]/10 shadow-sm overflow-hidden isolate">
+          <table className="w-full text-left border-collapse text-xs table-fixed">
+            <thead>
+              <tr className="border-b border-[#24252c]/10 bg-[var(--mist)]/50 text-[#24252c]/60 font-bold uppercase text-[10px] tracking-wider whitespace-nowrap">
+                <th className="py-3.5 px-3.5 w-[15%]">Ref / Customer</th>
+                <th className="py-3.5 px-3 w-[17%]">Package & Venue</th>
+                <th className="py-3.5 px-3 w-[11%]">Schedule Date</th>
+                <th className="py-3.5 px-3 w-[11%]">Cost Breakdown</th>
+                <th className="py-3.5 px-3 w-[13%]">Assigned Crew</th>
+                <th className="py-3.5 px-2 w-[11%] text-center">Booking Status</th>
+                <th className="py-3.5 px-2 w-[11%] text-center">Payment Status</th>
+                <th className="py-3.5 px-3 w-[11%] text-center bg-gradient-to-l from-[var(--ink)]/[0.22] via-[var(--ink)]/[0.08] to-transparent">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#24252c]/5">
+              {paginatedBookings.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="py-12 text-center text-xs text-[#24252c]/50">
+                    No bookings found matching your search and filter criteria.
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-[#24252c]/5">
-                {paginatedBookings.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="py-12 text-center text-xs text-[#24252c]/50">
-                      No bookings found matching your search and filter criteria.
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedBookings.map((row, idx) => {
-                    const popUpwards = idx >= Math.max(2, paginatedBookings.length - 3);
+              ) : (
+                paginatedBookings.map((row, idx) => {
+                  const popUpwards = idx >= Math.max(2, paginatedBookings.length - 3);
 
-                    return (
-                      <tr key={row.dbId} className="hover:bg-[var(--mist)]/40 transition-colors">
-                        {/* Col 1: Customer & Ref */}
-                        <td className="py-4 px-4">
-                          <div className="font-bold text-[#1090F8] text-[11px] tracking-wide">
-                            #{row.id}
-                          </div>
-                          <div className="font-extrabold text-[var(--ink)] text-xs mt-0.5">
-                            {row.customer}
-                          </div>
-                          <div className="text-[10px] text-[#24252c]/50 truncate max-w-[150px]">
-                            {row.email}
-                          </div>
-                        </td>
+                  return (
+                    <tr
+                      key={row.dbId}
+                      className="hover:bg-[var(--mist)]/40 transition-colors"
+                    >
+                      {/* Col 1: Customer & Ref */}
+                      <td className="py-3 px-3.5 align-middle">
+                        <div className="font-bold text-[#1090F8] text-[11px] tracking-wide truncate">
+                          #{row.id}
+                        </div>
+                        <div className="font-extrabold text-[var(--ink)] text-xs truncate mt-0.5" title={row.customer}>
+                          {row.customer}
+                        </div>
+                        <div className="text-[10px] text-[#24252c]/50 truncate" title={row.email}>
+                          {row.email}
+                        </div>
+                      </td>
 
-                        {/* Col 2: Package & Venue */}
-                        <td className="py-4 px-4">
-                          <div className="font-bold text-[var(--ink)]">{row.package}</div>
-                          <div className="text-[10px] text-[#24252c]/60 truncate max-w-[170px] mt-0.5">
-                            {row.venue}
+                      {/* Col 2: Package & Venue (Inline Expand Details with Icon) */}
+                      <td className="py-3 px-3 align-middle">
+                        <div className="font-bold text-[var(--ink)] text-xs leading-tight truncate" title={row.package}>
+                          {row.package}
+                        </div>
+                        {expandedVenueIds.has(row.dbId) ? (
+                          <div className="text-[10px] text-[#24252c]/80 mt-0.5 leading-snug break-words flex items-start justify-between gap-1">
+                            <span className="flex-1">{row.venue}</span>
+                            <button
+                              type="button"
+                              onClick={() => toggleExpandVenue(row.dbId)}
+                              className="p-0.5 rounded-full hover:bg-[#1090F8]/10 text-[#1090F8] transition-colors shrink-0 cursor-pointer"
+                              title="Collapse venue address"
+                            >
+                              <IconChevronDown className="w-3.5 h-3.5 rotate-180 transition-transform" />
+                            </button>
                           </div>
-                        </td>
-
-                        {/* Col 3: Event Date & Reschedule / Cancellation Alert */}
-                        <td className="py-4 px-4 whitespace-nowrap">
-                          <div className="font-semibold text-[var(--ink)] flex items-center gap-1.5">
-                            <IconCalendar className="w-3.5 h-3.5 text-[#1090F8] shrink-0" />
-                            <span>{row.date}</span>
+                        ) : (
+                          <div className="text-[10px] text-[#24252c]/70 mt-0.5 leading-tight flex items-center justify-between gap-1 min-w-0">
+                            <span className="truncate flex-1" title={row.venue}>{row.venue}</span>
+                            {row.venue && row.venue.length > 18 && (
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandVenue(row.dbId)}
+                                className="p-0.5 rounded-full hover:bg-[#1090F8]/10 text-[#1090F8] transition-colors shrink-0 cursor-pointer"
+                                title="Show full venue address"
+                              >
+                                <IconChevronDown className="w-3.5 h-3.5 transition-transform" />
+                              </button>
+                            )}
                           </div>
-                          {row.cancellationStatus === 'requested' && (
-                            <div className="mt-1.5 inline-flex items-center gap-1 bg-rose-600 text-white font-extrabold text-[9px] px-2.5 py-0.5 rounded-full shadow-2xs animate-pulse">
-                              <span>Cancel Req</span>
-                            </div>
-                          )}
-                          {row.rescheduleStatus === 'pending' && (
-                            <div className="mt-1.5 inline-flex items-center gap-1 bg-amber-500 text-white font-extrabold text-[9px] px-2.5 py-0.5 rounded-full shadow-2xs">
-                              <span>Reschedule Requested</span>
-                            </div>
-                          )}
-                        </td>
+                        )}
+                      </td>
 
-                        {/* Col 4: Cost Breakdown */}
-                        <td className="py-4 px-4 whitespace-nowrap">
-                          <div className="font-extrabold text-[var(--ink)] text-xs">{row.total}</div>
-                          <div className="text-[11px] text-[#24252c]/60 mt-0.5 space-y-0.5">
-                            <div className="text-emerald-700 font-medium">50% Dep: {row.deposit}</div>
-                            <div>Bal: {row.isFullyPaid ? '₱0' : row.remaining}</div>
+                      {/* Col 3: Event Date & Reschedule / Cancellation Alert */}
+                      <td className="py-3 px-3 align-middle whitespace-nowrap">
+                        <div className="font-semibold text-[var(--ink)] flex items-center gap-1 text-[11px]">
+                          <IconCalendar className="w-3.5 h-3.5 text-[#1090F8] shrink-0" />
+                          <span className="truncate">{row.date}</span>
+                        </div>
+                        {row.cancellationStatus === 'requested' && (
+                          <div className="mt-1 inline-flex items-center gap-1 bg-rose-600 text-white font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-2xs animate-pulse">
+                            <span>Cancel Req</span>
                           </div>
-                        </td>
+                        )}
+                        {row.rescheduleStatus === 'pending' && (
+                          <div className="mt-1 inline-flex items-center gap-1 bg-amber-500 text-white font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-2xs">
+                            <span>Reschedule Req</span>
+                          </div>
+                        )}
+                      </td>
 
-                        {/* Col 5: Assigned Crew */}
-                        <td className="py-4 px-4">
-                          {row.assignedCrew.length > 0 ? (
-                            <span className="text-xs text-[var(--ink)] font-medium">
+                      {/* Col 4: Cost Breakdown */}
+                      <td className="py-3 px-3 align-middle whitespace-nowrap">
+                        <div className="font-extrabold text-[var(--ink)] text-xs">{row.total}</div>
+                        <div className="text-[10px] text-[#24252c]/60 mt-0.5 leading-tight">
+                          <div className="text-emerald-700 font-medium">Dep: {row.deposit}</div>
+                          <div>Bal: {row.isFullyPaid ? '₱0' : row.remaining}</div>
+                        </div>
+                      </td>
+
+                      {/* Col 5: Assigned Crew (No ellipsis, wrap into next line) */}
+                      <td className="py-3 px-3 align-middle">
+                        {row.assignedCrew.length > 0 ? (
+                          <div className="flex flex-col gap-0.5 max-w-full">
+                            <span className="text-[11px] font-bold text-[var(--ink)]">
+                              {row.assignedCrew.length} Crew Assigned
+                            </span>
+                            <div className="text-[10px] text-[#24252c]/75 leading-tight break-words">
                               {row.assignedCrew.map((c: any) => c.name || c.full_name).join(', ')}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-[#24252c]/40 italic">Unassigned</span>
+                        )}
+                      </td>
+
+                      {/* Col 6: Booking Status */}
+                      <td className="py-3 px-2 align-middle whitespace-nowrap text-center">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border shadow-2xs ${
+                            row.status === 'Ongoing'
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-extrabold'
+                              : row.status === 'Upcoming' || row.status === 'Confirmed'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : row.status === 'Completed'
+                              ? 'bg-slate-100 text-slate-700 border-slate-300'
+                              : row.status === 'Cancelled'
+                              ? 'bg-rose-50 text-rose-700 border-rose-200'
+                              : 'bg-amber-50 text-amber-700 border-amber-200'
+                          }`}
+                        >
+                          <span
+                            className={`rounded-full ${
+                              row.status === 'Ongoing'
+                                ? 'w-1.5 h-1.5 bg-emerald-500 animate-pulse'
+                                : 'w-1.5 h-1.5 bg-current'
+                            }`}
+                          />
+                          <span className="truncate">{row.status}</span>
+                        </span>
+                      </td>
+
+                      {/* Col 7: Payment Status */}
+                      <td className="py-3 px-2 align-middle whitespace-nowrap text-center">
+                        {(row.rawStatus === 'cancelled' || row.rawStatus === 'declined' || row.rawStatus === 'refunded' || row.status === 'Cancelled' || row.status === 'Declined & Refunded') ? (
+                          row.refundStatus === 'processed' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-50 text-rose-800 border border-rose-300 text-[11px] font-bold shadow-2xs">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-600" />
+                              <span className="truncate">Refunded</span>
                             </span>
                           ) : (
-                            <span className="text-xs text-[#24252c]/40 italic">Unassigned</span>
-                          )}
-                        </td>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold shadow-2xs">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                              <span>Cancelled</span>
+                            </span>
+                          )
+                        ) : row.isFullyPaid ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold shadow-2xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            <span>Fully Paid</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-bold shadow-2xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            <span>50% Dep</span>
+                          </span>
+                        )}
+                      </td>
 
-                        {/* Col 6: Booking Status */}
-                        <td className="py-4 px-4 whitespace-nowrap">
+                      {/* Col 8: Actions with Darkened Progressive Gradient Fading to Left */}
+                      <td className="py-3 px-3 align-middle text-center bg-gradient-to-l from-[var(--ink)]/[0.18] via-[var(--ink)]/[0.05] to-transparent">
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleActionMenu(e, row)}
+                          className={`booking-action-menu inline-flex items-center justify-center gap-1 px-3.5 py-1.5 rounded-full border text-[11px] font-bold transition-all cursor-pointer shadow-xs ${
+                            actionMenuState?.booking.dbId === row.dbId
+                              ? 'bg-[var(--ink)] text-white border-[var(--ink)]'
+                              : 'bg-white hover:bg-[var(--mist)] text-[var(--ink)] border-[#24252c]/20 hover:border-[#24252c]/40'
+                          }`}
+                          title="Open booking actions menu"
+                        >
+                          <span>Actions</span>
+                          <IconChevronDown
+                            className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                              actionMenuState?.booking.dbId === row.dbId ? 'rotate-180' : ''
+                            }`}
+                          />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile & Tablet Row Cards View (< lg) */}
+        <div className="block lg:hidden space-y-3.5">
+          {paginatedBookings.length === 0 ? (
+            <div className="bg-white rounded-2xl p-8 border border-[#24252c]/10 text-center text-xs text-[#24252c]/50">
+              No bookings found matching your search and filter criteria.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
+              {paginatedBookings.map((row, idx) => {
+                const isMobileNearBottom = idx >= Math.max(1, paginatedBookings.length - 2);
+
+                return (
+                  <div key={row.dbId} className="bg-white rounded-2xl p-4 sm:p-5 border border-[#24252c]/10 shadow-sm space-y-3 relative overflow-visible flex flex-col justify-between">
+                    <div>
+                      {/* Header: Ref, Customer, Booking Status & Payment Status */}
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="min-w-0">
+                          <span className="font-bold text-xs text-[#1090F8]">#{row.id}</span>
+                          <h4 className="font-extrabold text-sm text-[var(--ink)] mt-0.5 truncate">{row.customer}</h4>
+                          <div className="text-[11px] text-[#24252c]/60 truncate">{row.package}</div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
                           <span
-                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border shadow-2xs ${
+                            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border inline-flex items-center gap-1 ${
                               row.status === 'Ongoing'
                                 ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-extrabold'
                                 : row.status === 'Upcoming' || row.status === 'Confirmed'
@@ -1862,823 +2044,108 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
                                 : 'bg-amber-50 text-amber-700 border-amber-200'
                             }`}
                           >
-                            <span
-                              className={`rounded-full ${
-                                row.status === 'Ongoing'
-                                  ? 'w-2 h-2 bg-emerald-500 animate-pulse'
-                                  : 'w-1.5 h-1.5 bg-current'
-                              }`}
-                            />
+                            {row.status === 'Ongoing' && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            )}
                             {row.status}
                           </span>
-                        </td>
-
-                        {/* Col 7: Payment Status */}
-                        <td className="py-4 px-4 whitespace-nowrap">
-                          {(row.rawStatus === 'cancelled' || row.rawStatus === 'declined' || row.rawStatus === 'refunded' || row.status === 'Cancelled' || row.status === 'Declined & Refunded') ? (
-                            row.refundStatus === 'processed' ? (
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 text-rose-800 border border-rose-300 text-xs font-bold shadow-2xs">
-                                <span className="w-1.5 h-1.5 rounded-full bg-rose-600" />
-                                Refunded (₱{row.refundAmount ? Number(row.refundAmount).toLocaleString() : (row.isFullyPaid ? row.total : row.deposit)})
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold shadow-2xs">
-                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                                Cancelled
-                              </span>
-                            )
-                          ) : row.isFullyPaid ? (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold shadow-2xs">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          {row.isFullyPaid ? (
+                            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                               Fully Paid
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold shadow-2xs">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
                               50% Deposit
                             </span>
                           )}
-                        </td>
+                        </div>
+                      </div>
 
-                        {/* Col 8: Actions (Streamlined Quick Action + Dropdown) */}
-                        <td className="py-4 px-4 text-right whitespace-nowrap">
-                          <div className="inline-flex items-center justify-end gap-1.5">
-                            {/* 1. Contextual Primary Action Button */}
-                            {(row.rawStatus === 'cancelled' || row.rawStatus === 'declined' || row.rawStatus === 'refunded' || row.status === 'Cancelled' || row.status === 'Declined & Refunded') || row.rawStatus === 'declined' || row.rawStatus === 'refunded' || row.status === 'Cancelled' || row.status === 'Declined & Refunded' ? (
+                      {/* Schedule, Venue, Crew & Cost */}
+                      <div className="text-xs space-y-1.5 py-2.5 my-2 border-y border-[#24252c]/[0.06] text-[#24252c]/70">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[#24252c]/50">Event Date:</span>
+                          <span className="font-semibold text-[var(--ink)]">{row.date}</span>
+                        </div>
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="text-[#24252c]/50 shrink-0">Venue:</span>
+                          {expandedVenueIds.has(row.dbId) ? (
+                            <div className="text-right text-[var(--ink)] font-medium leading-snug break-words flex items-start justify-end gap-1.5">
+                              <span>{row.venue}</span>
                               <button
                                 type="button"
-                                onClick={() => handleOpenViewRefund(row)}
-                                className="bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 text-[11px] font-bold px-3 py-1.5 rounded-full transition-colors shadow-2xs cursor-pointer shrink-0"
-                                title="View Refund Details & Proof"
+                                onClick={() => toggleExpandVenue(row.dbId)}
+                                className="p-0.5 rounded-full hover:bg-[#1090F8]/10 text-[#1090F8] transition-colors shrink-0 cursor-pointer"
+                                title="Collapse venue address"
                               >
-                                Refund Details
+                                <IconChevronDown className="w-3.5 h-3.5 rotate-180 transition-transform" />
                               </button>
-                            ) : row.cancellationStatus === 'requested' ? (
-                              <button
-                                type="button"
-                                onClick={() => handleOpenReviewCancellation(row)}
-                                className="bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-full transition-colors shadow-2xs cursor-pointer shrink-0 flex items-center gap-1 animate-pulse"
-                                title="Review customer cancellation & refund request"
-                              >
-                                <IconX className="w-3.5 h-3.5" />
-                                <span>Review Cancel</span>
-                              </button>
-                            ) : row.rescheduleStatus === 'pending' ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setReviewRescheduleBooking(row);
-                                  setAdminRescheduleNotes(getApprovalEmailTemplate(row));
-                                }}
-                                className="bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-full transition-colors shadow-2xs cursor-pointer shrink-0 flex items-center gap-1"
-                                title="Review customer reschedule request"
-                              >
-                                <IconCalendar className="w-3.5 h-3.5" />
-                                <span>Review</span>
-                              </button>
-                            ) : row.status.includes('Pending') ? (
-                              <div className="inline-flex items-center gap-1.5">
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-end gap-1 min-w-0 max-w-[220px]">
+                              <span className="text-[var(--ink)] font-medium truncate text-right" title={row.venue}>{row.venue}</span>
+                              {row.venue && row.venue.length > 20 && (
                                 <button
                                   type="button"
-                                  onClick={() => setApproveModalBooking(row)}
-                                  className="bg-[#1090F8] hover:bg-[#1090F8]/90 text-white text-[11px] font-bold px-3 py-1.5 rounded-full transition-colors shadow-2xs cursor-pointer shrink-0 flex items-center gap-1"
-                                  title="Review Technical Specs & Approve"
+                                  onClick={() => toggleExpandVenue(row.dbId)}
+                                  className="p-0.5 rounded-full hover:bg-[#1090F8]/10 text-[#1090F8] transition-colors shrink-0 cursor-pointer"
+                                  title="Show full venue address"
                                 >
-                                  <IconCheck className="w-3.5 h-3.5" />
-                                  <span>Approve</span>
+                                  <IconChevronDown className="w-3.5 h-3.5 transition-transform" />
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setDeclineModalBooking(row)}
-                                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold px-2.5 py-1.5 rounded-full transition-colors shadow-2xs cursor-pointer shrink-0 flex items-center gap-1"
-                                  title="Decline & Issue 100% Refund"
-                                >
-                                  <IconX className="w-3 h-3" />
-                                  <span>Decline</span>
-                                </button>
-                              </div>
-                            ) : !row.isFullyPaid ? (
-                              <button
-                                type="button"
-                                onClick={() => handleOpenSettleModal(row)}
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-full transition-all shadow-2xs cursor-pointer shrink-0 flex items-center gap-1"
-                                title={`Settle Remaining Balance (${row.remaining})`}
-                              >
-                                <span>₱</span>
-                                <span>Settle</span>
-                              </button>
-                            ) : null}
-
-                            {/* 2. Sleek Actions Dropdown Menu */}
-                            <div className="relative inline-block text-left booking-action-menu">
-                              <button
-                                type="button"
-                                onClick={() => setOpenActionMenuId(openActionMenuId === row.dbId ? null : row.dbId)}
-                                className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full border text-[11px] font-bold transition-all cursor-pointer ${
-                                  openActionMenuId === row.dbId
-                                    ? 'bg-[var(--ink)] text-white border-[var(--ink)] shadow-xs'
-                                    : 'bg-white hover:bg-[var(--mist)] text-[var(--ink)] border-[#24252c]/15 hover:border-[#24252c]/30 shadow-2xs'
-                                }`}
-                                title="More booking actions"
-                              >
-                                <span>Actions</span>
-                                <IconChevronDown
-                                  className={`w-3 h-3 transition-transform duration-200 ${
-                                    openActionMenuId === row.dbId ? 'rotate-180' : ''
-                                  }`}
-                                />
-                              </button>
-
-                              {openActionMenuId === row.dbId && (
-                                <div
-                                  className={`absolute right-0 ${
-                                    popUpwards ? 'bottom-full mb-1.5 origin-bottom-right' : 'top-full mt-1.5 origin-top-right'
-                                  } w-56 bg-white rounded-2xl shadow-xl border border-[#24252c]/10 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 text-left`}
-                                >
-                                  <div className="px-3.5 py-1 text-[10px] font-bold text-[#24252c]/40 uppercase tracking-wider">
-                                    Booking Actions
-                                  </div>
-
-                                  {/* Review Cancellation Request if pending */}
-                                  {row.cancellationStatus === 'requested' && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenActionMenuId(null);
-                                        handleOpenReviewCancellation(row);
-                                      }}
-                                      className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                                    >
-                                      <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
-                                        <IconX className="w-3 h-3" />
-                                      </span>
-                                      <div className="flex flex-col min-w-0">
-                                        <span className="truncate">Review Cancellation</span>
-                                        <span className="text-[10px] font-normal text-rose-600 truncate">
-                                          Customer refund pending
-                                        </span>
-                                      </div>
-                                    </button>
-                                  )}
-
-                                  {/* Settle / Payment Details */}
-                                  {row.rawStatus !== 'cancelled' && row.rawStatus !== 'declined' && row.rawStatus !== 'refunded' && row.status !== 'Cancelled' && row.status !== 'Declined & Refunded' && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenActionMenuId(null);
-                                        handleOpenSettleModal(row);
-                                      }}
-                                      className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-emerald-50 hover:text-emerald-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                                    >
-                                      <span className="w-5 h-5 rounded-md bg-emerald-100 text-emerald-700 flex items-center justify-center text-[11px] font-bold shrink-0">
-                                        ₱
-                                      </span>
-                                      <div className="flex flex-col min-w-0">
-                                        <span className="truncate">
-                                          {row.isFullyPaid ? 'Payment Settlement' : 'Settle Balance'}
-                                        </span>
-                                        <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                          {row.isFullyPaid ? 'View & edit settlement proof' : `Bal: ${row.remaining}`}
-                                        </span>
-                                      </div>
-                                    </button>
-                                  )}
-
-                                  {/* Mark as Completed Event */}
-                                  {row.rawStatus !== 'cancelled' && row.rawStatus !== 'declined' && row.rawStatus !== 'refunded' && row.status !== 'Cancelled' && row.status !== 'Declined & Refunded' && !row.isCompleted && row.status !== 'Completed' && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenActionMenuId(null);
-                                        handleMarkAsCompleted(row);
-                                      }}
-                                      className="w-full text-left px-3.5 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                                    >
-                                      <span className="w-5 h-5 rounded-md bg-blue-100 text-[#1090F8] flex items-center justify-center font-bold text-[11px] shrink-0">
-                                        ✓
-                                      </span>
-                                      <div className="flex flex-col min-w-0">
-                                        <span className="truncate">Mark as Completed</span>
-                                        <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                          {row.isToday ? 'Event is today' : 'Set status to completed'}
-                                        </span>
-                                      </div>
-                                    </button>
-                                  )}
-
-                                   {/* Undo Mark as Completed (Allowed if event is today or not past) */}
-                                   {row.rawStatus !== "cancelled" && (row.isCompleted || row.status === "Completed") && (row.isToday || !row.isPast) && (
-                                     <button
-                                       type="button"
-                                       onClick={() => {
-                                         setOpenActionMenuId(null);
-                                         handleUndoMarkAsCompleted(row);
-                                       }}
-                                       className="w-full text-left px-3.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                                     >
-                                       <span className="w-5 h-5 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-[11px] shrink-0">
-                                         ↺
-                                       </span>
-                                       <div className="flex flex-col min-w-0">
-                                         <span className="truncate">Undo Completed</span>
-                                         <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                           {row.isToday ? "Reopen as Ongoing (Today)" : "Reopen as Upcoming"}
-                                         </span>
-                                       </div>
-                                     </button>
-                                   )}
-
-                                  {/* Proof Slips */}
-                                  {(row.depositReceiptUrl || row.balanceReceiptUrl) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenActionMenuId(null);
-                                        setSelectedReceipt(row);
-                                      }}
-                                      className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-purple-50 hover:text-purple-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                                    >
-                                      <span className="w-5 h-5 rounded-md bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
-                                        <IconEye className="w-3 h-3" />
-                                      </span>
-                                      <div className="flex flex-col min-w-0">
-                                        <span className="truncate">View Proof Slips</span>
-                                        <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                          Deposit & settlement slips
-                                        </span>
-                                      </div>
-                                    </button>
-                                  )}
-
-                                  {/* Reschedule Date (Hidden if completed, past date, or cancelled) */}
-                                  {row.rawStatus !== 'cancelled' && row.rawStatus !== 'declined' && row.rawStatus !== 'refunded' && row.status !== 'Cancelled' && row.status !== 'Declined & Refunded' && !row.isCompleted && !row.isPast && row.status !== 'Completed' && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenActionMenuId(null);
-                                        setRescheduleBooking(row);
-                                        const targetDate = row.rawDate ? row.rawDate.slice(0, 10) : '';
-                                        setNewRescheduleDate(targetDate);
-                                        const sTime = (row.startTime || '13:00').slice(0, 5);
-                                        const eTime = (row.endTime || '18:00').slice(0, 5);
-                                        setDirectRescheduleStartTime(sTime);
-                                        setDirectRescheduleEndTime(eTime);
-                                        setAdminRescheduleNotes(getDirectRescheduleEmailTemplate(row, targetDate, sTime, eTime));
-                                      }}
-                                      className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-[var(--mist)] flex items-center gap-2.5 transition-colors cursor-pointer"
-                                    >
-                                      <span className="w-5 h-5 rounded-md bg-[#24252c]/10 text-[var(--ink)] flex items-center justify-center shrink-0">
-                                        <IconCalendar className="w-3 h-3" />
-                                      </span>
-                                      <div className="flex flex-col min-w-0">
-                                        <span className="truncate">Reschedule Date</span>
-                                        <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                          Change event date
-                                        </span>
-                                      </div>
-                                    </button>
-                                  )}
-
-                                  {/* Assign Crew (Hidden if completed, past date, or cancelled) */}
-                                  {row.rawStatus !== 'cancelled' && row.rawStatus !== 'declined' && row.rawStatus !== 'refunded' && row.status !== 'Cancelled' && row.status !== 'Declined & Refunded' && !row.isCompleted && !row.isPast && row.status !== 'Completed' && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenActionMenuId(null);
-                                        setAssignCrewBooking(row);
-                                      }}
-                                      className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-indigo-50 hover:text-indigo-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                                    >
-                                      <span className="w-5 h-5 rounded-md bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
-                                        <IconUser className="w-3 h-3" />
-                                      </span>
-                                      <div className="flex flex-col min-w-0">
-                                        <span className="truncate">Assign Crew</span>
-                                        <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                          {row.assignedCrew.length > 0
-                                            ? `${row.assignedCrew.length} crew assigned`
-                                            : 'Assign production crew'}
-                                        </span>
-                                      </div>
-                                    </button>
-                                  )}
-
-                                  {/* Review Reschedule Request */}
-                                  {row.rescheduleStatus === 'pending' && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenActionMenuId(null);
-                                        setReviewRescheduleBooking(row);
-                                        setAdminRescheduleNotes(getApprovalEmailTemplate(row));
-                                      }}
-                                      className="w-full text-left px-3.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                                    >
-                                      <span className="w-5 h-5 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
-                                        <IconCalendar className="w-3 h-3" />
-                                      </span>
-                                      <div className="flex flex-col min-w-0">
-                                        <span className="truncate">Review Reschedule</span>
-                                        <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                          Customer request pending
-                                        </span>
-                                      </div>
-                                    </button>
-                                  )}
-
-                                  {/* Approve / Review Booking (if pending) */}
-                                   {row.status.includes('Pending') && (
-                                     <>
-                                       <button
-                                         type="button"
-                                         onClick={() => {
-                                           setOpenActionMenuId(null);
-                                           setApproveModalBooking(row);
-                                         }}
-                                         className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[#1090F8] hover:bg-blue-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                                       >
-                                         <span className="w-5 h-5 rounded-md bg-[#1090F8]/15 text-[#1090F8] flex items-center justify-center shrink-0">
-                                           <IconCheck className="w-3 h-3" />
-                                         </span>
-                                         <div className="flex flex-col min-w-0">
-                                           <span className="truncate">Approve Booking</span>
-                                           <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                             Technical &amp; schedule sign-off
-                                           </span>
-                                         </div>
-                                       </button>
-
-                                       <button
-                                         type="button"
-                                         onClick={() => {
-                                           setOpenActionMenuId(null);
-                                           setDeclineModalBooking(row);
-                                         }}
-                                         className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                                       >
-                                         <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
-                                           <IconX className="w-3 h-3" />
-                                         </span>
-                                         <div className="flex flex-col min-w-0">
-                                           <span className="truncate">Decline &amp; Refund</span>
-                                           <span className="text-[10px] font-normal text-rose-600 truncate">
-                                             100% deposit refund
-                                           </span>
-                                         </div>
-                                       </button>
-                                     </>
-                                   )}
-
-                                  {/* Refund Details (if cancelled) */}
-                                  {(row.rawStatus === 'cancelled' || row.rawStatus === 'declined' || row.rawStatus === 'refunded' || row.status === 'Cancelled' || row.status === 'Declined & Refunded') && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenActionMenuId(null);
-                                        handleOpenViewRefund(row);
-                                      }}
-                                      className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                                    >
-                                      <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center text-[11px] font-bold shrink-0">
-                                        ₱
-                                      </span>
-                                      <div className="flex flex-col min-w-0">
-                                        <span className="truncate">Refund Details & Proof</span>
-                                        <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                          View disbursement breakdown
-                                        </span>
-                                      </div>
-                                    </button>
-                                  )}
-
-                                  {/* Cancel Booking & Process Refund (Hidden if completed, past date, or cancelled) */}
-                                  {row.rawStatus !== 'cancelled' && row.rawStatus !== 'declined' && row.rawStatus !== 'refunded' && row.status !== 'Cancelled' && row.status !== 'Declined & Refunded' && !row.isCompleted && !row.isPast && row.status !== 'Completed' && (
-                                    <>
-                                      <div className="my-1 border-t border-[#24252c]/5" />
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setOpenActionMenuId(null);
-                                          handleOpenDirectCancel(row);
-                                        }}
-                                        className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                                      >
-                                        <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
-                                          <IconX className="w-3 h-3" />
-                                        </span>
-                                        <div className="flex flex-col min-w-0">
-                                          <span className="truncate">Cancel &amp; Refund Booking</span>
-                                          <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                            Cancel reservation &amp; refund
-                                          </span>
-                                        </div>
-                                      </button>
-                                    </>
-                                  )}
-                                </div>
                               )}
                             </div>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Mobile Row Cards View */}
-        <div className="block sm:hidden space-y-3">
-          {paginatedBookings.map((row, idx) => {
-            const isMobileNearBottom = idx >= Math.max(1, paginatedBookings.length - 2);
-
-            return (
-              <div key={row.dbId} className="bg-white rounded-2xl p-4 border border-[#24252c]/10 shadow-sm space-y-3 relative overflow-visible">
-                {/* Header: Ref, Customer, Booking Status & Payment Status */}
-                <div className="flex justify-between items-start gap-2">
-                  <div>
-                    <span className="font-bold text-xs text-[#1090F8]">#{row.id}</span>
-                    <h4 className="font-extrabold text-sm text-[var(--ink)] mt-0.5">{row.customer}</h4>
-                    <div className="text-[11px] text-[#24252c]/60">{row.package}</div>
-                  </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span
-                      className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border inline-flex items-center gap-1 ${
-                        row.status === 'Ongoing'
-                          ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-extrabold'
-                          : row.status === 'Upcoming' || row.status === 'Confirmed'
-                          ? 'bg-blue-50 text-blue-700 border-blue-200'
-                          : row.status === 'Completed'
-                          ? 'bg-slate-100 text-slate-700 border-slate-300'
-                          : row.status === 'Cancelled'
-                          ? 'bg-rose-50 text-rose-700 border-rose-200'
-                          : 'bg-amber-50 text-amber-700 border-amber-200'
-                      }`}
-                    >
-                      {row.status === 'Ongoing' && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      )}
-                      {row.status}
-                    </span>
-                    {row.isFullyPaid ? (
-                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        Fully Paid
-                      </span>
-                    ) : (
-                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                        50% Deposit
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Schedule, Venue, Crew & Cost */}
-                <div className="text-xs space-y-1.5 py-2 border-y border-[#24252c]/[0.06] text-[#24252c]/70">
-                  <div className="flex justify-between">
-                    <span className="text-[#24252c]/50">Event Date:</span>
-                    <span className="font-semibold text-[var(--ink)]">{row.date}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#24252c]/50">Venue:</span>
-                    <span className="font-medium text-[var(--ink)] truncate max-w-[200px]">{row.venue}</span>
-                  </div>
-                  {row.rescheduleStatus === 'pending' && (
-                    <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px]">
-                      <strong>Reschedule Requested:</strong> {formatDisplayDate(row.rescheduleRequestedDate)}
-                    </div>
-                  )}
-                  <div className="flex justify-between items-start">
-                    <span className="text-[#24252c]/50">Crew:</span>
-                    <span className="text-[var(--ink)] font-medium text-right max-w-[200px]">
-                      {row.assignedCrew.length > 0
-                        ? row.assignedCrew.map((c: any) => c.name || c.full_name).join(', ')
-                        : <span className="italic text-[#24252c]/40">Unassigned</span>}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center pt-1 border-t border-[#24252c]/[0.05]">
-                    <span className="text-[#24252c]/50">Cost:</span>
-                    <div className="text-right">
-                      <span className="font-bold text-[var(--ink)]">{row.total}</span>
-                      <span className="text-[11px] text-[#24252c]/60 ml-2">
-                        (50% Dep: {row.deposit}, Bal: {row.isFullyPaid ? '₱0' : row.remaining})
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Mobile Actions: Clean Primary Action + Actions Dropdown */}
-                <div className="flex items-center gap-2 pt-1">
-                  {(row.rawStatus === 'cancelled' || row.rawStatus === 'declined' || row.rawStatus === 'refunded' || row.status === 'Cancelled' || row.status === 'Declined & Refunded') || row.rawStatus === 'declined' || row.rawStatus === 'refunded' || row.status === 'Cancelled' || row.status === 'Declined & Refunded' ? (
-                    <button
-                      type="button"
-                      onClick={() => handleOpenViewRefund(row)}
-                      className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 text-xs font-bold py-2 rounded-full transition-colors cursor-pointer shadow-2xs"
-                    >
-                      Refund Details
-                    </button>
-                  ) : row.cancellationStatus === 'requested' ? (
-                    <button
-                      type="button"
-                      onClick={() => handleOpenReviewCancellation(row)}
-                      className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs py-2 rounded-full shadow-sm text-center cursor-pointer flex items-center justify-center gap-1.5 animate-pulse"
-                    >
-                      <IconX className="w-3.5 h-3.5" />
-                      <span>Review Cancellation</span>
-                    </button>
-                  ) : row.rescheduleStatus === 'pending' ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReviewRescheduleBooking(row);
-                        setAdminRescheduleNotes(getApprovalEmailTemplate(row));
-                      }}
-                      className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs py-2 rounded-full shadow-sm text-center cursor-pointer flex items-center justify-center gap-1.5"
-                    >
-                      <IconCalendar className="w-3.5 h-3.5" />
-                      <span>Review Reschedule</span>
-                    </button>
-                  ) : row.status.includes('Pending') ? (
-                    <div className="flex-1 flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setApproveModalBooking(row)}
-                        className="flex-1 bg-[#1090F8] hover:bg-[#1090F8]/90 text-white text-xs font-bold py-2 rounded-full transition-colors shadow-sm cursor-pointer flex items-center justify-center gap-1"
-                      >
-                        <IconCheck className="w-3.5 h-3.5" />
-                        <span>Approve</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeclineModalBooking(row)}
-                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold px-3 py-2 rounded-full transition-colors shadow-sm cursor-pointer flex items-center justify-center gap-1"
-                      >
-                        <IconX className="w-3 h-3" />
-                        <span>Decline</span>
-                      </button>
-                    </div>
-                  ) : !row.isFullyPaid ? (
-                    <button
-                      type="button"
-                      onClick={() => handleOpenSettleModal(row)}
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 rounded-full hover:bg-emerald-700 transition-colors shadow-sm cursor-pointer flex items-center justify-center gap-1"
-                    >
-                      <span>₱</span>
-                      <span>Settle Balance ({row.remaining})</span>
-                    </button>
-                  ) : null}
-
-                  {/* Mobile Actions Dropdown */}
-                  <div className={`relative inline-block text-left booking-action-menu ${row.isFullyPaid && !row.rescheduleStatus && row.cancellationStatus !== 'requested' && !row.status.includes('Pending') && row.rawStatus !== 'cancelled' && row.rawStatus !== 'declined' && row.rawStatus !== 'refunded' && row.status !== 'Cancelled' && row.status !== 'Declined & Refunded' ? 'w-full' : ''}`}>
-                    <button
-                      type="button"
-                      onClick={() => setOpenActionMenuId(openActionMenuId === row.dbId ? null : row.dbId)}
-                      className={`inline-flex items-center justify-center gap-1 px-3 py-2 rounded-full border text-xs font-bold transition-all cursor-pointer ${
-                        row.isFullyPaid && !row.rescheduleStatus && row.cancellationStatus !== 'requested' && !row.status.includes('Pending') && row.rawStatus !== 'cancelled' && row.rawStatus !== 'declined' && row.rawStatus !== 'refunded' && row.status !== 'Cancelled' && row.status !== 'Declined & Refunded' ? 'w-full' : ''
-                      } ${
-                        openActionMenuId === row.dbId
-                          ? 'bg-[var(--ink)] text-white border-[var(--ink)]'
-                          : 'bg-white hover:bg-[var(--mist)] text-[var(--ink)] border-[#24252c]/15 shadow-2xs'
-                      }`}
-                    >
-                      <span>Actions</span>
-                      <IconChevronDown
-                        className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                          openActionMenuId === row.dbId ? 'rotate-180' : ''
-                        }`}
-                      />
-                    </button>
-
-                    {openActionMenuId === row.dbId && (
-                      <div
-                        className={`absolute right-0 ${
-                          isMobileNearBottom ? 'bottom-full mb-2 origin-bottom-right' : 'top-full mt-2 origin-top-right'
-                        } w-56 bg-white rounded-2xl shadow-xl border border-[#24252c]/10 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 text-left`}
-                      >
-                        <div className="px-3.5 py-1 text-[10px] font-bold text-[#24252c]/40 uppercase tracking-wider">
-                          Booking Actions
+                          )}
                         </div>
-
-                        {/* Review Cancellation Request */}
-                        {row.cancellationStatus === 'requested' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setOpenActionMenuId(null);
-                              handleOpenReviewCancellation(row);
-                            }}
-                            className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                          >
-                            <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
-                              <IconX className="w-3 h-3" />
+                        {row.rescheduleStatus === 'pending' && (
+                          <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px]">
+                            <strong>Reschedule Requested:</strong> {formatDisplayDate(row.rescheduleRequestedDate)}
+                          </div>
+                        )}
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="text-[#24252c]/50 shrink-0">Crew:</span>
+                          <div className="text-[var(--ink)] font-medium text-right max-w-[220px] break-words">
+                            {row.assignedCrew.length > 0
+                              ? row.assignedCrew.map((c: any) => c.name || c.full_name).join(', ')
+                              : <span className="italic text-[#24252c]/40">Unassigned</span>}
+                          </div>
+                        </div>
+                        <div className="flex justify-between items-center pt-1 border-t border-[#24252c]/[0.05]">
+                          <span className="text-[#24252c]/50">Cost:</span>
+                          <div className="text-right">
+                            <span className="font-bold text-[var(--ink)]">{row.total}</span>
+                            <span className="text-[11px] text-[#24252c]/60 ml-1.5">
+                              (50%: {row.deposit}, Bal: {row.isFullyPaid ? '₱0' : row.remaining})
                             </span>
-                            <div className="flex flex-col min-w-0">
-                              <span className="truncate">Review Cancellation</span>
-                              <span className="text-[10px] font-normal text-rose-600 truncate">
-                                Customer refund pending
-                              </span>
-                            </div>
-                          </button>
-                        )}
-
-                        {/* Settle / Payment Details */}
-                        {row.rawStatus !== 'cancelled' && row.rawStatus !== 'declined' && row.rawStatus !== 'refunded' && row.status !== 'Cancelled' && row.status !== 'Declined & Refunded' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setOpenActionMenuId(null);
-                              handleOpenSettleModal(row);
-                            }}
-                            className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-emerald-50 hover:text-emerald-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                          >
-                            <span className="w-5 h-5 rounded-md bg-emerald-100 text-emerald-700 flex items-center justify-center text-[11px] font-bold shrink-0">
-                              ₱
-                            </span>
-                            <div className="flex flex-col min-w-0">
-                              <span className="truncate">
-                                {row.isFullyPaid ? 'Payment Settlement' : 'Settle Balance'}
-                              </span>
-                              <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                {row.isFullyPaid ? 'View & edit settlement proof' : `Bal: ${row.remaining}`}
-                              </span>
-                            </div>
-                          </button>
-                        )}
-
-                        {/* Mark as Completed Event */}
-                        {row.rawStatus !== 'cancelled' && row.rawStatus !== 'declined' && row.rawStatus !== 'refunded' && row.status !== 'Cancelled' && row.status !== 'Declined & Refunded' && !row.isCompleted && row.status !== 'Completed' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setOpenActionMenuId(null);
-                              handleMarkAsCompleted(row);
-                            }}
-                            className="w-full text-left px-3.5 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                          >
-                            <span className="w-5 h-5 rounded-md bg-blue-100 text-[#1090F8] flex items-center justify-center font-bold text-[11px] shrink-0">
-                              ✓
-                            </span>
-                            <div className="flex flex-col min-w-0">
-                              <span className="truncate">Mark as Completed</span>
-                              <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                {row.isToday ? 'Event is today' : 'Set status to completed'}
-                              </span>
-                            </div>
-                          </button>
-                        )}
-
-                         {/* Undo Mark as Completed (Allowed if event is today or not past) */}
-                         {row.rawStatus !== "cancelled" && (row.isCompleted || row.status === "Completed") && (row.isToday || !row.isPast) && (
-                           <button
-                             type="button"
-                             onClick={() => {
-                               setOpenActionMenuId(null);
-                               handleUndoMarkAsCompleted(row);
-                             }}
-                             className="w-full text-left px-3.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                           >
-                             <span className="w-5 h-5 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-[11px] shrink-0">
-                               ↺
-                             </span>
-                             <div className="flex flex-col min-w-0">
-                               <span className="truncate">Undo Completed</span>
-                               <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                 {row.isToday ? "Reopen as Ongoing (Today)" : "Reopen as Upcoming"}
-                               </span>
-                             </div>
-                           </button>
-                         )}
-
-                        {/* Reschedule Date (Hidden if completed, past date, or cancelled) */}
-                        {row.rawStatus !== 'cancelled' && row.rawStatus !== 'declined' && row.rawStatus !== 'refunded' && row.status !== 'Cancelled' && row.status !== 'Declined & Refunded' && !row.isCompleted && !row.isPast && row.status !== 'Completed' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setOpenActionMenuId(null);
-                              setRescheduleBooking(row);
-                              const targetDate = row.rawDate ? row.rawDate.slice(0, 10) : '';
-                              setNewRescheduleDate(targetDate);
-                              const sTime = (row.startTime || '13:00').slice(0, 5);
-                              const eTime = (row.endTime || '18:00').slice(0, 5);
-                              setDirectRescheduleStartTime(sTime);
-                              setDirectRescheduleEndTime(eTime);
-                              setAdminRescheduleNotes(getDirectRescheduleEmailTemplate(row, targetDate, sTime, eTime));
-                            }}
-                            className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-[var(--mist)] flex items-center gap-2.5 transition-colors cursor-pointer"
-                          >
-                            <span className="w-5 h-5 rounded-md bg-[#24252c]/10 text-[var(--ink)] flex items-center justify-center shrink-0">
-                              <IconCalendar className="w-3 h-3" />
-                            </span>
-                            <div className="flex flex-col min-w-0">
-                              <span className="truncate">Reschedule Date</span>
-                              <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                Change event date
-                              </span>
-                            </div>
-                          </button>
-                        )}
-
-                        {/* Proof Slips */}
-                        {(row.depositReceiptUrl || row.balanceReceiptUrl) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setOpenActionMenuId(null);
-                              setSelectedReceipt(row);
-                            }}
-                            className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-purple-50 hover:text-purple-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                          >
-                            <span className="w-5 h-5 rounded-md bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
-                              <IconEye className="w-3 h-3" />
-                            </span>
-                            <div className="flex flex-col min-w-0">
-                              <span className="truncate">View Proof Slips</span>
-                              <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                Deposit & settlement receipts
-                              </span>
-                            </div>
-                          </button>
-                        )}
-
-                        {/* Crew (Hidden if completed, past date, or cancelled) */}
-                        {row.rawStatus !== 'cancelled' && row.rawStatus !== 'declined' && row.rawStatus !== 'refunded' && row.status !== 'Cancelled' && row.status !== 'Declined & Refunded' && !row.isCompleted && !row.isPast && row.status !== 'Completed' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setOpenActionMenuId(null);
-                              setAssignCrewBooking(row);
-                            }}
-                            className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-indigo-50 hover:text-indigo-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                          >
-                            <span className="w-5 h-5 rounded-md bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
-                              <IconUser className="w-3 h-3" />
-                            </span>
-                            <div className="flex flex-col min-w-0">
-                              <span className="truncate">Assign Crew</span>
-                              <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                {row.assignedCrew.length > 0
-                                  ? `${row.assignedCrew.length} assigned`
-                                  : 'Assign production crew'}
-                              </span>
-                            </div>
-                          </button>
-                        )}
-
-                        {/* Refund Details & Proof (if cancelled) */}
-                        {(row.rawStatus === 'cancelled' || row.rawStatus === 'declined' || row.rawStatus === 'refunded' || row.status === 'Cancelled' || row.status === 'Declined & Refunded') && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setOpenActionMenuId(null);
-                              handleOpenViewRefund(row);
-                            }}
-                            className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                          >
-                            <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center text-[11px] font-bold shrink-0">
-                              ₱
-                            </span>
-                            <div className="flex flex-col min-w-0">
-                              <span className="truncate">Refund Details & Proof</span>
-                              <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                View disbursement breakdown
-                              </span>
-                            </div>
-                          </button>
-                        )}
-
-                        {/* Cancel Booking & Process Refund (Hidden if completed, past date, or cancelled) */}
-                        {row.rawStatus !== 'cancelled' && row.rawStatus !== 'declined' && row.rawStatus !== 'refunded' && row.status !== 'Cancelled' && row.status !== 'Declined & Refunded' && !row.isCompleted && !row.isPast && row.status !== 'Completed' && (
-                          <>
-                            <div className="my-1 border-t border-[#24252c]/5" />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenActionMenuId(null);
-                                handleOpenDirectCancel(row);
-                              }}
-                              className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                            >
-                              <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
-                                <IconX className="w-3 h-3" />
-                              </span>
-                              <div className="flex flex-col min-w-0">
-                                <span className="truncate">Cancel &amp; Refund Booking</span>
-                                <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
-                                  Cancel reservation &amp; refund
-                                </span>
-                              </div>
-                            </button>
-                          </>
-                        )}
+                          </div>
+                        </div>
                       </div>
-                    )}
+                    </div>
+
+                    {/* Mobile Actions: Unified Booking Actions Menu */}
+                    <div className="pt-2 border-t border-[#24252c]/[0.06]">
+                      <button
+                        type="button"
+                        onClick={(e) => handleToggleActionMenu(e, row)}
+                        className={`booking-action-menu w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-full border text-xs font-bold transition-all cursor-pointer ${
+                          actionMenuState?.booking.dbId === row.dbId
+                            ? 'bg-[var(--ink)] text-white border-[var(--ink)] shadow-xs'
+                            : 'bg-[var(--mist)] hover:bg-[#24252c]/10 text-[var(--ink)] border-[#24252c]/10 shadow-2xs'
+                        }`}
+                      >
+                        <span>Actions</span>
+                        <IconChevronDown
+                          className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                            actionMenuState?.booking.dbId === row.dbId ? 'rotate-180' : ''
+                          }`}
+                        />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Pagination Footer */}
@@ -4817,6 +4284,330 @@ export default function AdminBookingsPage({ go }: { go: (p: Page) => void }) {
           </div>
         )}
       </ModalOverlay>
+
+      {/* ── Modal 8: Assign Production Crew Modal ── */}
+      <AssignCrewModal
+        isOpen={Boolean(assignCrewBooking)}
+        onClose={() => setAssignCrewBooking(null)}
+        booking={assignCrewBooking}
+        onAssigned={(updatedCrew) => {
+          setBookings((prev) =>
+            prev.map((b) =>
+              b.id === assignCrewBooking?.dbId || b.id === assignCrewBooking?.id
+                ? { ...b, assigned_crew: updatedCrew }
+                : b
+            )
+          );
+          setAssignCrewBooking(null);
+        }}
+      />
+
+      {/* ── Fixed Portal Action Menu (Rendered into document.body above the table to prevent clipping) ── */}
+      {actionMenuState && typeof document !== 'undefined' && createPortal(
+        <div
+          className="booking-action-menu fixed w-56 bg-white rounded-2xl shadow-2xl border border-[#24252c]/15 py-1.5 z-[99999] animate-in fade-in zoom-in-95 duration-100 text-left max-h-[85vh] overflow-y-auto"
+          style={{
+            top: actionMenuState.popUpwards ? undefined : `${actionMenuState.top}px`,
+            bottom: actionMenuState.popUpwards ? `${window.innerHeight - actionMenuState.top}px` : undefined,
+            right: `${actionMenuState.right}px`,
+          }}
+        >
+          <div className="px-3.5 py-1 text-[10px] font-bold text-[#24252c]/40 uppercase tracking-wider">
+            Booking Actions
+          </div>
+
+          {/* Review Cancellation Request if pending */}
+          {actionMenuState.booking.cancellationStatus === 'requested' && (
+            <button
+              type="button"
+              onClick={() => {
+                const b = actionMenuState.booking;
+                setActionMenuState(null);
+                handleOpenReviewCancellation(b);
+              }}
+              className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+            >
+              <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                <IconX className="w-3 h-3" />
+              </span>
+              <div className="flex flex-col min-w-0">
+                <span className="truncate">Review Cancellation</span>
+                <span className="text-[10px] font-normal text-rose-600 truncate">
+                  Customer refund pending
+                </span>
+              </div>
+            </button>
+          )}
+
+          {/* Settle / Payment Details */}
+          {actionMenuState.booking.rawStatus !== 'cancelled' && actionMenuState.booking.rawStatus !== 'declined' && actionMenuState.booking.rawStatus !== 'refunded' && actionMenuState.booking.status !== 'Cancelled' && actionMenuState.booking.status !== 'Declined & Refunded' && (
+            <button
+              type="button"
+              onClick={() => {
+                const b = actionMenuState.booking;
+                setActionMenuState(null);
+                handleOpenSettleModal(b);
+              }}
+              className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-emerald-50 hover:text-emerald-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+            >
+              <span className="w-5 h-5 rounded-md bg-emerald-100 text-emerald-700 flex items-center justify-center text-[11px] font-bold shrink-0">
+                ₱
+              </span>
+              <div className="flex flex-col min-w-0">
+                <span className="truncate">
+                  {actionMenuState.booking.isFullyPaid ? 'Payment Settlement' : 'Settle Balance'}
+                </span>
+                <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
+                  {actionMenuState.booking.isFullyPaid ? 'View & edit settlement proof' : `Bal: ${actionMenuState.booking.remaining}`}
+                </span>
+              </div>
+            </button>
+          )}
+
+          {/* Mark as Completed Event */}
+          {actionMenuState.booking.rawStatus !== 'cancelled' && actionMenuState.booking.rawStatus !== 'declined' && actionMenuState.booking.rawStatus !== 'refunded' && actionMenuState.booking.status !== 'Cancelled' && actionMenuState.booking.status !== 'Declined & Refunded' && !actionMenuState.booking.isCompleted && actionMenuState.booking.status !== 'Completed' && (
+            <button
+              type="button"
+              onClick={() => {
+                const b = actionMenuState.booking;
+                setActionMenuState(null);
+                handleMarkAsCompleted(b);
+              }}
+              className="w-full text-left px-3.5 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+            >
+              <span className="w-5 h-5 rounded-md bg-blue-100 text-[#1090F8] flex items-center justify-center font-bold text-[11px] shrink-0">
+                ✓
+              </span>
+              <div className="flex flex-col min-w-0">
+                <span className="truncate">Mark as Completed</span>
+                <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
+                  {actionMenuState.booking.isToday ? 'Event is today' : 'Set status to completed'}
+                </span>
+              </div>
+            </button>
+          )}
+
+          {/* Undo Mark as Completed */}
+          {actionMenuState.booking.rawStatus !== "cancelled" && (actionMenuState.booking.isCompleted || actionMenuState.booking.status === "Completed") && (actionMenuState.booking.isToday || !actionMenuState.booking.isPast) && (
+            <button
+              type="button"
+              onClick={() => {
+                const b = actionMenuState.booking;
+                setActionMenuState(null);
+                handleUndoMarkAsCompleted(b);
+              }}
+              className="w-full text-left px-3.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+            >
+              <span className="w-5 h-5 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-[11px] shrink-0">
+                ↺
+              </span>
+              <div className="flex flex-col min-w-0">
+                <span className="truncate">Undo Completed</span>
+                <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
+                  {actionMenuState.booking.isToday ? "Reopen as Ongoing (Today)" : "Reopen as Upcoming"}
+                </span>
+              </div>
+            </button>
+          )}
+
+          {/* Proof Slips */}
+          {(actionMenuState.booking.depositReceiptUrl || actionMenuState.booking.balanceReceiptUrl) && (
+            <button
+              type="button"
+              onClick={() => {
+                const b = actionMenuState.booking;
+                setActionMenuState(null);
+                setSelectedReceipt(b);
+              }}
+              className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-purple-50 hover:text-purple-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+            >
+              <span className="w-5 h-5 rounded-md bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+                <IconEye className="w-3 h-3" />
+              </span>
+              <div className="flex flex-col min-w-0">
+                <span className="truncate">View Proof Slips</span>
+                <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
+                  Deposit & settlement slips
+                </span>
+              </div>
+            </button>
+          )}
+
+          {/* Reschedule Date */}
+          {actionMenuState.booking.rawStatus !== 'cancelled' && actionMenuState.booking.rawStatus !== 'declined' && actionMenuState.booking.rawStatus !== 'refunded' && actionMenuState.booking.status !== 'Cancelled' && actionMenuState.booking.status !== 'Declined & Refunded' && !actionMenuState.booking.isCompleted && !actionMenuState.booking.isPast && actionMenuState.booking.status !== 'Completed' && (
+            <button
+              type="button"
+              onClick={() => {
+                const b = actionMenuState.booking;
+                setActionMenuState(null);
+                setRescheduleBooking(b);
+                const targetDate = b.rawDate ? b.rawDate.slice(0, 10) : '';
+                setNewRescheduleDate(targetDate);
+                const sTime = (b.startTime || '13:00').slice(0, 5);
+                const eTime = (b.endTime || '18:00').slice(0, 5);
+                setDirectRescheduleStartTime(sTime);
+                setDirectRescheduleEndTime(eTime);
+                setAdminRescheduleNotes(getDirectRescheduleEmailTemplate(b, targetDate, sTime, eTime));
+              }}
+              className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-[var(--mist)] flex items-center gap-2.5 transition-colors cursor-pointer"
+            >
+              <span className="w-5 h-5 rounded-md bg-[#24252c]/10 text-[var(--ink)] flex items-center justify-center shrink-0">
+                <IconCalendar className="w-3 h-3" />
+              </span>
+              <div className="flex flex-col min-w-0">
+                <span className="truncate">Reschedule Date</span>
+                <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
+                  Change event date
+                </span>
+              </div>
+            </button>
+          )}
+
+          {/* Assign Crew */}
+          {actionMenuState.booking.rawStatus !== 'cancelled' && actionMenuState.booking.rawStatus !== 'declined' && actionMenuState.booking.rawStatus !== 'refunded' && actionMenuState.booking.status !== 'Cancelled' && actionMenuState.booking.status !== 'Declined & Refunded' && !actionMenuState.booking.isCompleted && !actionMenuState.booking.isPast && actionMenuState.booking.status !== 'Completed' && (
+            <button
+              type="button"
+              onClick={() => {
+                const b = actionMenuState.booking;
+                setActionMenuState(null);
+                setAssignCrewBooking(b);
+              }}
+              className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[var(--ink)] hover:bg-indigo-50 hover:text-indigo-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+            >
+              <span className="w-5 h-5 rounded-md bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                <IconUser className="w-3 h-3" />
+              </span>
+              <div className="flex flex-col min-w-0">
+                <span className="truncate">Assign Crew</span>
+                <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
+                  {actionMenuState.booking.assignedCrew.length > 0
+                    ? `${actionMenuState.booking.assignedCrew.length} crew assigned`
+                    : 'Assign production crew'}
+                </span>
+              </div>
+            </button>
+          )}
+
+          {/* Review Reschedule Request */}
+          {actionMenuState.booking.rescheduleStatus === 'pending' && (
+            <button
+              type="button"
+              onClick={() => {
+                const b = actionMenuState.booking;
+                setActionMenuState(null);
+                setReviewRescheduleBooking(b);
+                setAdminRescheduleNotes(getApprovalEmailTemplate(b));
+              }}
+              className="w-full text-left px-3.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+            >
+              <span className="w-5 h-5 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <IconCalendar className="w-3 h-3" />
+              </span>
+              <div className="flex flex-col min-w-0">
+                <span className="truncate">Review Reschedule</span>
+                <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
+                  Customer request pending
+                </span>
+              </div>
+            </button>
+          )}
+
+          {/* Approve / Decline if pending */}
+          {actionMenuState.booking.status.includes('Pending') && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  const b = actionMenuState.booking;
+                  setActionMenuState(null);
+                  setApproveModalBooking(b);
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-[#1090F8] hover:bg-blue-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <span className="w-5 h-5 rounded-md bg-[#1090F8]/15 text-[#1090F8] flex items-center justify-center shrink-0">
+                  <IconCheck className="w-3 h-3" />
+                </span>
+                <div className="flex flex-col min-w-0">
+                  <span className="truncate">Approve Booking</span>
+                  <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
+                    Technical &amp; schedule sign-off
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const b = actionMenuState.booking;
+                  setActionMenuState(null);
+                  setDeclineModalBooking(b);
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                  <IconX className="w-3 h-3" />
+                </span>
+                <div className="flex flex-col min-w-0">
+                  <span className="truncate">Decline &amp; Refund</span>
+                  <span className="text-[10px] font-normal text-rose-600 truncate">
+                    100% deposit refund
+                  </span>
+                </div>
+              </button>
+            </>
+          )}
+
+          {/* Refund Details */}
+          {(actionMenuState.booking.rawStatus === 'cancelled' || actionMenuState.booking.rawStatus === 'declined' || actionMenuState.booking.rawStatus === 'refunded' || actionMenuState.booking.status === 'Cancelled' || actionMenuState.booking.status === 'Declined & Refunded') && (
+            <button
+              type="button"
+              onClick={() => {
+                const b = actionMenuState.booking;
+                setActionMenuState(null);
+                handleOpenViewRefund(b);
+              }}
+              className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+            >
+              <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center text-[11px] font-bold shrink-0">
+                ₱
+              </span>
+              <div className="flex flex-col min-w-0">
+                <span className="truncate">Refund Details & Proof</span>
+                <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
+                  View disbursement breakdown
+                </span>
+              </div>
+            </button>
+          )}
+
+          {/* Cancel Booking */}
+          {actionMenuState.booking.rawStatus !== 'cancelled' && actionMenuState.booking.rawStatus !== 'declined' && actionMenuState.booking.rawStatus !== 'refunded' && actionMenuState.booking.status !== 'Cancelled' && actionMenuState.booking.status !== 'Declined & Refunded' && !actionMenuState.booking.isCompleted && !actionMenuState.booking.isPast && actionMenuState.booking.status !== 'Completed' && (
+            <>
+              <div className="my-1 border-t border-[#24252c]/5" />
+              <button
+                type="button"
+                onClick={() => {
+                  const b = actionMenuState.booking;
+                  setActionMenuState(null);
+                  handleOpenDirectCancel(b);
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                  <IconX className="w-3 h-3" />
+                </span>
+                <div className="flex flex-col min-w-0">
+                  <span className="truncate">Cancel &amp; Refund Booking</span>
+                  <span className="text-[10px] font-normal text-[#24252c]/50 truncate">
+                    Cancel reservation &amp; refund
+                  </span>
+                </div>
+              </button>
+            </>
+          )}
+        </div>,
+        document.body
+      )}
 
     </div>
   );

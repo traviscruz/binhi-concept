@@ -24,7 +24,7 @@ import {
 import { supabase } from '../../lib/supabase';
 import { sendOtp, verifyOtp } from '../../utils/smsService';
 import { createPaymongoCheckoutSession } from '../../utils/paymongoPayment';
-import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
+import { fetchDbBookedDates, isPastDate, getDefaultEventDate, getTodayIso, type DBBooking } from '../../utils/bookingService';
 import { validateVoucherCode, recordVoucherUsage } from '../../utils/voucherService';
 import {
   fetchLogisticsConfig,
@@ -43,6 +43,7 @@ import {
   type CrossSellBundle,
 } from '../../components/shared/CrossSellPromotions';
 import { fetchCrewAvailabilityRecords } from '../../utils/crewAvailabilityService';
+import { AvailabilityDatePicker } from '../../components/shared/AvailabilityDatePicker';
 
 interface TransportRuleOption {
   id: string;
@@ -93,7 +94,7 @@ export default function CheckoutPage({
 
   // Helper to format ISO YYYY-MM-DD for HTML5 date input
   const formatIsoDate = (dString?: string) => {
-    if (!dString) return '2026-09-14';
+    if (!dString) return getTodayIso();
     if (/^\d{4}-\d{2}-\d{2}$/.test(dString)) return dString;
     try {
       const parsed = new Date(dString);
@@ -101,7 +102,7 @@ export default function CheckoutPage({
         return parsed.toISOString().split('T')[0];
       }
     } catch (e) {}
-    return '2026-09-14';
+    return getTodayIso();
   };
 
   // ── Event Info State ───────────────────────────────────────────────────────
@@ -110,7 +111,7 @@ export default function CheckoutPage({
   });
   const [eventDate, setEventDate] = useState(() => {
     const saved = localStorage.getItem('binhi_selected_event_date');
-    return saved ? formatIsoDate(saved) : formatIsoDate(initialDate);
+    return getDefaultEventDate(saved || initialDate);
   });
   const [startTime, setStartTime] = useState(() => localStorage.getItem('binhi_selected_start_time') || '14:00');
   const [endTime, setEndTime] = useState(() => localStorage.getItem('binhi_selected_end_time') || '19:00');
@@ -1666,33 +1667,18 @@ export default function CheckoutPage({
                 </select>
               </div>
               <div>
-                <div className="flex items-center justify-between ml-1 mb-1">
-                  <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50">
-                    Event Date <span className="text-rose-500">*</span>
-                  </label>
-                  {eventDate && !isPastDate(eventDate) && (() => {
-                    const dayStatus = getDayAvailabilityStatus(eventDate, dbBookings, bookingSettings, scheduleOverrides);
-                    return (
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${dayStatus.badgeClass}`}>
-                        {dayStatus.label}
-                      </span>
-                    );
-                  })()}
-                </div>
-                <input
-                  type="date"
-                  value={eventDate}
-                  min={new Date().toISOString().split('T')[0]}
-                  onChange={(e) => {
-                    setEventDate(e.target.value);
-                    localStorage.setItem('binhi_selected_event_date', e.target.value);
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 block ml-1 mb-1">
+                  Event Date <span className="text-rose-500">*</span>
+                </label>
+                <AvailabilityDatePicker
+                  selectedDate={eventDate}
+                  onChange={(d) => {
+                    setEventDate(d);
+                    localStorage.setItem('binhi_selected_event_date', d);
                   }}
-                  className={`w-full rounded-full border px-4 py-3 text-sm font-semibold focus:outline-none ${
-                    isPastDate(eventDate) || getDayAvailabilityStatus(eventDate, dbBookings, bookingSettings, scheduleOverrides).status === 'fully_booked'
-                      ? 'border-rose-400 bg-rose-50/50 text-rose-800'
-                      : 'border-transparent bg-[var(--mist)] text-[var(--ink)] focus:border-[#1090F8]'
-                  }`}
-                  required
+                  buttonClassName="bg-[var(--mist)] border-transparent text-sm font-semibold"
+                  placeholder="Select Event Date"
+                  showAvailabilityBadge={false}
                 />
                 {isPastDate(eventDate) ? (
                   <p className="text-[11px] font-bold text-rose-600 mt-1 ml-2">

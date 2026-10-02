@@ -2,6 +2,7 @@ import { useState, useEffect, type ReactNode } from 'react';
 import type { Page } from '../../types';
 import { Logo } from './Logo';
 import { IconCalendar, IconBox, IconCheck, IconLogOut, IconMenu, IconX, IconUser } from '../shared/icons';
+import { LogoutModal } from '../shared/LogoutModal';
 import { supabase } from '../../utils/supabase';
 
 export function CrewLayout({
@@ -16,6 +17,7 @@ export function CrewLayout({
   assignedCount?: number;
 }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [crewName, setCrewName] = useState('');
   const [crewAvatar, setCrewAvatar] = useState<string | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -88,12 +90,12 @@ export function CrewLayout({
   };
 
   const handleLogout = async () => {
-    setMobileSidebarOpen(false);
     try {
       await supabase.auth.signOut();
     } catch (err) {
       console.error('Crew logout error:', err);
     }
+    setShowLogoutModal(false);
     go('landing');
   };
 
@@ -180,8 +182,11 @@ export function CrewLayout({
         </button>
 
         <button
-          onClick={handleLogout}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs text-rose-600 bg-rose-50 hover:bg-rose-100 font-semibold transition-colors border border-rose-200 cursor-pointer"
+          onClick={() => {
+            setMobileSidebarOpen(false);
+            setShowLogoutModal(true);
+          }}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-full text-xs text-rose-600 bg-rose-50 hover:bg-rose-100 font-semibold transition-colors border border-rose-200 cursor-pointer"
         >
           <IconLogOut className="w-4 h-4" />
           Log Out Crew
@@ -230,6 +235,15 @@ export function CrewLayout({
           {children}
         </main>
       </div>
+
+      {/* ── Crew Logout Confirmation Modal ── */}
+      <LogoutModal
+        isOpen={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={handleLogout}
+        userName={crewName}
+        roleTitle="Event Staff / Crew"
+      />
     </div>
   );
 }

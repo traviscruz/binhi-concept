@@ -2,6 +2,8 @@ import { useState, useEffect, type ReactNode } from 'react';
 import type { Page } from '../../types';
 import { Logo } from './Logo';
 import { IconTicket, IconUser, IconLogOut, IconMenu, IconX, IconExternal, IconShield } from '../shared/icons';
+import { LogoutModal } from '../shared/LogoutModal';
+import { supabase } from '../../utils/supabase';
 import {
   getStoredPartnerSession,
   clearStoredPartnerSession,
@@ -18,6 +20,7 @@ export function PartnerLayout({
   children: ReactNode;
 }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [partner, setPartner] = useState<AffiliatePartner | null>(() => getStoredPartnerSession());
 
   useEffect(() => {
@@ -36,9 +39,14 @@ export function PartnerLayout({
     go(target);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn('Partner Supabase signout note:', err);
+    }
     clearStoredPartnerSession();
-    setMobileSidebarOpen(false);
+    setShowLogoutModal(false);
     go('partner-login');
   };
 
@@ -130,8 +138,11 @@ export function PartnerLayout({
         <div className="pt-4 border-t border-[#24252c]/[0.08]">
           <button
             type="button"
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold text-rose-600 bg-rose-50/70 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer"
+            onClick={() => {
+              setMobileSidebarOpen(false);
+              setShowLogoutModal(true);
+            }}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-full text-xs font-bold text-rose-600 bg-rose-50/70 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer"
           >
             <IconLogOut className="w-3.5 h-3.5" />
             Sign Out
@@ -193,8 +204,11 @@ export function PartnerLayout({
             <div className="pt-4 border-t border-[#24252c]/10">
               <button
                 type="button"
-                onClick={handleLogout}
-                className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200"
+                onClick={() => {
+                  setMobileSidebarOpen(false);
+                  setShowLogoutModal(true);
+                }}
+                className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-full text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 cursor-pointer"
               >
                 <IconLogOut className="w-3.5 h-3.5" />
                 Sign Out
@@ -208,6 +222,15 @@ export function PartnerLayout({
       <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full">
         {children}
       </main>
+
+      {/* ── Partner Logout Confirmation Modal ── */}
+      <LogoutModal
+        isOpen={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={handleLogout}
+        userName={partner?.partnerName}
+        roleTitle="Affiliate Partner"
+      />
     </div>
   );
 }

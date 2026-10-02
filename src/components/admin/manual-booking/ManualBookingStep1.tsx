@@ -15,6 +15,7 @@ import {
   type ScheduleOverride,
   type SlotFeasibilityResult,
 } from '../../../utils/bookingEngine';
+import { AvailabilityDatePicker } from '../../shared/AvailabilityDatePicker';
 
 interface ManualBookingStep1Props {
   channel: string;
@@ -349,30 +350,15 @@ export function ManualBookingStep1({
         </div>
 
         <div>
-          <div className="flex items-center justify-between mb-1">
-            <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block">
-              Event Date <span className="text-rose-500">*</span>
-            </label>
-            {eventDate && !isPastDate(eventDate) && (() => {
-              const dayStatus = getDayAvailabilityStatus(eventDate, dbBookings, bookingSettings, scheduleOverrides);
-              return (
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${dayStatus.badgeClass}`}>
-                  {dayStatus.label}
-                </span>
-              );
-            })()}
-          </div>
-          <input
-            type="date"
-            value={eventDate}
-            min={new Date().toISOString().split('T')[0]}
-            onChange={(e) => setEventDate(e.target.value)}
-            className={`w-full rounded-full border px-4 py-3 text-sm font-semibold focus:outline-none ${
-              isPastDate(eventDate) || (eventDate && getDayAvailabilityStatus(eventDate, dbBookings, bookingSettings, scheduleOverrides).status === 'fully_booked')
-                ? 'border-rose-400 bg-rose-50/50 text-rose-800'
-                : 'border-transparent bg-[var(--mist)] text-[var(--ink)] focus:border-[#1090F8]'
-            }`}
-            required
+          <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 mb-1 block">
+            Event Date <span className="text-rose-500">*</span>
+          </label>
+          <AvailabilityDatePicker
+            selectedDate={eventDate}
+            onChange={(d) => setEventDate(d)}
+            buttonClassName="bg-[var(--mist)] border-transparent text-sm font-semibold"
+            placeholder="Select Event Date"
+            showAvailabilityBadge={false}
           />
           {isPastDate(eventDate) ? (
             <p className="text-[11px] font-bold text-rose-600 mt-1 ml-2">

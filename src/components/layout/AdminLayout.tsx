@@ -17,6 +17,7 @@ import {
   IconStar,
   IconFileSpreadsheet,
 } from '../shared/icons';
+import { LogoutModal } from '../shared/LogoutModal';
 import { supabase } from '../../utils/supabase';
 
 export function AdminLayout({
@@ -33,6 +34,7 @@ export function AdminLayout({
   inquiryCount?: number;
 }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [adminName, setAdminName] = useState('');
   const [adminAvatar, setAdminAvatar] = useState<string | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -168,12 +170,12 @@ export function AdminLayout({
   };
 
   const handleLogout = async () => {
-    setMobileSidebarOpen(false);
     try {
       await supabase.auth.signOut();
     } catch (err) {
       console.error('Admin logout error:', err);
     }
+    setShowLogoutModal(false);
     go('landing');
   };
 
@@ -326,8 +328,11 @@ export function AdminLayout({
           </button>
 
           <button
-            onClick={handleLogout}
-            className="w-full mt-2 py-2.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            onClick={() => {
+              setMobileSidebarOpen(false);
+              setShowLogoutModal(true);
+            }}
+            className="w-full mt-2 py-2.5 rounded-full border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer"
           >
             <IconLogOut className="w-4 h-4" /> Log out
           </button>
@@ -338,6 +343,15 @@ export function AdminLayout({
       <main key={page} className="animate-blur-in flex-1 p-4 sm:p-6 lg:p-8 2xl:p-10 max-w-7xl 2xl:max-w-[1600px] mx-auto w-full min-w-0 overflow-x-hidden">
         {children}
       </main>
+
+      {/* ── Admin Logout Confirmation Modal ── */}
+      <LogoutModal
+        isOpen={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={handleLogout}
+        userName={adminName}
+        roleTitle="System Administrator"
+      />
     </div>
   );
 }

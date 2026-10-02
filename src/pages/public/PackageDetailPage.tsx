@@ -9,7 +9,7 @@ import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { PackageReviewsSection } from '../../components/shared/PackageReviewsSection';
 import { CrossSellPromotions, generateSmartAddonBundles, type CrossSellBundle } from '../../components/shared/CrossSellPromotions';
 import { supabase } from '../../lib/supabase';
-import { fetchDbBookedDates, isPastDate, type DBBooking } from '../../utils/bookingService';
+import { fetchDbBookedDates, isPastDate, getDefaultEventDate, getEarliestAvailableDate, type DBBooking } from '../../utils/bookingService';
 import {
   fetchBookingSettings,
   fetchScheduleOverrides,
@@ -19,6 +19,7 @@ import {
   DEFAULT_BOOKING_SETTINGS,
 } from '../../utils/bookingEngine';
 import { fetchCrewAvailabilityRecords } from '../../utils/crewAvailabilityService';
+import { AvailabilityDatePicker } from '../../components/shared/AvailabilityDatePicker';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -128,7 +129,7 @@ export default function PackageDetailPage({
   const pkg = allPackages.find((p) => p.id === packageId) || allPackages[0];
 
   const [selectedDate, setSelectedDate] = useState(() => {
-    return localStorage.getItem('binhi_selected_event_date') || '2026-09-14';
+    return getDefaultEventDate(localStorage.getItem('binhi_selected_event_date'));
   });
   const [guestCount, setGuestCount] = useState(100);
   const [addonSelections, setAddonSelections] = useState<AddonSelection>({});
@@ -148,6 +149,11 @@ export default function PackageDetailPage({
         setDbBookings(bookings);
         setBookingSettings(settings);
         setScheduleOverrides(overrides);
+
+        const saved = localStorage.getItem('binhi_selected_event_date');
+        const earliest = getEarliestAvailableDate(saved, bookings, settings, overrides);
+        setSelectedDate(earliest);
+        localStorage.setItem('binhi_selected_event_date', earliest);
       } catch (e) {
         console.warn('Failed loading engine data in PackageDetailPage:', e);
       }
@@ -549,32 +555,17 @@ export default function PackageDetailPage({
               <h3 className="text-lg font-bold mb-4">Pick Your Date & Customize</h3>
 
               <div className="mb-4">
-                <div className="flex items-center justify-between ml-1 mb-1">
-                  <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50">
-                    Event Date
-                  </label>
-                  {selectedDate && !isPastDate(selectedDate) && (() => {
-                    const dayStatus = getDayAvailabilityStatus(selectedDate, dbBookings, bookingSettings, scheduleOverrides);
-                    return (
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${dayStatus.badgeClass}`}>
-                        {dayStatus.label}
-                      </span>
-                    );
-                  })()}
-                </div>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  min={new Date().toISOString().split('T')[0]}
-                  onChange={(e) => {
-                    setSelectedDate(e.target.value);
-                    localStorage.setItem('binhi_selected_event_date', e.target.value);
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 block ml-1 mb-1">
+                  Event Date
+                </label>
+                <AvailabilityDatePicker
+                  selectedDate={selectedDate}
+                  onChange={(d) => {
+                    setSelectedDate(d);
+                    localStorage.setItem('binhi_selected_event_date', d);
                   }}
-                  className={`w-full rounded-full border px-4 py-3 text-sm focus:outline-none ${
-                    isPastDate(selectedDate) || getDayAvailabilityStatus(selectedDate, dbBookings, bookingSettings, scheduleOverrides).status === 'fully_booked'
-                      ? 'border-rose-400 bg-rose-50 text-rose-800 font-bold'
-                      : 'border-transparent bg-white text-[var(--ink)] focus:border-[#1090F8]'
-                  }`}
+                  placeholder="Select Event Date"
+                  showAvailabilityBadge={false}
                 />
                 {isPastDate(selectedDate) ? (
                   <p className="text-[11px] font-bold text-rose-600 mt-1 ml-2">
