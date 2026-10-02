@@ -634,7 +634,7 @@ export async function fetchAllAffiliates(): Promise<{
       supabase.from('affiliate_payouts').select('*').order('processed_at', { ascending: false }),
     ]);
 
-    if (!affRes.error && affRes.data && affRes.data.length > 0) {
+    if (!affRes.error && Array.isArray(affRes.data)) {
       affiliates = affRes.data.map((d: any) => ({
         id: d.id,
         userId: d.user_id,
@@ -664,7 +664,7 @@ export async function fetchAllAffiliates(): Promise<{
       console.warn('Supabase fetch affiliates error:', affRes.error.message);
     }
 
-    if (!refRes.error && refRes.data && refRes.data.length > 0) {
+    if (!refRes.error && Array.isArray(refRes.data)) {
       referrals = refRes.data.map((r: any) => ({
         id: r.id,
         affiliateId: r.affiliate_id,
@@ -684,7 +684,7 @@ export async function fetchAllAffiliates(): Promise<{
       console.warn('Supabase fetch referrals error:', refRes.error.message);
     }
 
-    if (!payRes.error && payRes.data && payRes.data.length > 0) {
+    if (!payRes.error && Array.isArray(payRes.data)) {
       payouts = payRes.data.map((p: any) => ({
         id: p.id,
         affiliateId: p.affiliate_id,
