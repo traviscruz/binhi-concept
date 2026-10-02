@@ -58,6 +58,167 @@ export function isValidPhilippinePhone(phone: string): boolean {
 }
 
 /**
+ * Checks if a given mobile phone number is already used by another account
+ * in `profiles` or `affiliates` tables in Supabase.
+ *
+ * @param phone The phone string or 10-digit number (e.g. 9171234567 or +63 9171234567)
+ * @param excludeUserId Optional user_id or profile id to ignore (for updating own profile)
+ * @param excludeAffiliateId Optional affiliate id to ignore (for updating own affiliate profile)
+ * @returns { isUnique: boolean; error?: string }
+ */
+export async function checkPhoneUniqueAcrossSystem(
+  phone: string,
+  excludeUserId?: string | null,
+  excludeAffiliateId?: string | null,
+  excludeEmail?: string | null
+): Promise<{ isUnique: boolean; error?: string }> {
+  const digits = phone.replace(/\D/g, '').slice(-10);
+  if (digits.length !== 10 || !digits.startsWith('9')) {
+    return { isUnique: true };
+  }
+
+  try {
+    // 1. Gather all identifiers belonging to the current person/account to exclude them
+    const allowedUserIds = new Set<string>();
+    const allowedAffiliateIds = new Set<string>();
+    const allowedEmails = new Set<string>();
+
+    if (excludeUserId) allowedUserIds.add(excludeUserId.toLowerCase());
+    if (excludeAffiliateId) allowedAffiliateIds.add(excludeAffiliateId.toLowerCase());
+    if (excludeEmail) allowedEmails.add(excludeEmail.trim().toLowerCase());
+
+    // If excludeUserId is known, resolve their profile email and affiliate ID
+    if (excludeUserId) {
+      try {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('id, email')
+          .eq('id', excludeUserId)
+          .maybeSingle();
+        if (prof?.email) allowedEmails.add(prof.email.trim().toLowerCase());
+
+        const { data: affs } = await supabase
+          .from('affiliates')
+          .select('id, email')
+          .eq('user_id', excludeUserId);
+        if (affs) {
+          affs.forEach((a) => {
+            if (a.id) allowedAffiliateIds.add(a.id.toLowerCase());
+            if (a.email) allowedEmails.add(a.email.trim().toLowerCase());
+          });
+        }
+      } catch {}
+    }
+
+    // If excludeAffiliateId is known, resolve their affiliate email and user_id
+    if (excludeAffiliateId) {
+      try {
+        const { data: aff } = await supabase
+          .from('affiliates')
+          .select('id, user_id, email')
+          .eq('id', excludeAffiliateId)
+          .maybeSingle();
+        if (aff?.email) allowedEmails.add(aff.email.trim().toLowerCase());
+        if (aff?.user_id) allowedUserIds.add(aff.user_id.toLowerCase());
+      } catch {}
+    }
+
+    // If excludeEmail is known, look up matching profiles and affiliates
+    if (excludeEmail) {
+      try {
+        const cleanEmail = excludeEmail.trim().toLowerCase();
+        const { data: matchedProf } = await supabase
+          .from('profiles')
+          .select('id')
+          .ilike('email', cleanEmail)
+          .maybeSingle();
+        if (matchedProf?.id) allowedUserIds.add(matchedProf.id.toLowerCase());
+
+        const { data: matchedAffs } = await supabase
+          .from('affiliates')
+          .select('id, user_id')
+          .ilike('email', cleanEmail);
+        if (matchedAffs) {
+          matchedAffs.forEach((a) => {
+            if (a.id) allowedAffiliateIds.add(a.id.toLowerCase());
+            if (a.user_id) allowedUserIds.add(a.user_id.toLowerCase());
+          });
+        }
+      } catch {}
+    }
+
+    // Also check current auth user session if any identifier is present
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionUser = sessionData?.session?.user;
+      if (sessionUser) {
+        if (allowedUserIds.size === 0 && allowedEmails.size === 0 && allowedAffiliateIds.size === 0) {
+          if (sessionUser.id) allowedUserIds.add(sessionUser.id.toLowerCase());
+          if (sessionUser.email) allowedEmails.add(sessionUser.email.trim().toLowerCase());
+        } else if (sessionUser.id && allowedUserIds.has(sessionUser.id.toLowerCase())) {
+          if (sessionUser.email) allowedEmails.add(sessionUser.email.trim().toLowerCase());
+        }
+      }
+    } catch {}
+
+    // 2. Query `profiles` table for this phone number
+    const { data: existingProfiles, error: profErr } = await supabase
+      .from('profiles')
+      .select('id, email, phone')
+      .ilike('phone', `%${digits}%`);
+
+    if (!profErr && existingProfiles && existingProfiles.length > 0) {
+      // Filter out any profiles belonging to the same individual
+      const duplicateProfiles = existingProfiles.filter((p) => {
+        const pId = p.id?.toLowerCase();
+        const pEmail = p.email?.trim().toLowerCase();
+        if (pId && allowedUserIds.has(pId)) return false;
+        if (pEmail && allowedEmails.has(pEmail)) return false;
+        return true;
+      });
+
+      if (duplicateProfiles.length > 0) {
+        return {
+          isUnique: false,
+          error: 'This mobile phone number is already registered to another user account. Please use a unique mobile number.',
+        };
+      }
+    }
+
+    // 3. Query `affiliates` table for this phone number
+    const { data: existingAffs, error: affErr } = await supabase
+      .from('affiliates')
+      .select('id, user_id, email, phone')
+      .ilike('phone', `%${digits}%`);
+
+    if (!affErr && existingAffs && existingAffs.length > 0) {
+      // Filter out any affiliates belonging to the same individual
+      const duplicateAffs = existingAffs.filter((a) => {
+        const aId = a.id?.toLowerCase();
+        const aUserId = a.user_id?.toLowerCase();
+        const aEmail = a.email?.trim().toLowerCase();
+        if (aId && allowedAffiliateIds.has(aId)) return false;
+        if (aUserId && allowedUserIds.has(aUserId)) return false;
+        if (aEmail && allowedEmails.has(aEmail)) return false;
+        return true;
+      });
+
+      if (duplicateAffs.length > 0) {
+        return {
+          isUnique: false,
+          error: 'This mobile phone number is already registered to another partner/affiliate account. Please use a unique mobile number.',
+        };
+      }
+    }
+
+    return { isUnique: true };
+  } catch (err) {
+    console.warn('Phone uniqueness check error, continuing:', err);
+    return { isUnique: true };
+  }
+}
+
+/**
  * Extracts descriptive error string from Supabase FunctionsHttpError response
  */
 async function extractFunctionErrorMessage(error: any): Promise<string> {

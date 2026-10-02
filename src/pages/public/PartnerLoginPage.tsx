@@ -31,11 +31,30 @@ export default function PartnerLoginPage({ go }: { go: (p: Page) => void }) {
   const [authMode, setAuthMode] = useState<'password' | 'otp'>('password');
 
   // Input States
-  const [identifier, setIdentifier] = useState('');
+  const [identifier, setIdentifier] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('binhi_registered_email');
+      if (saved) {
+        sessionStorage.removeItem('binhi_registered_email');
+        return saved;
+      }
+    } catch { }
+    return '';
+  });
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [successNotice, setSuccessNotice] = useState(() => {
+    try {
+      const notice = sessionStorage.getItem('binhi_login_notice');
+      if (notice) {
+        sessionStorage.removeItem('binhi_login_notice');
+        return notice;
+      }
+    } catch { }
+    return '';
+  });
 
   // OTP Verification State
   const [pendingPartnerData, setPendingPartnerData] = useState<{
@@ -267,19 +286,11 @@ export default function PartnerLoginPage({ go }: { go: (p: Page) => void }) {
         return;
       }
 
-      // Update phone verified status in DB without overriding admin approval status
-      try {
-        await supabase
-          .from('affiliates')
-          .update({ is_phone_verified: true })
-          .eq('id', pendingPartnerData.partner.id);
-      } catch {}
-
       // Clear session OTP and log in preserving actual status
       sessionStorage.removeItem('binhi_partner_login_otp');
       const verifiedPartner: AffiliatePartner = {
         ...pendingPartnerData.partner,
-        isPhoneVerified: true,
+        isPhoneVerified: Boolean(pendingPartnerData.partner.isPhoneVerified),
       };
 
       setStoredPartnerSession(verifiedPartner);
@@ -360,6 +371,13 @@ export default function PartnerLoginPage({ go }: { go: (p: Page) => void }) {
           <span>Login via Email OTP</span>
         </button>
       </div>
+
+      {successNotice && (
+        <div className="mb-4 p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-800 flex items-center gap-2 animate-fade-in font-medium">
+          <IconCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{successNotice}</span>
+        </div>
+      )}
 
       {errorMessage && (
         <div className="mb-4 p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-900 flex items-start gap-2 animate-fade-in">

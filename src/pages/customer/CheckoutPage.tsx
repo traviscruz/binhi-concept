@@ -22,7 +22,7 @@ import {
   DEFAULT_BOOKING_SETTINGS,
 } from '../../utils/bookingEngine';
 import { supabase } from '../../lib/supabase';
-import { sendOtp, verifyOtp } from '../../utils/smsService';
+import { sendOtp, verifyOtp, checkPhoneUniqueAcrossSystem } from '../../utils/smsService';
 import { createPaymongoCheckoutSession } from '../../utils/paymongoPayment';
 import { fetchDbBookedDates, isPastDate, getDefaultEventDate, getTodayIso, type DBBooking } from '../../utils/bookingService';
 import { validateVoucherCode, recordVoucherUsage } from '../../utils/voucherService';
@@ -826,6 +826,16 @@ export default function CheckoutPage({
       return;
     }
 
+    // Check phone uniqueness
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const uniqueCheck = await checkPhoneUniqueAcrossSystem(phoneDigits, user?.id, undefined, user?.email);
+      if (!uniqueCheck.isUnique) {
+        setStep1Error(uniqueCheck.error || 'This mobile phone number is already registered.');
+        return;
+      }
+    } catch {}
+
     setPhoneModalError('');
     setPhoneModalInfo('');
     setPhoneOtpToken('');
@@ -1544,8 +1554,8 @@ export default function CheckoutPage({
 
               {/* Mobile Phone Number (Country Code + 10 digits + Verification) */}
               <div>
-                <div className="flex items-center justify-between ml-1 mb-1">
-                  <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50">
+                <div className="flex items-center justify-between gap-2 ml-1 mb-1">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 whitespace-nowrap shrink-0">
                     Mobile Phone Number <span className="text-rose-500">*</span>
                   </label>
                   {profileLoading ? (
@@ -1562,15 +1572,15 @@ export default function CheckoutPage({
                       type="button"
                       onClick={handleStartPhoneVerification}
                       disabled={sendingPhoneOtp || phoneDigits.length !== 10 || !phoneDigits.startsWith('9')}
-                      className="group relative text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-300 hover:border-rose-400 px-3 py-1 rounded-full transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-sm disabled:opacity-50"
+                      className="group relative text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-300 hover:border-rose-400 px-3 py-1 rounded-full transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-sm disabled:opacity-50 whitespace-nowrap shrink-0"
                       title="Click to verify this mobile number via SMS OTP"
                     >
-                      <span className="relative flex h-2 w-2">
+                      <span className="relative flex h-2 w-2 shrink-0">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
                       </span>
-                      <span>Unverified</span>
-                      <span className="font-semibold text-rose-700 bg-rose-200/70 group-hover:bg-rose-200 px-1.5 py-0.5 rounded-full text-[9px] transition-colors flex items-center gap-0.5">
+                      <span className="whitespace-nowrap">Unverified</span>
+                      <span className="font-semibold text-rose-700 bg-rose-200/70 group-hover:bg-rose-200 px-1.5 py-0.5 rounded-full text-[9px] transition-colors inline-flex items-center gap-0.5 whitespace-nowrap">
                         {sendingPhoneOtp ? 'Sending...' : 'Click to verify ↗'}
                       </span>
                     </button>
@@ -1607,21 +1617,6 @@ export default function CheckoutPage({
                   <p className="text-[10px] text-rose-500 font-semibold ml-2 mt-1">
                     Must be 10 digits starting with 9 (e.g. 9171234567).
                   </p>
-                )}
-                {!isPhoneVerified && !profileLoading && (
-                  <div className="mt-2.5 p-3 rounded-2xl bg-amber-50/90 border border-amber-200 text-amber-900 text-xs flex items-center justify-between gap-3">
-                    <span className="text-[11px] leading-snug">
-                      <strong>Verification Required:</strong> You cannot proceed to booking without verifying your Philippine mobile number (+63 {phoneDigits || '9XXXXXXXXX'}) via SMS OTP.
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleStartPhoneVerification}
-                      disabled={sendingPhoneOtp || phoneDigits.length !== 10 || !phoneDigits.startsWith('9')}
-                      className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] px-3.5 py-1.5 rounded-full transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
-                    >
-                      {sendingPhoneOtp ? 'Sending...' : 'Verify Now'}
-                    </button>
-                  </div>
                 )}
                 <p className="text-[11px] text-[#24252c]/50 mt-1.5 ml-2">
                   Need to update your registered phone number?{' '}

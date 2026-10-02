@@ -21,6 +21,7 @@ import {
   setStoredPartnerSession,
 } from '../../utils/affiliateService';
 import { sendPartnerOtpEmail } from '../../utils/emailService';
+import { checkPhoneUniqueAcrossSystem } from '../../utils/smsService';
 
 const inputClass =
   'w-full rounded-full border px-5 py-3.5 bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors text-xs sm:text-sm';
@@ -181,6 +182,16 @@ export default function RegisterPage({ go }: { go: (p: Page) => void }) {
     setErrorMsg('');
     setInfoMsg('');
 
+    // Check phone uniqueness across profiles and affiliates
+    if (phoneDigits) {
+      const uniqueCheck = await checkPhoneUniqueAcrossSystem(phoneDigits);
+      if (!uniqueCheck.isUnique) {
+        setErrorMsg(uniqueCheck.error || 'This mobile phone number is already registered.');
+        setLoading(false);
+        return;
+      }
+    }
+
     const formattedPhone = phoneDigits ? `${countryCode} ${phoneDigits}` : '';
     const fullName = `${firstName.trim()} ${lastName.trim()}`;
 
@@ -301,8 +312,15 @@ export default function RegisterPage({ go }: { go: (p: Page) => void }) {
           return;
         }
 
+        try {
+          await supabase.auth.signOut();
+        } catch { }
+
+        sessionStorage.setItem('binhi_login_notice', 'Account created and verified successfully! Please log in with your credentials.');
+        sessionStorage.setItem('binhi_registered_email', email.trim());
+
         setLoading(false);
-        go('booking-tracker');
+        go('login');
       } catch (err: any) {
         setErrorMsg(err?.message || 'Verification failed. Please check your OTP code.');
         setLoading(false);
@@ -351,7 +369,7 @@ export default function RegisterPage({ go }: { go: (p: Page) => void }) {
           businessName: businessName.trim() || undefined,
           email: email.trim().toLowerCase(),
           phone: formattedPhone,
-          isPhoneVerified: true,
+          isPhoneVerified: false,
           profession,
           preferredCode: preferredCode.trim().toUpperCase() || undefined,
           payoutMethod,
@@ -367,12 +385,13 @@ export default function RegisterPage({ go }: { go: (p: Page) => void }) {
           return;
         }
 
-        // 2. Clear registration OTP and set session
+        // 2. Clear registration OTP and redirect to partner login page
         sessionStorage.removeItem('binhi_partner_reg_otp');
-        setStoredPartnerSession(res.partner);
+        sessionStorage.setItem('binhi_login_notice', 'Partner account registered and verified! Please log in to your partner portal.');
+        sessionStorage.setItem('binhi_registered_email', email.trim());
 
         setLoading(false);
-        go('partner-dashboard');
+        go('partner-login');
       } catch (err: any) {
         setErrorMsg(err?.message || 'Failed to activate partner account.');
         setLoading(false);
@@ -733,8 +752,8 @@ export default function RegisterPage({ go }: { go: (p: Page) => void }) {
               type={showPassword ? 'text' : 'password'}
               autoFocus={accountType === 'customer'}
               required
-              minLength={6}
-              placeholder="Create a password (min. 6 chars)"
+              minLength={8}
+              placeholder="Create a password (min. 8 chars)"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className={inputClass + ' pr-12'}
@@ -824,9 +843,9 @@ export default function RegisterPage({ go }: { go: (p: Page) => void }) {
             {loading ? (
               <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
             ) : accountType === 'partner' ? (
-              'Verify & Open Partner Portal'
+              'Verify & Proceed to Partner Login'
             ) : (
-              'Verify & Create Account'
+              'Verify & Proceed to Login'
             )}
           </button>
         </div>

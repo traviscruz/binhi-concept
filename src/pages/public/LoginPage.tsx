@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Page } from '../../types';
 import { AuthShell } from '../../components/shared/AuthShell';
 import { MonoBadge } from '../../components/shared/Badges';
-import { IconUser, IconEye, IconEyeOff, IconShield, IconLock } from '../../components/shared/icons';
+import { IconUser, IconEye, IconEyeOff, IconShield, IconLock, IconCheck } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { supabase } from '../../utils/supabase';
 import { validatePassword } from '../../utils/passwordValidation';
@@ -12,7 +12,26 @@ const inputClass =
   'w-full rounded-full border px-5 py-3.5 bg-[#EEEEEE] text-[var(--ink)] placeholder:text-[#24252c]/40 focus:outline-none focus:border-[#1090F8] border-transparent transition-colors';
 
 export default function LoginPage({ go }: { go: (p: Page) => void }) {
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('binhi_registered_email');
+      if (saved) {
+        sessionStorage.removeItem('binhi_registered_email');
+        return saved;
+      }
+    } catch { }
+    return '';
+  });
+  const [successMsg, setSuccessMsg] = useState(() => {
+    try {
+      const notice = sessionStorage.getItem('binhi_login_notice');
+      if (notice) {
+        sessionStorage.removeItem('binhi_login_notice');
+        return notice;
+      }
+    } catch { }
+    return '';
+  });
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -41,6 +60,7 @@ export default function LoginPage({ go }: { go: (p: Page) => void }) {
 
     setLoading(true);
     setErrorMsg('');
+    setSuccessMsg('');
 
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -167,6 +187,13 @@ export default function LoginPage({ go }: { go: (p: Page) => void }) {
       onBack={() => go('landing')}
     >
       <form onSubmit={handleLogin} className="flex flex-col gap-3.5">
+        {successMsg && (
+          <div className="p-3.5 rounded-2xl text-xs bg-emerald-50 border border-emerald-200 text-emerald-800 font-medium flex items-center gap-2">
+            <IconCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{successMsg}</span>
+          </div>
+        )}
+
         {errorMsg && (
           <div className="p-3.5 rounded-2xl text-xs bg-rose-50 border border-rose-200 text-rose-700 font-medium">
             {errorMsg}

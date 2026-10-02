@@ -5,7 +5,7 @@ import { OtpInput } from '../../components/shared/OtpInput';
 import { IconShield, IconX, IconEye, IconEyeOff, IconUser, IconLock, IconTicket, IconArrow } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { supabase } from '../../utils/supabase';
-import { sendOtp, verifyOtp } from '../../utils/smsService';
+import { sendOtp, verifyOtp, checkPhoneUniqueAcrossSystem } from '../../utils/smsService';
 import { validatePassword } from '../../utils/passwordValidation';
 import { PasswordChecklist } from '../../components/shared/PasswordChecklist';
 import { fetchUserLoyaltyData } from '../../utils/loyaltyService';
@@ -252,6 +252,14 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
     }
 
     setProfileErrorMsg('');
+
+    // Validate phone uniqueness across system
+    const uniqueCheck = await checkPhoneUniqueAcrossSystem(phoneDigits, userId, undefined, email);
+    if (!uniqueCheck.isUnique) {
+      setProfileErrorMsg(uniqueCheck.error || 'This mobile phone number is already registered.');
+      return;
+    }
+
     setPhoneModalError('');
     setPhoneModalInfo('');
     setPhoneOtpCode('');
@@ -381,6 +389,16 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
     setProfileLoading(true);
     setProfileErrorMsg('');
     setProfileSuccessMsg('');
+
+    // Check phone uniqueness if phone is modified
+    if (phoneDigits && phoneDigits !== savedPhoneDigits) {
+      const uniqueCheck = await checkPhoneUniqueAcrossSystem(phoneDigits, userId, undefined, email);
+      if (!uniqueCheck.isUnique) {
+        setProfileErrorMsg(uniqueCheck.error || 'This mobile phone number is already registered.');
+        setProfileLoading(false);
+        return;
+      }
+    }
 
     const formattedPhone = phoneDigits ? `${countryCode} ${phoneDigits}` : '';
     // Only mark unverified if the user changed the previously verified phone number
@@ -702,8 +720,8 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
               </div>
 
               <div>
-                <div className="flex items-center justify-between ml-1 mb-1">
-                  <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50">
+                <div className="flex items-center justify-between gap-2 ml-1 mb-1">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 whitespace-nowrap shrink-0">
                     Mobile Phone Number
                   </label>
                   {isPhoneVerified ? (
@@ -727,7 +745,8 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
                           type="button"
                           onClick={() => {
                             setIsEditingPhone(true);
-                            setProfileSuccessMsg('Phone unlocked. Update your number below and click "Save Personal Details".');
+                            setPhoneDigits('');
+                            setProfileSuccessMsg('Phone unlocked. Enter your new mobile number below.');
                             setTimeout(() => setProfileSuccessMsg(''), 4000);
                           }}
                           className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 hover:bg-[#1090F8]/20 border border-[#1090F8]/20 px-2.5 py-0.5 rounded-full transition-colors cursor-pointer"
@@ -741,15 +760,15 @@ export default function ProfilePage({ go }: { go: (p: Page) => void }) {
                       type="button"
                       onClick={handleStartPhoneVerification}
                       disabled={sendingPhoneOtp}
-                      className="group relative text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-300 hover:border-rose-400 px-3 py-1 rounded-full transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-sm"
+                      className="group relative text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-300 hover:border-rose-400 px-3 py-1 rounded-full transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-sm disabled:opacity-50 whitespace-nowrap shrink-0"
                       title="Click to verify this mobile number via SMS OTP"
                     >
-                      <span className="relative flex h-2 w-2">
+                      <span className="relative flex h-2 w-2 shrink-0">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
                       </span>
-                      <span>Unverified</span>
-                      <span className="font-semibold text-rose-700 bg-rose-200/70 group-hover:bg-rose-200 px-1.5 py-0.5 rounded-full text-[9px] transition-colors flex items-center gap-0.5">
+                      <span className="whitespace-nowrap">Unverified</span>
+                      <span className="font-semibold text-rose-700 bg-rose-200/70 group-hover:bg-rose-200 px-1.5 py-0.5 rounded-full text-[9px] transition-colors inline-flex items-center gap-0.5 whitespace-nowrap">
                         {sendingPhoneOtp ? 'Sending...' : 'Click to verify ↗'}
                       </span>
                     </button>

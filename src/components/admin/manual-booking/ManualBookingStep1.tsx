@@ -203,7 +203,7 @@ export function ManualBookingStep1({
           />
         </div>
         <div>
-          <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-1">
+          <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 ml-1 block mb-1 whitespace-nowrap shrink-0">
             Mobile Phone Number <span className="text-rose-500">*</span>
           </label>
           <div className="flex gap-2">

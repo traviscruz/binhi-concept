@@ -14,7 +14,8 @@ import {
 } from '../../components/shared/icons';
 import { ModalOverlay } from '../../components/shared/ModalOverlay';
 import { OtpInput } from '../../components/shared/OtpInput';
-import { sendOtp, verifyOtp } from '../../utils/smsService';
+import { sendOtp, verifyOtp, checkPhoneUniqueAcrossSystem } from '../../utils/smsService';
+import { supabase } from '../../lib/supabase';
 import {
   getStoredPartnerSession,
   setStoredPartnerSession,
@@ -63,7 +64,7 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
   const [phoneDigits, setPhoneDigits] = useState('');
   const [savedPhoneDigits, setSavedPhoneDigits] = useState('');
   const [isEditingPhone, setIsEditingPhone] = useState(false);
-  const [isPhoneVerified, setIsPhoneVerified] = useState(true);
+  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [profession, setProfession] = useState(PROFESSIONS[0]);
 
   // Banking & Payout Fields
@@ -121,7 +122,7 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
     const digits = parseDigits(session.phone || '');
     setPhoneDigits(digits);
     setSavedPhoneDigits(digits);
-    setIsPhoneVerified(session.isPhoneVerified !== false);
+    setIsPhoneVerified(Boolean(session.isPhoneVerified));
     setProfession(session.profession || PROFESSIONS[0]);
     setPayoutMethod(session.payoutMethod || PAYOUT_METHODS[0]);
     setPayoutAccountName(session.payoutAccountName || '');
@@ -129,6 +130,34 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
     setPayoutBankName(session.payoutBankName || '');
     setPayoutQrUrl(session.payoutQrUrl || '');
     setQrPreview(session.payoutQrUrl || null);
+
+    // Sync latest from Supabase affiliates table
+    async function syncPartnerFromDb() {
+      if (!session?.id) return;
+      try {
+        const { data } = await supabase
+          .from('affiliates')
+          .select('*')
+          .eq('id', session.id)
+          .maybeSingle();
+
+        if (data) {
+          const verified = Boolean(data.is_phone_verified);
+          setIsPhoneVerified(verified);
+          const updated: AffiliatePartner = {
+            ...session,
+            isPhoneVerified: verified,
+            phone: data.phone || session.phone,
+          };
+          setPartner(updated);
+          setStoredPartnerSession(updated);
+        }
+      } catch (err) {
+        console.warn('Sync partner profile notice:', err);
+      }
+    }
+
+    syncPartnerFromDb();
   }, [go]);
 
   const isPhoneValid = phoneDigits.length === 10 && phoneDigits.startsWith('9');
@@ -141,6 +170,14 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
     }
 
     setErrorMessage(null);
+
+    // Validate uniqueness across database
+    const uniqueCheck = await checkPhoneUniqueAcrossSystem(phoneDigits, partner?.userId, partner?.id, partner?.email);
+    if (!uniqueCheck.isUnique) {
+      setErrorMessage(uniqueCheck.error || 'This mobile phone number is already registered.');
+      return;
+    }
+
     setPhoneModalError('');
     setPhoneModalInfo('');
     setPhoneOtpToken('');
@@ -322,6 +359,16 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
     setSuccessMessage(null);
     setErrorMessage(null);
 
+    // Validate phone uniqueness if phone is provided or modified
+    if (phoneDigits && phoneDigits !== savedPhoneDigits) {
+      const uniqueCheck = await checkPhoneUniqueAcrossSystem(phoneDigits, partner?.userId, partner?.id, partner?.email);
+      if (!uniqueCheck.isUnique) {
+        setErrorMessage(uniqueCheck.error || 'This mobile phone number is already registered.');
+        setSaving(false);
+        return;
+      }
+    }
+
     try {
       let finalQrUrl = payoutQrUrl;
 
@@ -490,8 +537,8 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
 
           {/* Mobile Phone Number with Separate +63 and Verification Modal */}
           <div>
-            <div className="flex items-center justify-between ml-1 mb-1">
-              <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50">
+            <div className="flex items-center justify-between gap-2 ml-1 mb-1">
+              <label className="text-xs font-semibold uppercase tracking-wider text-[#24252c]/50 whitespace-nowrap shrink-0">
                 Mobile Phone Number *
               </label>
               {isPhoneVerified ? (
@@ -515,7 +562,8 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
                       type="button"
                       onClick={() => {
                         setIsEditingPhone(true);
-                        setSuccessMessage('Phone unlocked. Update your number below and click "Save Profile & Payout Details".');
+                        setPhoneDigits('');
+                        setSuccessMessage('Phone unlocked. Enter your new mobile number below.');
                         setTimeout(() => setSuccessMessage(null), 4000);
                       }}
                       className="text-[10px] font-bold text-[#1090F8] bg-[#1090F8]/10 hover:bg-[#1090F8]/20 border border-[#1090F8]/20 px-2.5 py-0.5 rounded-full transition-colors cursor-pointer"
@@ -529,15 +577,15 @@ export default function PartnerProfilePage({ go }: { go: (p: Page) => void }) {
                   type="button"
                   onClick={handleStartPhoneVerification}
                   disabled={sendingPhoneOtp}
-                  className="group relative text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-300 hover:border-rose-400 px-3 py-1 rounded-full transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-sm"
+                  className="group relative text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-300 hover:border-rose-400 px-3 py-1 rounded-full transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs hover:shadow-sm disabled:opacity-50 whitespace-nowrap shrink-0"
                   title="Click to verify this mobile number via SMS OTP"
                 >
-                  <span className="relative flex h-2 w-2">
+                  <span className="relative flex h-2 w-2 shrink-0">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
                   </span>
-                  <span>Unverified</span>
-                  <span className="font-semibold text-rose-700 bg-rose-200/70 group-hover:bg-rose-200 px-1.5 py-0.5 rounded-full text-[9px] transition-colors flex items-center gap-0.5">
+                  <span className="whitespace-nowrap">Unverified</span>
+                  <span className="font-semibold text-rose-700 bg-rose-200/70 group-hover:bg-rose-200 px-1.5 py-0.5 rounded-full text-[9px] transition-colors inline-flex items-center gap-0.5 whitespace-nowrap">
                     {sendingPhoneOtp ? 'Sending...' : 'Click to verify ↗'}
                   </span>
                 </button>

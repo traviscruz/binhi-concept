@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Page } from '../../types';
-import { IconMenu, IconX, IconLogOut, IconUser, IconCalendar } from '../shared/icons';
+import { IconMenu, IconX, IconLogOut, IconUser, IconCalendar, IconChevronDown } from '../shared/icons';
 import { ModalOverlay } from '../shared/ModalOverlay';
 import { LogoutModal } from '../shared/LogoutModal';
 import { Logo } from './Logo';
@@ -31,6 +31,7 @@ export function CustomerHeader({
   hasBanner?: boolean;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [currentTierName, setCurrentTierName] = useState('Standard');
@@ -38,6 +39,19 @@ export function CustomerHeader({
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
+
+  // Close "More" dropdown when clicking outside
+  useEffect(() => {
+    const handleCloseMore = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.customer-nav-more')) {
+        setMoreMenuOpen(false);
+      }
+    };
+    if (moreMenuOpen) {
+      document.addEventListener('mousedown', handleCloseMore);
+      return () => document.removeEventListener('mousedown', handleCloseMore);
+    }
+  }, [moreMenuOpen]);
 
   // Master Event Calendar Modal state & DB Bookings
   const today = new Date();
@@ -169,10 +183,15 @@ export function CustomerHeader({
     go('landing');
   };
 
-  const navItem = (label: string, target: Page, count?: number) => (
+  const customerFirstName = customerName ? customerName.trim().split(' ')[0] : 'Account';
+
+  const navItem = (label: React.ReactNode, target: Page, count?: number) => (
     <button
-      onClick={() => handleNav(target)}
-      className={`px-2 xl:px-3.5 py-1.5 xl:py-2 rounded-full text-xs xl:text-sm font-medium transition-all outline-none focus:outline-none focus:ring-0 focus-visible:outline-none inline-flex items-center justify-between lg:justify-start gap-1 xl:gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+      onClick={() => {
+        setMoreMenuOpen(false);
+        handleNav(target);
+      }}
+      className={`px-1.5 lg:px-2 xl:px-3 py-1.5 xl:py-2 rounded-full text-[11px] lg:text-xs xl:text-sm font-medium transition-all outline-none focus:outline-none focus:ring-0 focus-visible:outline-none inline-flex items-center justify-between lg:justify-start gap-1 xl:gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
         page === target || (target === 'packages' && page === 'package-detail')
           ? 'bg-[var(--ink)] text-white font-semibold shadow-sm'
           : 'text-black/60 hover:text-[var(--ink)] hover:bg-black/5'
@@ -192,71 +211,184 @@ export function CustomerHeader({
   );
 
   return (
-    <header className={`fixed ${hasBanner ? 'top-9 sm:top-10' : 'top-4 sm:top-5'} inset-x-0 z-50 px-2 sm:px-4 md:px-6 xl:px-8 transition-all duration-300`}>
-      <div className="mx-auto max-w-7xl 2xl:max-w-[1600px] bg-white/90 backdrop-blur-md border border-[#24252c]/[0.08] rounded-full shadow-[0_4px_24px_-4px_rgba(0,0,0,.08)] px-3 sm:px-5 xl:px-7 py-2 sm:py-2.5 xl:py-3 flex items-center justify-between gap-1.5 xl:gap-3">
+    <header className={`fixed ${hasBanner ? 'top-9 sm:top-10' : 'top-4 sm:top-5'} inset-x-0 z-50 px-2 sm:px-3 md:px-4 xl:px-8 transition-all duration-300`}>
+      <div className="mx-auto max-w-7xl 2xl:max-w-[1600px] bg-white/90 backdrop-blur-md border border-[#24252c]/[0.08] rounded-full shadow-[0_4px_24px_-4px_rgba(0,0,0,.08)] px-2.5 sm:px-4 xl:px-6 py-2 sm:py-2.5 xl:py-3 flex items-center justify-between gap-1.5 lg:gap-2 xl:gap-3 min-w-0">
         <button onClick={() => handleNav('packages')} className="pl-1 outline-none focus:outline-none focus-visible:outline-none cursor-pointer shrink-0">
           <Logo />
         </button>
 
-        <nav className="hidden lg:flex items-center gap-0.5 xl:gap-1.5 flex-nowrap shrink-0">
+        <nav className="hidden lg:flex items-center gap-0.5 xl:gap-1 flex-nowrap shrink min-w-0">
           {navItem('Packages', 'packages')}
-          {navItem('Custom Setup', 'custom-package')}
-          {navItem('Active Booking', 'booking-tracker')}
+          {navItem(
+            <>
+              <span className="xl:hidden">Custom</span>
+              <span className="hidden xl:inline">Custom Setup</span>
+            </>,
+            'custom-package'
+          )}
+          {navItem(
+            <>
+              <span className="xl:hidden">Bookings</span>
+              <span className="hidden xl:inline">Active Booking</span>
+            </>,
+            'booking-tracker'
+          )}
           {navItem('History', 'booking-history')}
           {navItem('Wishlist', 'wishlist', wishlistCount)}
           {navItem('Rewards', 'loyalty')}
-          {navItem('Review', 'review-submit')}
-          {navItem('Partners', 'affiliates')}
+
+          {/* Secondary items: directly visible on xl+ (1280px+), folded into More menu on lg (1024-1279px) */}
+          <div className="hidden xl:flex items-center gap-0.5 xl:gap-1">
+            {navItem('Review', 'review-submit')}
+            {navItem('Partners', 'affiliates')}
+          </div>
+
           <button
             type="button"
             onClick={() => setShowCalendarModal(true)}
-            className="px-2 xl:px-3.5 py-1.5 xl:py-2 rounded-full text-xs xl:text-sm font-medium text-black/60 hover:text-[var(--ink)] hover:bg-black/5 transition-all outline-none cursor-pointer whitespace-nowrap shrink-0"
+            className="px-1.5 lg:px-2 xl:px-3 py-1.5 xl:py-2 rounded-full text-[11px] lg:text-xs xl:text-sm font-medium text-black/60 hover:text-[var(--ink)] hover:bg-black/5 transition-all outline-none cursor-pointer whitespace-nowrap shrink-0"
           >
             Calendar
           </button>
-        </nav>
 
-        <div className="hidden md:flex items-center gap-1.5 xl:gap-2.5 shrink-0">
-          <button
-            onClick={() => handleNav('profile')}
-            className={`flex items-center gap-1.5 pl-1.5 pr-2.5 xl:pr-3 py-1 rounded-full border transition-all outline-none cursor-pointer whitespace-nowrap shrink-0 ${
-              page === 'profile'
-                ? 'bg-[var(--ink)] text-white border-[var(--ink)] shadow-sm'
-                : 'bg-[var(--mist)] text-[var(--ink)] border-[#24252c]/[0.08] hover:border-[#1090F8]/50'
-            }`}
-            title="Open Account Profile"
-          >
-            {avatarUrl ? (
-              <img
-                src={avatarUrl}
-                alt={customerName}
-                className="w-6 h-6 xl:w-7 xl:h-7 rounded-full object-cover border border-[#24252c]/10 shrink-0"
-              />
-            ) : (
-              <span className="w-6 h-6 xl:w-7 xl:h-7 rounded-full bg-white text-[var(--ink)] border border-[#24252c]/15 shadow-xs flex items-center justify-center shrink-0">
-                <IconUser className="w-3.5 h-3.5 xl:w-4 xl:h-4" />
-              </span>
-            )}
-            {loadingProfile ? (
-              <span className="w-12 xl:w-16 h-3 xl:h-3.5 bg-black/10 animate-pulse rounded-full" />
-            ) : (
-              <div className="flex items-center gap-1 xl:gap-1.5">
-                <span className="text-xs xl:text-sm font-semibold max-w-[85px] lg:max-w-[110px] xl:max-w-[160px] truncate">{customerName}</span>
-                <span
-                  className={`text-[8px] xl:text-[9px] font-black px-1.5 xl:px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0 ${
-                    page === 'profile'
-                      ? 'bg-white/20 text-white border border-white/30'
-                      : currentTierName === 'Platinum'
-                      ? 'bg-purple-100 text-purple-800 border border-purple-300'
-                      : currentTierName === 'Gold'
-                      ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                      : currentTierName === 'Silver'
-                      ? 'bg-slate-200 text-slate-800 border border-slate-300'
-                      : 'bg-blue-100 text-blue-800 border border-blue-200'
+          {/* Compact More Dropdown on lg viewports */}
+          <div className="relative xl:hidden customer-nav-more">
+            <button
+              type="button"
+              onClick={() => setMoreMenuOpen((v) => !v)}
+              className={`px-2 py-1.5 rounded-full text-xs font-medium transition-all outline-none inline-flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer ${
+                page === 'review-submit' || page === 'affiliates' || moreMenuOpen
+                  ? 'bg-[var(--ink)] text-white font-semibold shadow-xs'
+                  : 'text-black/60 hover:text-[var(--ink)] hover:bg-black/5'
+              }`}
+            >
+              <span>More</span>
+              <IconChevronDown className={`w-3 h-3 transition-transform duration-200 ${moreMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {moreMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 w-44 bg-white rounded-2xl shadow-xl border border-[#24252c]/10 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 text-left">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreMenuOpen(false);
+                    handleNav('review-submit');
+                  }}
+                  className={`w-full text-left px-3.5 py-2 text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer ${
+                    page === 'review-submit' ? 'bg-[var(--mist)] text-[var(--ink)]' : 'text-[#24252c]/80 hover:bg-[var(--mist)]'
                   }`}
                 >
-                  {currentTierName}
+                  <span>Submit Review</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreMenuOpen(false);
+                    handleNav('affiliates');
+                  }}
+                  className={`w-full text-left px-3.5 py-2 text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer ${
+                    page === 'affiliates' ? 'bg-[var(--mist)] text-[var(--ink)]' : 'text-[#24252c]/80 hover:bg-[var(--mist)]'
+                  }`}
+                >
+                  <span>Partner Program</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </nav>
+
+        <div className="hidden md:flex items-center gap-1.5 xl:gap-2 shrink-0">
+          <button
+            onClick={() => handleNav('profile')}
+            className={`group relative flex items-center gap-1.5 pl-1.5 pr-2.5 xl:pr-3 py-1 rounded-full border transition-all outline-none cursor-pointer whitespace-nowrap shrink-0 ${
+              page === 'profile'
+                ? 'bg-[var(--ink)] text-white border-[var(--ink)] shadow-sm'
+                : currentTierName === 'Platinum'
+                ? 'border-purple-400/80 hover:border-purple-600 bg-purple-50/50 text-[var(--ink)] shadow-[0_0_10px_rgba(168,85,247,0.18)]'
+                : currentTierName === 'Gold'
+                ? 'border-amber-400 hover:border-amber-500 bg-amber-50/50 text-[var(--ink)] shadow-[0_0_10px_rgba(245,158,11,0.2)]'
+                : currentTierName === 'Silver'
+                ? 'border-slate-300 hover:border-slate-500 bg-slate-100/60 text-[var(--ink)] shadow-[0_0_8px_rgba(148,163,184,0.25)]'
+                : 'border-blue-300 hover:border-blue-500 bg-blue-50/40 text-[var(--ink)]'
+            }`}
+            title={`Account Profile: ${customerName} (${currentTierName} Host)`}
+          >
+            {/* Avatar with Tier-Colored Ring & Mini Gem Indicator */}
+            <div className="relative shrink-0">
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt={customerName}
+                  className={`w-6 h-6 xl:w-7 xl:h-7 rounded-full object-cover ${
+                    page === 'profile'
+                      ? 'ring-1.5 ring-white/50'
+                      : currentTierName === 'Platinum'
+                      ? 'ring-2 ring-purple-400'
+                      : currentTierName === 'Gold'
+                      ? 'ring-2 ring-amber-400'
+                      : currentTierName === 'Silver'
+                      ? 'ring-2 ring-slate-400'
+                      : 'ring-1.5 ring-blue-400'
+                  }`}
+                />
+              ) : (
+                <span
+                  className={`w-6 h-6 xl:w-7 xl:h-7 rounded-full bg-white text-[var(--ink)] shadow-xs flex items-center justify-center ${
+                    page === 'profile'
+                      ? 'ring-1.5 ring-white/50'
+                      : currentTierName === 'Platinum'
+                      ? 'ring-2 ring-purple-400'
+                      : currentTierName === 'Gold'
+                      ? 'ring-2 ring-amber-400'
+                      : currentTierName === 'Silver'
+                      ? 'ring-2 ring-slate-400'
+                      : 'ring-1.5 ring-blue-400'
+                  }`}
+                >
+                  <IconUser className="w-3.5 h-3.5 xl:w-4 xl:h-4" />
                 </span>
+              )}
+
+              {/* Seamless tier indicator gem in avatar corner */}
+              <span
+                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white shrink-0 ${
+                  currentTierName === 'Platinum'
+                    ? 'bg-purple-600 shadow-[0_0_6px_rgba(168,85,247,0.8)]'
+                    : currentTierName === 'Gold'
+                    ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.8)]'
+                    : currentTierName === 'Silver'
+                    ? 'bg-slate-400 shadow-[0_0_5px_rgba(148,163,184,0.8)]'
+                    : 'bg-blue-500 shadow-[0_0_5px_rgba(59,130,246,0.8)]'
+                }`}
+              />
+            </div>
+
+            {loadingProfile ? (
+              <span className="w-10 xl:w-14 h-3 xl:h-3.5 bg-black/10 animate-pulse rounded-full" />
+            ) : (
+              <div className="flex items-center gap-1 min-w-0">
+                <span
+                  className="inline-block truncate text-xs xl:text-sm font-bold max-w-[50px] sm:max-w-[60px] lg:max-w-[70px] xl:max-w-[100px] 2xl:max-w-[140px] align-middle"
+                  title={`${customerName} (${currentTierName} Host)`}
+                >
+                  {customerFirstName}
+                </span>
+
+                {/* Seamless Hover Tooltip Badge explaining tier and color */}
+                <div className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1 rounded-xl bg-[var(--ink)] text-white text-[10px] font-bold shadow-xl border border-white/10 whitespace-nowrap z-50 flex items-center gap-1.5">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      currentTierName === 'Platinum'
+                        ? 'bg-purple-400'
+                        : currentTierName === 'Gold'
+                        ? 'bg-amber-400'
+                        : currentTierName === 'Silver'
+                        ? 'bg-slate-300'
+                        : 'bg-blue-400'
+                    }`}
+                  />
+                  <span>{currentTierName} Host</span>
+                </div>
               </div>
             )}
           </button>
